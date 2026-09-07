@@ -2,6 +2,7 @@
 **/obj/
 .tools/
 artifacts/
+scripts/__pycache__/
 TestResults/
 *.user
 *.suo

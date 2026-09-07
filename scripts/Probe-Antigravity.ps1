@@ -2,6 +2,10 @@
 [CmdletBinding()]
 param([string]$Executable = "$env:LOCALAPPDATA\Programs\antigravity\Antigravity.exe", [ValidateRange(5,60)][int]$ObserveSeconds = 15, [switch]$Visible)
 $ErrorActionPreference = 'Stop'
+if(-not (Test-Path -LiteralPath $Executable -PathType Leaf)) {
+    throw "Antigravity executable not found: $Executable"
+}
+$Executable = [IO.Path]::GetFullPath($Executable)
 $probeParent = [IO.Path]::GetFullPath((Join-Path $env:TEMP 'AGProfileHub-Probes'))
 $probeRoot = Join-Path $probeParent ([guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probeRoot -Force | Out-Null

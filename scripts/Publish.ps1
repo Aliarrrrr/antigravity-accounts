@@ -25,7 +25,7 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Probe-Antigravity.ps1') -Destin
 $manifest=@{schemaVersion=1;builtAt=[DateTime]::UtcNow.ToString('o');runtime='win-x64';selfContained=(-not $FrameworkDependent);experimental=$true;authIsolation='manual-verification-required'}
 $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $packageRoot 'package-manifest.json') -Encoding utf8
 '@start "" "%~dp0hub\AGProfileHub.Gui.exe"' | Set-Content -LiteralPath (Join-Path $packageRoot 'Start Hub.cmd') -Encoding ascii
-'@"%~dp0cli\agprofile.exe" %*' | Set-Content -LiteralPath (Join-Path $packageRoot 'agprofile.cmd') -Encoding ascii
+'@"%~dp0cli\AGProfileHub.Cli.exe" %*' | Set-Content -LiteralPath (Join-Path $packageRoot 'agprofile.cmd') -Encoding ascii
 $zip=Join-Path (Split-Path $packageRoot -Parent) 'AGProfileHub-win-x64.zip'
 Compress-Archive -LiteralPath $packageRoot -DestinationPath $zip
 Get-FileHash -Algorithm SHA256 -LiteralPath $zip | Select-Object Algorithm,Hash | ConvertTo-Json | Set-Content -LiteralPath ($zip+'.sha256.json') -Encoding utf8
