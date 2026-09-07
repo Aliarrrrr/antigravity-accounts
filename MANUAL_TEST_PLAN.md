@@ -14,7 +14,7 @@ Use two new Hub profiles; keep original installation profile untouched. Do not s
 
 | Test | Status | Observation |
 |---|---|---|
-| Visible separate windows | pending | Hidden Phase 0 process probe is insufficient |
+| Visible separate windows | observed (first-run only) | Two different windows rendered official onboarding; authenticated usability pending |
 | A login survives restart | pending | Requires user OAuth |
 | B login survives restart | pending | Requires user OAuth |
 | A/B concurrently keep distinct identity | pending | Requires user observation |

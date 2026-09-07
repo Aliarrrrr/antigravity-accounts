@@ -1,6 +1,6 @@
 #requires -Version 7.0
 [CmdletBinding()]
-param([string]$Executable = "$env:LOCALAPPDATA\Programs\antigravity\Antigravity.exe", [int]$ObserveSeconds = 15)
+param([string]$Executable = "$env:LOCALAPPDATA\Programs\antigravity\Antigravity.exe", [ValidateRange(5,60)][int]$ObserveSeconds = 15, [switch]$Visible)
 $ErrorActionPreference = 'Stop'
 $probeParent = [IO.Path]::GetFullPath((Join-Path $env:TEMP 'AGProfileHub-Probes'))
 $probeRoot = Join-Path $probeParent ([guid]::NewGuid().ToString('N'))
@@ -15,6 +15,7 @@ function Start-ProbeInstance([string]$Label) {
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $psi.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
+    if($Visible) {$psi.WindowStyle = [Diagnostics.ProcessWindowStyle]::Normal}
     $psi.WorkingDirectory = $dir
     $psi.ArgumentList.Add('--user-data-dir=' + (Join-Path $dir 'user-data'))
     $psi.Environment['USERPROFILE'] = Join-Path $dir 'home'
@@ -25,7 +26,7 @@ function Start-ProbeInstance([string]$Label) {
     $psi.Environment['TMP'] = Join-Path $dir 'temp'
     $psi.Environment['HOMEDRIVE'] = [IO.Path]::GetPathRoot($psi.Environment['USERPROFILE']).TrimEnd('\')
     $psi.Environment['HOMEPATH'] = $psi.Environment['USERPROFILE'].Substring(2)
-    $null = $psi.Environment.Remove('ELECTRON_RUN_AS_NODE')
+    foreach($key in @('ELECTRON_RUN_AS_NODE','ELECTRON_OZONE_PLATFORM_HINT','DEV_URL','JETSKI_LS_PORT','NODE_OPTIONS')) {$null = $psi.Environment.Remove($key)}
     $proc = [Diagnostics.Process]::Start($psi)
     # Drain and discard vendor output: it may contain ephemeral bridge/CSRF secrets.
     $proc.BeginOutputReadLine()
@@ -59,6 +60,8 @@ try {
     $sample=$report.samples[-1]
     if($sample.paths.a.userDataCreated -and $sample.paths.b.userDataCreated) {$report.capabilities.userDataIsolation='observed'}
     if($sample.paths.a.homeGeminiCreated -and $sample.paths.b.homeGeminiCreated) {$report.capabilities.homeStateIsolation='observed'}
+    $report.capabilities['separateWindows'] = 'unknown'
+    if(@($sample.windows | Where-Object {$_.hasWindow}).Count -eq 2) {$report.capabilities.separateWindows='observed'}
     if(-not $a.HasExited) {
         $null=$a.CloseMainWindow()
         if(-not $a.WaitForExit(5000)) {$a.Kill($true);$a.WaitForExit(5000)|Out-Null}

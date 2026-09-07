@@ -18,7 +18,7 @@ scripts/Probe-Antigravity.ps1 created two disposable directories under TEMP/AGPr
 | Separate root and backend processes concurrently | observed |
 | Electron user-data and home .gemini paths | observed separate directory creation |
 | Stop A while B survives | observed |
-| Visible, usable independent windows | unknown (probe launched hidden; MainWindowHandle was 0) |
+| Visible independent windows | observed on second visible probe; both rendered separate first-run screens |
 | Account A/B login persistence and non-overwrite | manual-verification-required |
 | OAuth protocol callback destination with two instances | manual-verification-required; shared protocol registration is a risk |
 | Windows Credential Manager / DPAPI isolation | unknown; no secret access performed |
@@ -38,3 +38,8 @@ The first probe inherited vendor output unintentionally; subsequent code drains/
 - [Microsoft .NET support](https://learn.microsoft.com/en-us/dotnet/core/releases-and-support): .NET 10 LTS supported through November 2028.
 
 Re-run probe on update. Preserve unknowns; directory creation alone never proves Google authentication isolation.
+
+## Visible follow-up
+Re-ran `-Visible -ObserveSeconds 35` at 09:13 UTC. Roots 11088 and 2740 both had nonzero window handles. Windows computer-use inspection identified two distinct Antigravity windows (723210 and 68022), activated each, and observed each rendering the official first-run Security Notice & Data Use page. No onboarding choices, privacy settings or login actions were performed. Both process homes/state paths were separate; A stop left B alive; cleanup completed without process residue. This proves separate rendered first-run windows, not authenticated functionality.
+
+Further packaged main.js inspection confirms a shared `antigravity` URL protocol: it checks/registers the executable as default handler without a profile identifier, then routes received deep links to its own first window. This strengthens the callback-routing risk; no registry modifications by Hub are proposed. The vendor app itself can check protocol registration and updates when launched, so disposable-directory isolation is not a guarantee of zero system-wide vendor side effects.

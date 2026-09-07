@@ -17,7 +17,7 @@ Core/config/driver/process supervisor/CLI/GUI/shortcuts/package and automated te
 
 ## Known Issues
 - Antigravity 2.12.2 uses both userData and process-home .gemini; user-data-only is insufficient.
-- Probe launched hidden; MainWindowHandle=0; process success is not visible UI/auth proof.
+- Follow-up visible probe observed two rendered first-run windows and clean shutdown; authenticated behavior still pending.
 - Shared OAuth protocol/Credential Manager/DPAPI are not proved isolated.
 - Synthetic home can hide existing tool config; never copy credentials to work around it.
 - Vendor stdout contains ephemeral secrets; probe now discards output.
@@ -29,7 +29,7 @@ Core/config/driver/process supervisor/CLI/GUI/shortcuts/package and automated te
 .NET SDK 10.0.400 installed locally in .tools/dotnet. Four-project solution scaffold restores/builds; no business implementation yet. scripts/Build.ps1 is the local entry point. Test project is a console harness scaffold, not passing business tests yet.
 
 ## Test Status
-Phase 0 actual process probe passed limited observations. Unit tests not yet implemented. All Google/manual checks pending.
+Phase 0 actual process probe and separate visible first-run windows observed; latest report under artifacts/probe. Unit tests in implementation. All Google login/manual identity checks pending.
 
 ## Next Actions
 Finish skeleton/build; record handoff; Sol reads all specified docs and implements sequentially. Preserve unknown capability statuses.
