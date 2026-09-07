@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+.tools/
+artifacts/
+TestResults/
+*.user
+*.suo
+.vs/
+capability-report.json
+Antigravity Profile Hub — Codex Master Prompt.md

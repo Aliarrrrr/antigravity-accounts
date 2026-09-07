@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AGProfileHub.Cli/AGProfileHub.Cli.csproj" />
+    <Project Path="src/AGProfileHub.Core/AGProfileHub.Core.csproj" />
+    <Project Path="src/AGProfileHub.Gui/AGProfileHub.Gui.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AGProfileHub.Tests/AGProfileHub.Tests.csproj" />
+  </Folder>
+</Solution>

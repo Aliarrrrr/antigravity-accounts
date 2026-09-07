@@ -1,0 +1,11 @@
+# Decisions
+
+- ADR-001 accepted: .NET 10 LTS + WPF for native Windows, Core + CLI first. User-local SDK installation avoids administrator changes.
+- ADR-002 accepted: schema-versioned JSON, atomic replace/backups, locking; reject unknown future schemas.
+- ADR-003 accepted: root ownership requires PID, start time, executable, exact user-data arg; descendants cannot be killed by executable name. Stale runtime files are hints only.
+- ADR-004 experimental: Desktop 2.12.2 needs independent process home AND user-data. Old IDE flags alone are not adequate. Local dynamic probe observed separate roots/backends/state directories. Auth remains manual. No new Windows user or token manipulation.
+- ADR-005 accepted: shortcuts invoke CLI with immutable UUID; no duplicated vendor launch construction.
+- ADR-006 accepted: workspace stored as metadata until a supported Desktop launch mechanism is verified. Never pretend an ignored positional argument works. GUI must communicate this limitation.
+- ADR-007 accepted: remove unregisters; no purge for MVP. No import/copy of existing identities.
+- ADR-008 accepted: omit arbitrary launch arguments initially; they could override isolation or leak secrets. Log allowlisted templates only; discard vendor output.
+- ADR-009 accepted: experimental delivery can continue before human OAuth testing, but full functional acceptance cannot be marked complete. Agent Safe worktrees, tray, CLI identity are later work.
