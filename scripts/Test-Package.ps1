@@ -8,9 +8,9 @@ $cli=Join-Path $package 'cli\AGProfileHub.Cli.exe'
 $testRoot=Join-Path $repo ('artifacts\package-smoke\'+[guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
 $checks=[Collections.Generic.List[object]]::new()
-function Invoke-Cli([string[]]$Arguments) {
+function Invoke-Cli([string[]]$Arguments,[int]$ExpectedExit=0) {
     $output=& $cli --data-root $testRoot --json @Arguments
-    if($LASTEXITCODE -ne 0) {throw "Packaged CLI failed: $($Arguments[0])"}
+    if($LASTEXITCODE -ne $ExpectedExit) {throw "Packaged CLI exit $LASTEXITCODE for $($Arguments[0]); expected $ExpectedExit"}
     if($output) {return ($output | Out-String | ConvertFrom-Json)}
 }
 function Check([string]$Name,[bool]$Pass) {
@@ -48,6 +48,11 @@ try {
     $null=Invoke-Cli @('stop',[string]$profile.id,'--force')
     $status=Invoke-Cli @('status',[string]$profile.id)
     Check 'packaged CLI stops shortcut instance' ($status.state -eq 'stopped')
+    $other=Invoke-Cli @('create','Package concurrent gate test')
+    $null=Invoke-Cli -Arguments @('launch-all') -ExpectedExit 4
+    $firstStatus=Invoke-Cli @('status',[string]$profile.id)
+    $otherStatus=Invoke-Cli @('status',[string]$other.id)
+    Check 'packaged launch-all does not partially start profiles' ($firstStatus.state -eq 'stopped' -and $otherStatus.state -eq 'stopped')
 } finally {
     try {$null=Invoke-Cli @('stop-all','--force')} catch {Write-Warning 'Inspect owned package-smoke profiles before cleanup.'}
     @{schemaVersion=1;timestamp=[DateTime]::UtcNow.ToString('o');checks=@($checks.ToArray());package=$package} |

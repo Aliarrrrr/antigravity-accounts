@@ -26,6 +26,13 @@ public sealed class HubService
     public Task<ProfileStatus> GetStatusAsync(Guid id, CancellationToken cancellationToken = default) => _processes.GetStatusAsync(id, cancellationToken);
     public Task<IReadOnlyList<ProfileStatus>> GetAllStatusesAsync(CancellationToken cancellationToken = default) => _processes.GetAllAsync(cancellationToken);
     public Task<LaunchResult> LaunchAsync(Guid id, CancellationToken cancellationToken = default) => _processes.LaunchAsync(id, cancellationToken);
+    public async Task<IReadOnlyList<LaunchResult>> LaunchAllAsync(CancellationToken cancellationToken = default)
+    {
+        var profiles = await _profiles.ListAsync(cancellationToken).ConfigureAwait(false);
+        if (profiles.Count > 1)
+            throw new UnsupportedCapabilityException("Launch all is disabled because this Desktop version cannot safely run Google-account profiles concurrently.");
+        return profiles.Count == 0 ? [] : [await _processes.LaunchAsync(profiles[0].Id, cancellationToken).ConfigureAwait(false)];
+    }
     public Task<StopResult> StopAsync(Guid id, bool force = false, CancellationToken cancellationToken = default) => _processes.StopAsync(id, force, cancellationToken);
     public async Task<string> CreateShortcutAsync(Guid id, string cliExecutable, string? directory = null, CancellationToken cancellationToken = default)
     {
@@ -72,12 +79,23 @@ public sealed class HubService
         IReadOnlyList<ProfileStatus> statuses;
         try { statuses = installation is null ? [] : await _processes.GetAllAsync(cancellationToken); }
         catch (HubException ex) { statuses = []; warnings.Add($"[{ex.Code}] Status reconciliation failed."); }
+        try
+        {
+            var barrier = await _repository.ReadLaunchBarrierAsync(cancellationToken).ConfigureAwait(false);
+            if (barrier is not null)
+                warnings.Add("A global launch barrier is retained for a previous attempt. New launches fail closed until that process is verified or proven exited.");
+        }
+        catch (HubException ex)
+        {
+            warnings.Add($"[{ex.Code}] The global launch barrier could not be validated. New launches fail closed.");
+        }
         if (installation is not null && !installation.IsKnownCompatible) warnings.Add(installation.CompatibilityDetail);
         if (installation is not null && settings.LastTestedVersion is not null && !string.Equals(settings.LastTestedVersion, installation.Version, StringComparison.OrdinalIgnoreCase))
             warnings.Add($"Installed version {installation.Version} differs from last tested version {settings.LastTestedVersion}.");
         if (installation is not null && settings.AuthIsolationAttestedVersion is not null && !string.Equals(settings.AuthIsolationAttestedVersion, installation.Version, StringComparison.OrdinalIgnoreCase))
             warnings.Add("The saved manual authentication-isolation attestation belongs to another version and is invalid.");
         warnings.Add("Synthetic HOME isolates file paths but is not an OS security boundary and can hide existing Git/SSH/tool configuration.");
+        warnings.Add("Manual validation found that concurrent profiles can resolve to the same later-signed-in Google account. Do not use this Desktop version for separate Google accounts.");
         warnings.Add("The shared antigravity:// protocol registration can make OAuth callback routing ambiguous while multiple instances run.");
 
         var capabilities = new List<CapabilityFinding>
@@ -85,7 +103,7 @@ public sealed class HubService
             new("executableDiscovery", installation is null ? CapabilityState.Unknown : CapabilityState.Verified, installation is null ? "Executable was not found." : "Executable and file version were read without launching."),
             new("desktopRuntimeIsolation", installation?.IsKnownCompatible == true ? CapabilityState.Experimental : CapabilityState.Unknown, "Independent user-data and process-home roots were observed locally for Desktop 2.12.2."),
             new("visibleConcurrentWindows", CapabilityState.Unknown, "A prior disposable probe observed first-run windows; run the local probe again to attest the current installation."),
-            new("googleAccountIsolation", CapabilityState.ManualVerificationRequired, "Two-account login persistence and callback routing require human verification."),
+            new("googleAccountIsolation", CapabilityState.Incompatible, "Manual validation showed concurrent profiles resolved to the Google account signed in later. Directory isolation does not isolate Google accounts on Desktop 2.12.2."),
             new("workspaceForwarding", CapabilityState.Unsupported, "Workspace is metadata; no supported Desktop forwarding contract was found."),
             new("credentialOperations", CapabilityState.Unsupported, "Hub never reads, copies, exports, or purges credentials.")
         };
@@ -120,9 +138,11 @@ public static class HubBootstrap
     }
 
     public static HubService CreateForTesting(HubPaths paths, ConfigRepository repository, ProfileManager profiles,
-        IAntigravityDriver driver, IProcessCatalog catalog, IProcessLauncher launcher, IProcessController controller, IHubLogger? logger = null)
+        IAntigravityDriver driver, IProcessCatalog catalog, IProcessLauncher launcher, IProcessController controller, IHubLogger? logger = null,
+        int launchVerificationAttempts = 20, TimeSpan? launchVerificationDelay = null)
     {
-        var supervisor = new ProcessSupervisor(paths, repository, profiles, driver, catalog, launcher, controller, logger ?? new NullHubLogger());
+        var supervisor = new ProcessSupervisor(paths, repository, profiles, driver, catalog, launcher, controller, logger ?? new NullHubLogger(),
+            launchVerificationAttempts, launchVerificationDelay);
         return new HubService(paths, repository, profiles, supervisor, driver);
     }
 }

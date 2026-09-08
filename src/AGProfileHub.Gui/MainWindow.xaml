@@ -15,7 +15,7 @@
                 BorderBrush="#E7C46A"
                 BorderThickness="1"
                 CornerRadius="4">
-            <TextBlock Text="Authentication stays in official Antigravity / Google flow. Profile isolation is experimental and manual account verification is required."
+            <TextBlock Text="Authentication stays in official Antigravity / Google flow. Concurrent Google-account profiles are unsupported on Desktop 2.12.2 after failed manual isolation validation."
                        TextWrapping="Wrap"
                        Foreground="#624B00" />
         </Border>
@@ -23,7 +23,7 @@
         <WrapPanel DockPanel.Dock="Top"
                     Margin="0,0,0,12">
             <Button Content="+ Create profile" Click="Create_Click" Padding="12,6" Margin="0,0,8,0" />
-            <Button Content="Launch all" Click="LaunchAll_Click" Padding="12,6" Margin="0,0,8,0" />
+            <Button x:Name="LaunchAllButton" Content="Launch all" Click="LaunchAll_Click" Padding="12,6" Margin="0,0,8,0" />
             <Button Content="Stop all" Click="StopAll_Click" Padding="12,6" Margin="0,0,8,0" />
             <Button Content="Force stop all" Click="ForceStopAll_Click" Padding="12,6" Margin="0,0,8,0" />
             <Button Content="Refresh" Click="Refresh_Click" Padding="12,6" Margin="0,0,8,0" />

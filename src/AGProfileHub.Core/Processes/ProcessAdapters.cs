@@ -23,7 +23,10 @@ public interface IProcessController
     bool TryCloseMainWindow(ProcessSnapshot expected);
     Task<bool> WaitForExitAsync(int processId, TimeSpan timeout, CancellationToken cancellationToken = default);
     bool Terminate(ProcessSnapshot expected);
+    ProcessLiveness ProbeLiveness(ProcessIdentity expected);
 }
+
+public enum ProcessLiveness { Alive, NotFound, Unknown }
 
 public sealed class WindowsProcessCatalog : IProcessCatalog
 {
@@ -128,7 +131,7 @@ public sealed class WindowsProcessLauncher : IProcessLauncher
         finally { Marshal.FreeHGlobal(environmentBlock); }
         if (!created)
         {
-            throw new HubException("Antigravity failed to start.", "launch_failed", new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error()));
+            throw new LaunchNotStartedException("Antigravity failed to start.", new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error()));
         }
         try
         {
@@ -167,6 +170,25 @@ public sealed class WindowsProcessLauncher : IProcessLauncher
 
 public sealed class WindowsProcessController : IProcessController
 {
+    public ProcessLiveness ProbeLiveness(ProcessIdentity expected)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(expected.ProcessId);
+            var actualStart = new DateTimeOffset(process.StartTime.ToUniversalTime());
+            var actualPath = process.MainModule?.FileName;
+            return expected.StartTimeUtc != DateTimeOffset.MinValue && Math.Abs((actualStart - expected.StartTimeUtc).TotalSeconds) < 1 &&
+                !string.IsNullOrWhiteSpace(actualPath) &&
+                string.Equals(Path.GetFullPath(actualPath), Path.GetFullPath(expected.ExecutablePath), StringComparison.OrdinalIgnoreCase)
+                ? ProcessLiveness.Alive : ProcessLiveness.NotFound;
+        }
+        catch (ArgumentException) { return ProcessLiveness.NotFound; }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException or IOException)
+        {
+            return ProcessLiveness.Unknown;
+        }
+    }
+
     public bool TryFocus(ProcessSnapshot expected)
     {
         try

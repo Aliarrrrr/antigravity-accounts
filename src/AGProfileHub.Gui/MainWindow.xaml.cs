@@ -41,6 +41,9 @@ public partial class MainWindow : Window
                 }
                 _rows.Add(new ProfileRow(status));
             }
+            LaunchAllButton.IsEnabled = _rows.Count <= 1;
+            LaunchAllButton.ToolTip = _rows.Count <= 1 ? null :
+                "Disabled because Desktop 2.12.2 cannot safely run multiple Google-account profiles concurrently.";
             StatusText.Text = $"{_rows.Count} profile(s) · Data: {_service.DataRoot}";
         }
         catch (Exception ex)
@@ -132,7 +135,7 @@ public partial class MainWindow : Window
     {
         await RunAsync(async () =>
         {
-            foreach (var profile in await _service.ListProfilesAsync()) await _service.LaunchAsync(profile.Id);
+            await _service.LaunchAllAsync();
             await RefreshAsync();
         });
     }
@@ -209,7 +212,11 @@ public partial class MainWindow : Window
         if (!MainPanel.IsEnabled) return;
         MainPanel.IsEnabled = false;
         try { await action(); }
-        catch (Exception ex) { MessageBox.Show(FormatException(ex), "Operation failed", MessageBoxButton.OK, MessageBoxImage.Error); }
+        catch (Exception ex)
+        {
+            MessageBox.Show(FormatException(ex), "Operation failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            await RefreshAsync();
+        }
         finally { MainPanel.IsEnabled = true; }
     }
 

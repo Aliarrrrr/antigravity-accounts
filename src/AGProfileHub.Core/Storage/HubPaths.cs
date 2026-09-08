@@ -2,14 +2,19 @@ namespace AGProfileHub.Core;
 
 public sealed class HubPaths
 {
-    public HubPaths(string? dataRoot = null)
+    public HubPaths(string? dataRoot = null, string? globalLaunchStateRoot = null)
     {
-        var requested = dataRoot ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AntigravityProfileHub");
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var requested = dataRoot ?? Path.Combine(localAppData, "AntigravityProfileHub");
         DataRoot = Path.GetFullPath(requested);
+        GlobalLaunchStateRoot = Path.GetFullPath(globalLaunchStateRoot ??
+            Path.Combine(localAppData, "AntigravityProfileHub", "global-launch-state"));
         PathSafety.RejectExistingPathAncestors(DataRoot);
+        PathSafety.RejectExistingPathAncestors(GlobalLaunchStateRoot);
     }
 
     public string DataRoot { get; }
+    public string GlobalLaunchStateRoot { get; }
     public string ConfigDirectory => Path.Combine(DataRoot, "config");
     public string ProfilesFile => Path.Combine(ConfigDirectory, "profiles.json");
     public string SettingsFile => Path.Combine(ConfigDirectory, "settings.json");
@@ -18,6 +23,8 @@ public sealed class HubPaths
     public string LocksRoot => Path.Combine(DataRoot, "runtime", "locks");
     public string LogsRoot => Path.Combine(DataRoot, "logs");
     public string GlobalConfigLock => Path.Combine(LocksRoot, "config.lock");
+    public string GlobalLaunchLock => Path.Combine(GlobalLaunchStateRoot, "launch.lock");
+    public string LaunchBarrierFile => Path.Combine(GlobalLaunchStateRoot, "launch-barrier.json");
     public string ProfileRoot(Guid id) => SafeProfilePath(id, null);
     public string UserData(Guid id) => SafeProfilePath(id, "user-data");
     public string Home(Guid id) => SafeProfilePath(id, "home");
@@ -34,6 +41,8 @@ public sealed class HubPaths
         Directory.CreateDirectory(DataRoot);
         PathSafety.RejectExistingReparsePoints(DataRoot, DataRoot);
         foreach (var path in new[] { ConfigDirectory, ProfilesRoot, RuntimeStateRoot, LocksRoot, LogsRoot }) PathSafety.EnsureSafeDirectory(DataRoot, path);
+        Directory.CreateDirectory(GlobalLaunchStateRoot);
+        PathSafety.RejectExistingReparsePoints(GlobalLaunchStateRoot, GlobalLaunchStateRoot);
     }
 
     public void EnsureProfileLayout(Guid id)

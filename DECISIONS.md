@@ -9,3 +9,4 @@
 - ADR-007 accepted: remove unregisters; no purge for MVP. No import/copy of existing identities.
 - ADR-008 accepted: omit arbitrary launch arguments initially; they could override isolation or leak secrets. Log allowlisted templates only; discard vendor output.
 - ADR-009 accepted: experimental delivery can continue before human OAuth testing, but full functional acceptance cannot be marked complete. Agent Safe worktrees, tray, CLI identity are later work.
+- ADR-010 accepted: manual validation on Desktop 2.12.2 showed concurrent profiles resolving to the Google account signed in later. The Hub preserves profile data, makes no credential changes, and blocks a second Antigravity root instead of claiming separate-account support. Real concurrent multi-account support requires an official profile-scoped authentication contract or a separate Windows identity boundary.

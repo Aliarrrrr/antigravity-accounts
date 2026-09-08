@@ -10,7 +10,7 @@ $probeParent = [IO.Path]::GetFullPath((Join-Path $env:TEMP 'AGProfileHub-Probes'
 $probeRoot = Join-Path $probeParent ([guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probeRoot -Force | Out-Null
 $owned = [Collections.Generic.List[Diagnostics.Process]]::new()
-$report = [ordered]@{schemaVersion=1; timestamp=[DateTime]::UtcNow.ToString('o'); antigravity=@{path=$Executable;version=(Get-Item -LiteralPath $Executable).VersionInfo.ProductVersion}; strategy='isolated-process-home-and-user-data'; capabilities=@{multiInstance='unknown';userDataIsolation='unknown';homeStateIsolation='unknown';authIsolation='manual-verification-required';workspaceLaunch='unknown';extensionsIsolation='not-applicable-desktop-2'}; samples=@();cleanup='pending'}
+$report = [ordered]@{schemaVersion=1; timestamp=[DateTime]::UtcNow.ToString('o'); antigravity=@{path=$Executable;version=(Get-Item -LiteralPath $Executable).VersionInfo.ProductVersion}; strategy='isolated-process-home-and-user-data'; capabilities=@{multiInstance='unknown';userDataIsolation='unknown';homeStateIsolation='unknown';authIsolation='not-evaluated-by-probe';workspaceLaunch='unknown';extensionsIsolation='not-applicable-desktop-2'}; authenticationNote='Probe does not evaluate authentication. Manual A/B verification found concurrent Google-account isolation incompatible on Desktop 2.12.2.'; samples=@();cleanup='pending'}
 function Start-ProbeInstance([string]$Label) {
     $dir = Join-Path $probeRoot $Label
     foreach ($sub in @('home','roaming','local','temp','user-data')) { New-Item -ItemType Directory -Path (Join-Path $dir $sub) -Force | Out-Null }

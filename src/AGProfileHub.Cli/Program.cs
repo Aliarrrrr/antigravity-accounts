@@ -99,10 +99,8 @@ internal static class CliApplication
                 return launch;
             case "launch-all":
                 RequireNoArguments(tail, "launch-all");
-                var launches = new List<LaunchResult>();
-                foreach (var profile in await hub.ListProfilesAsync().ConfigureAwait(false))
-                    launches.Add(await hub.LaunchAsync(profile.Id).ConfigureAwait(false));
-                if (!json) launches.ForEach(item => PrintStatus(item.Status));
+                var launches = await hub.LaunchAllAsync().ConfigureAwait(false);
+                if (!json) foreach (var item in launches) PrintStatus(item.Status);
                 return launches;
             case "stop":
                 var forceStop = TakeFlag(tail, "--force");
@@ -277,7 +275,7 @@ internal static class CliApplication
           stop <id> [--force] | stop-all [--force] | restart <id> [--force]
           open-data [id] | open-logs | configure-executable <path>
           shortcut <id> [--directory <path>]
-        Authentication is performed only by official Antigravity; account isolation requires manual verification.
+        Authentication is performed only by official Antigravity. Concurrent Google-account profiles are unsupported on Desktop 2.12.2 after failed manual isolation validation.
         """;
 
     private static void EnsureStopped(StopResult result)

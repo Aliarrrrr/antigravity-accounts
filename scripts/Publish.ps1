@@ -22,7 +22,7 @@ foreach($name in @('README.md','CAPABILITY_REPORT.md','MANUAL_TEST_PLAN.md','SEC
 }
 New-Item -ItemType Directory -Path (Join-Path $packageRoot 'scripts') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Probe-Antigravity.ps1') -Destination (Join-Path $packageRoot 'scripts')
-$manifest=@{schemaVersion=1;builtAt=[DateTime]::UtcNow.ToString('o');runtime='win-x64';selfContained=(-not $FrameworkDependent);experimental=$true;authIsolation='manual-verification-required'}
+$manifest=@{schemaVersion=1;hubVersion='0.1.2';builtAt=[DateTime]::UtcNow.ToString('o');runtime='win-x64';selfContained=(-not $FrameworkDependent);experimental=$true;authIsolation='incompatible-on-current-desktop'}
 $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $packageRoot 'package-manifest.json') -Encoding utf8
 '@start "" "%~dp0hub\AGProfileHub.Gui.exe"' | Set-Content -LiteralPath (Join-Path $packageRoot 'Start Hub.cmd') -Encoding ascii
 '@"%~dp0cli\AGProfileHub.Cli.exe" %*' | Set-Content -LiteralPath (Join-Path $packageRoot 'agprofile.cmd') -Encoding ascii

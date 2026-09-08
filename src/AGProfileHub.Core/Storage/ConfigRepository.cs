@@ -5,8 +5,15 @@ public sealed class ConfigRepository
     private static readonly TimeSpan LockTimeout = TimeSpan.FromSeconds(10);
     private readonly HubPaths _paths;
     private readonly AtomicJsonStore _json;
+    private readonly AtomicJsonStore _launchJson;
 
-    public ConfigRepository(HubPaths paths) { _paths = paths; _paths.EnsureBaseLayout(); _json = new AtomicJsonStore(paths.DataRoot); }
+    public ConfigRepository(HubPaths paths)
+    {
+        _paths = paths;
+        _paths.EnsureBaseLayout();
+        _json = new AtomicJsonStore(paths.DataRoot);
+        _launchJson = new AtomicJsonStore(paths.GlobalLaunchStateRoot);
+    }
 
     public async Task<ProfilesDocument> ReadProfilesAsync(CancellationToken cancellationToken = default)
     {
@@ -66,7 +73,36 @@ public sealed class ConfigRepository
         if (File.Exists(path)) File.Delete(path);
     }
     internal Task<FileLock> LockProfileAsync(Guid id, CancellationToken cancellationToken) => FileLock.AcquireAsync(_paths.ProfileLock(id), LockTimeout, cancellationToken);
+    internal Task<FileLock> LockLaunchAsync(CancellationToken cancellationToken) => FileLock.AcquireAsync(_paths.GlobalLaunchLock, LockTimeout, cancellationToken);
+    internal async Task<LaunchBarrierRecord?> ReadLaunchBarrierAsync(CancellationToken cancellationToken)
+    {
+        if (!File.Exists(_paths.LaunchBarrierFile)) return null;
+        var barrier = await _launchJson.ReadAsync(_paths.LaunchBarrierFile, HubJsonContext.Default.LaunchBarrierRecord,
+            () => throw new ConfigurationException("Launch barrier is missing.", "launch_barrier_invalid"), cancellationToken).ConfigureAwait(false);
+        if (barrier.SchemaVersion != SchemaVersions.Current || barrier.AttemptId == Guid.Empty || barrier.ProfileId == Guid.Empty ||
+            barrier.CreatedUtc == default || !IsFullPath(barrier.OriginDataRoot) || !IsFullPath(barrier.ExecutablePath) || !IsFullPath(barrier.UserDataPath) ||
+            barrier.Root is not null && (barrier.Root.ProcessId <= 0 || barrier.Root.StartTimeUtc == default ||
+                !IsFullPath(barrier.Root.ExecutablePath) || !IsFullPath(barrier.Root.UserDataPath) ||
+                !string.Equals(barrier.Root.ExecutablePath, barrier.ExecutablePath, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(barrier.Root.UserDataPath, barrier.UserDataPath, StringComparison.OrdinalIgnoreCase)))
+            throw new ConfigurationException("Launch barrier has invalid identity fields.", "launch_barrier_invalid");
+        return barrier;
+    }
+    internal Task WriteLaunchBarrierAsync(LaunchBarrierRecord barrier, CancellationToken cancellationToken) =>
+        _launchJson.WriteAsync(_paths.LaunchBarrierFile, barrier, HubJsonContext.Default.LaunchBarrierRecord, cancellationToken);
+    internal void DeleteLaunchBarrier()
+    {
+        PathSafety.RejectExistingReparsePoints(_paths.GlobalLaunchStateRoot, _paths.LaunchBarrierFile);
+        if (File.Exists(_paths.LaunchBarrierFile)) File.Delete(_paths.LaunchBarrierFile);
+    }
     private Task<ProfilesDocument> ReadProfilesUnlockedAsync(CancellationToken cancellationToken) => _json.ReadAsync(_paths.ProfilesFile, HubJsonContext.Default.ProfilesDocument, () => new ProfilesDocument(), cancellationToken);
+
+    private static bool IsFullPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        try { return Path.IsPathFullyQualified(path) && string.Equals(Path.GetFullPath(path), path, StringComparison.OrdinalIgnoreCase); }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return false; }
+    }
 
     private static void Validate(ProfilesDocument document)
     {

@@ -38,6 +38,18 @@ public sealed record RuntimeRecord
     public DateTimeOffset UpdatedUtc { get; init; }
 }
 
+public sealed record LaunchBarrierRecord
+{
+    public int SchemaVersion { get; init; } = SchemaVersions.Current;
+    public Guid AttemptId { get; init; }
+    public Guid ProfileId { get; init; }
+    public string OriginDataRoot { get; init; } = string.Empty;
+    public string ExecutablePath { get; init; } = string.Empty;
+    public string UserDataPath { get; init; } = string.Empty;
+    public DateTimeOffset CreatedUtc { get; init; }
+    public ProcessIdentity? Root { get; init; }
+}
+
 public sealed record ProfileStatus(Guid ProfileId, string Name, RuntimeState State, ProcessIdentity? Root, string? Detail, string? WorkspacePath);
 public sealed record LaunchResult(ProfileStatus Status, bool StartedNewProcess);
 public sealed record StopResult(ProfileStatus Status, bool WasRunning, bool Graceful);
@@ -63,11 +75,14 @@ public sealed class ConfigurationException(string message, string code = "config
 public sealed class ProfileNotFoundException(Guid id) : HubException($"Profile '{id}' was not found.", "profile_not_found");
 public sealed class UnsupportedCapabilityException(string message) : HubException(message, "unsupported_capability");
 public sealed class ProcessOwnershipException(string message) : HubException(message, "process_ownership_unknown");
+public sealed class LaunchNotStartedException(string message, Exception? inner = null) : HubException(message, "launch_failed", inner);
+public sealed class LaunchStateUncertainException(string message, Exception? inner = null) : HubException(message, "launch_state_uncertain", inner);
 
 [JsonSourceGenerationOptions(WriteIndented = true, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(ProfilesDocument))]
 [JsonSerializable(typeof(HubSettings))]
 [JsonSerializable(typeof(RuntimeRecord))]
+[JsonSerializable(typeof(LaunchBarrierRecord))]
 [JsonSerializable(typeof(ProfileRegistration))]
 [JsonSerializable(typeof(ProfileStatus))]
 [JsonSerializable(typeof(LaunchResult))]
