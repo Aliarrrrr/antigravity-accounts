@@ -8,11 +8,14 @@ namespace AGProfileHub.Gui;
 
 public partial class MainWindow : Window
 {
-    private readonly HubService _service = HubBootstrap.CreateDefault();
+    private readonly HubService _service;
     private readonly ObservableCollection<ProfileRow> _rows = [];
 
-    public MainWindow()
+    public MainWindow() : this(null) { }
+
+    public MainWindow(string? dataRoot)
     {
+        _service = HubBootstrap.CreateDefault(dataRoot);
         InitializeComponent();
         ProfilesGrid.ItemsSource = _rows;
         Loaded += async (_, _) => await RefreshAsync();
@@ -104,7 +107,7 @@ public partial class MainWindow : Window
     private async void Stop_Click(object sender, RoutedEventArgs e)
     {
         if (TryGetProfileId(sender, out var id))
-            await RunAsync(async () => { await _service.StopAsync(id); await RefreshAsync(); });
+            await RunAsync(async () => { var result = await _service.StopAsync(id); await RefreshAsync(); EnsureStopped(result); });
     }
 
     private async void ForceStop_Click(object sender, RoutedEventArgs e)
@@ -138,8 +141,10 @@ public partial class MainWindow : Window
     {
         await RunAsync(async () =>
         {
-            foreach (var profile in await _service.ListProfilesAsync()) await _service.StopAsync(profile.Id);
+            var results = new List<StopResult>();
+            foreach (var profile in await _service.ListProfilesAsync()) results.Add(await _service.StopAsync(profile.Id));
             await RefreshAsync();
+            foreach (var result in results) EnsureStopped(result);
         });
     }
 
@@ -170,6 +175,28 @@ public partial class MainWindow : Window
     }
 
     private void OpenData_Click(object sender, RoutedEventArgs e) => OpenFolderSafely(() => _service.OpenDataFolder());
+    private async void Settings_Click(object sender, RoutedEventArgs e)
+    {
+        var picker = new Microsoft.Win32.OpenFileDialog { Title = "Select Antigravity executable", Filter = "Antigravity executable (*.exe)|*.exe", CheckFileExists = true };
+        if (picker.ShowDialog(this) != true) return;
+        await RunAsync(async () => { await _service.ConfigureExecutableAsync(picker.FileName); await RefreshAsync(); });
+    }
+
+    private async void Shortcut_Click(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetProfileId(sender, out var id)) return;
+        await RunAsync(async () =>
+        {
+            var path = await _service.CreateShortcutAsync(id, DesktopShortcut.FindCliExecutable(AppContext.BaseDirectory));
+            StatusText.Text = $"Shortcut created: {path}";
+        });
+    }
+
+    private static void EnsureStopped(StopResult result)
+    {
+        if (result.Status.State != RuntimeState.Stopped)
+            throw new HubException(result.Status.Detail ?? "The profile is still running.", "graceful_close_pending");
+    }
     private void OpenLogs_Click(object sender, RoutedEventArgs e) => OpenFolderSafely(_service.OpenLogsFolder);
 
     private void Data_Click(object sender, RoutedEventArgs e)
@@ -179,8 +206,11 @@ public partial class MainWindow : Window
 
     private async Task RunAsync(Func<Task> action)
     {
+        if (!MainPanel.IsEnabled) return;
+        MainPanel.IsEnabled = false;
         try { await action(); }
         catch (Exception ex) { MessageBox.Show(FormatException(ex), "Operation failed", MessageBoxButton.OK, MessageBoxImage.Error); }
+        finally { MainPanel.IsEnabled = true; }
     }
 
     private static void OpenFolderSafely(Action action)
@@ -202,6 +232,7 @@ public partial class MainWindow : Window
         };
         var panel = new StackPanel { Margin = new Thickness(12) };
         var box = new TextBox();
+        window.Loaded += (_, _) => box.Focus();
         var ok = new Button
         {
             Content = "OK",
@@ -224,8 +255,8 @@ public partial class MainWindow : Window
     private static string FormatException(Exception ex) =>
         ex is HubException hub ? $"[{hub.Code}] {hub.Message}" : "Unexpected error.";
 
-    private sealed record ProfileRow(Guid ProfileId, string Name, RuntimeState State, int? RootProcessId, string? WorkspacePath)
+    private sealed record ProfileRow(Guid ProfileId, string Name, RuntimeState State, int? RootProcessId, string? WorkspacePath, string? Detail)
     {
-        public ProfileRow(ProfileStatus status) : this(status.ProfileId, status.Name, status.State, status.Root?.ProcessId, status.WorkspacePath) { }
+        public ProfileRow(ProfileStatus status) : this(status.ProfileId, status.Name, status.State, status.Root?.ProcessId, status.WorkspacePath, status.Detail) { }
     }
 }

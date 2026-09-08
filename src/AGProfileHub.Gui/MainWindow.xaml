@@ -7,7 +7,7 @@
         MinHeight="480"
         MinWidth="820"
         Background="#F7F8FA">
-    <DockPanel Margin="18">
+    <DockPanel x:Name="MainPanel" Margin="18">
         <Border DockPanel.Dock="Top"
                 Padding="12"
                 Margin="0,0,0,12"
@@ -20,8 +20,7 @@
                        Foreground="#624B00" />
         </Border>
 
-        <StackPanel DockPanel.Dock="Top"
-                    Orientation="Horizontal"
+        <WrapPanel DockPanel.Dock="Top"
                     Margin="0,0,0,12">
             <Button Content="+ Create profile" Click="Create_Click" Padding="12,6" Margin="0,0,8,0" />
             <Button Content="Launch all" Click="LaunchAll_Click" Padding="12,6" Margin="0,0,8,0" />
@@ -29,9 +28,10 @@
             <Button Content="Force stop all" Click="ForceStopAll_Click" Padding="12,6" Margin="0,0,8,0" />
             <Button Content="Refresh" Click="Refresh_Click" Padding="12,6" Margin="0,0,8,0" />
             <Button Content="Doctor" Click="Doctor_Click" Padding="12,6" Margin="0,0,8,0" />
+            <Button Content="Settings" Click="Settings_Click" Padding="12,6" Margin="0,0,8,0" />
             <Button Content="Open data" Click="OpenData_Click" Padding="12,6" Margin="0,0,8,0" />
             <Button Content="Open logs" Click="OpenLogs_Click" Padding="12,6" />
-        </StackPanel>
+        </WrapPanel>
 
         <TextBlock x:Name="StatusText"
                    DockPanel.Dock="Bottom"
@@ -49,6 +49,14 @@
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Profile" Binding="{Binding Name}" Width="1.4*" />
                 <DataGridTextColumn Header="Status" Binding="{Binding State}" Width="0.9*" />
+                <DataGridTextColumn Header="Details" Binding="{Binding Detail}" Width="1.5*">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="TextWrapping" Value="Wrap" />
+                            <Setter Property="ToolTip" Value="{Binding Detail}" />
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
                 <DataGridTextColumn Header="PID" Binding="{Binding RootProcessId}" Width="0.7*" />
                 <DataGridTextColumn Header="Workspace" Binding="{Binding WorkspacePath}" Width="2.2*" />
                 <DataGridTemplateColumn Header="Actions" Width="4.8*">
@@ -63,6 +71,7 @@
                                 <Button Content="Workspace" Tag="{Binding ProfileId}" Click="Workspace_Click" Margin="2" Padding="8,3" />
                                 <Button Content="Rename" Tag="{Binding ProfileId}" Click="Rename_Click" Margin="2" Padding="8,3" />
                                 <Button Content="Data" Tag="{Binding ProfileId}" Click="Data_Click" Margin="2" Padding="8,3" />
+                                <Button Content="Shortcut" Tag="{Binding ProfileId}" Click="Shortcut_Click" Margin="2" Padding="8,3" />
                                 <Button Content="Remove" Tag="{Binding ProfileId}" Click="Remove_Click" Margin="2" Padding="8,3" />
                             </WrapPanel>
                         </DataTemplate>

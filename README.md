@@ -34,11 +34,16 @@ Windows 原生 Antigravity Desktop 多实例管理器。管理任意数量的本
 .\agprofile.cmd open-data <profile-id>
 .\agprofile.cmd open-logs
 .\agprofile.cmd remove <profile-id>
+.\agprofile.cmd shortcut <profile-id>
 ```
 
 `--json` 输出 camelCase 机器可读 JSON；`--data-root <绝对路径>` 用于独立测试/便携数据目录。**remove 只移除登记，保留 Profile 数据**。请先停止该 Profile。不要把 Profile 数据目录上传到 Git 或当普通诊断日志分享。
 
 GUI 的 `Workspace` 按钮只保存默认工作区元数据，`Data` 和顶部的 `Open logs` 按钮分别打开受管理的目录。当前版本没有声称把工作区参数转发进 Antigravity Desktop。
+
+`Shortcut` 按钮或 `shortcut <profile-id>` 在桌面创建绑定 UUID 的快捷方式；CLI 可用 `--directory <绝对目录>` 指定已有目录。快捷方式保存当前 Hub 数据目录，重命名 Profile 后仍可启动。已有同名链接不会被覆盖。移动便携包后请重新创建快捷方式。GUI 的 `Settings` 用于选择官方 Antigravity 可执行文件。
+
+GUI 也支持 `AGProfileHub.Gui.exe --data-root <绝对路径>`，可用于独立测试数据。操作期间会禁用按钮，状态详情显示异常或未完成的停止请求。
 
 ## 数据与限制
 
@@ -59,6 +64,7 @@ GUI 的 `Workspace` 按钮只保存默认工作区元数据，`Data` 和顶部�
 pwsh -NoProfile -File scripts/Build.ps1 -Test
 pwsh -NoProfile -File scripts/Test-Integration.ps1
 pwsh -NoProfile -File scripts/Publish.ps1
+pwsh -NoProfile -File scripts/Test-Package.ps1 -PackageRoot <发布包中的AGProfileHub目录>
 ```
 
 第一条构建解决方案并运行断言测试程序。第二条会启动真实的无登录测试实例，观察 CLI 生命周期，并把证据保存在被 Git 忽略的 artifacts/integration 随机目录。第三条先构建/测试，再产生带运行时的便携包和 SHA-256 文件；`-FrameworkDependent` 可输出依赖本机运行时的版本。

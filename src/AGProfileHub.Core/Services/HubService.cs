@@ -27,6 +27,13 @@ public sealed class HubService
     public Task<IReadOnlyList<ProfileStatus>> GetAllStatusesAsync(CancellationToken cancellationToken = default) => _processes.GetAllAsync(cancellationToken);
     public Task<LaunchResult> LaunchAsync(Guid id, CancellationToken cancellationToken = default) => _processes.LaunchAsync(id, cancellationToken);
     public Task<StopResult> StopAsync(Guid id, bool force = false, CancellationToken cancellationToken = default) => _processes.StopAsync(id, force, cancellationToken);
+    public async Task<string> CreateShortcutAsync(Guid id, string cliExecutable, string? directory = null, CancellationToken cancellationToken = default)
+    {
+        if (!OperatingSystem.IsWindows()) throw new UnsupportedCapabilityException("Desktop shortcuts require Windows.");
+        var profile = await _profiles.GetAsync(id, cancellationToken).ConfigureAwait(false);
+        return DesktopShortcut.Create(profile, _paths.DataRoot, cliExecutable,
+            directory ?? Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory));
+    }
     public Task<LaunchResult> RestartAsync(Guid id, bool force = false, CancellationToken cancellationToken = default) => _processes.RestartAsync(id, force, cancellationToken);
 
     public Task LaunchWithWorkspaceAsync(Guid id, string workspacePath, CancellationToken cancellationToken = default) =>

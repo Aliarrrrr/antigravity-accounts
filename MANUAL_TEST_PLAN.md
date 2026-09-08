@@ -1,5 +1,7 @@
 # Manual verification — pending
 
+September 8 user update: two-account checks have not yet been performed; the user will complete this checklist later. Engineering checks must not fill these account rows automatically.
+
 Use two new Hub profiles; keep original installation profile untouched. Do not send credentials, OAuth codes, tokens, cookie exports or account screenshots to the developer. Record pass/fail and non-sensitive observations only.
 
 1. Launch Pro A visibly. Confirm official Antigravity window is usable. Complete official Google A login yourself. Close A, relaunch; verify it still shows A.
@@ -11,6 +13,7 @@ Use two new Hub profiles; keep original installation profile untouched. Do not s
 7. Close Hub but leave profiles running. Reopen Hub, confirm correct status; duplicate launch must report running/focus. Close an app manually and refresh Hub.
 8. Check synthetic-home tool behavior: Git identity, SSH, plugins and tool configuration may be absent. Configure normal non-secret preferences separately as needed; no automatic credential copying.
 9. After vendor update, run doctor and repeat steps 1–6 before asserting long-term compatibility.
+10. Create each profile's desktop shortcut. Close Hub, launch the shortcut and verify the intended identity. Rename a profile in Hub and confirm the original shortcut still launches that profile. If the portable package moves, recreate the shortcuts.
 
 | Test | Status | Observation |
 |---|---|---|

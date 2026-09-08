@@ -1,40 +1,30 @@
-# Project state
+# Project state — 2026-09-08
 
-## Current Phase
-Astra Phase 0 and the Sol implementation pass are complete. Release packaging and documentation are complete for the experimental build; authenticated Google A/B verification remains a human gate.
+## Current phase
+Experimental MVP engineering is implemented. Full product acceptance is blocked on the user's two-account Google login verification. The user confirmed September 8 that this has not been performed and will be done later using the checklist.
 
 ## Completed
-- Read master requirements; initialized Git; original prompt left unmodified and excluded from commits.
-- Windows/PowerShell/Git/vendor discovery; installed vendor code inspected read-only.
-- Dynamic two-profile probe: separate roots/backends/state paths; stop A leaves B; cleanup completed.
-- Architecture, decisions, security, phased implementation plan, manual test checklist.
-- Native four-project scaffold and local .NET 10.0.400 SDK; Core domain/storage/driver/process implementation builds cleanly.
-- 12 Core/process safety assertions pass; the visible probe observed two separate official first-run windows with no login or privacy interactions.
-- CLI concurrency and real-process integration scripts pass, including duplicate launch, two roots, workspace metadata, restart/stop isolation, and unregister-with-data-preserved.
-- WPF GUI builds and the packaged GUI starts with a visible window.
-- Self-contained win-x64 package was produced under `artifacts/package/20260907-213404/`.
+- Core UUID profiles, atomic schema-checked configuration, locks, path validation, registration-only removal, workspace metadata.
+- Desktop 2.12.2 discovery, independent process home/user-data, ownership reconciliation, duplicate-launch focus, graceful/forced stop and restart.
+- CLI lifecycle, JSON, diagnostics and structured operation logs.
+- WPF management UI, executable picker, readable status details, operation locking, isolated --data-root startup.
+- CLI and GUI desktop shortcuts: UUID and Hub data-root arguments, no overwrite of existing links, rename stability.
+- Portable self-contained win-x64 packaging and reproducible packaged-shortcut smoke script.
 
-## In Progress
-- Human validation of two authenticated Google profiles and OAuth callback routing.
+## Latest verification
+- Release build: zero warnings/errors; 16/16 Core/process/shortcut checks passed.
+- CLI concurrency: 12/12 passed; artifacts/cli-concurrency/65adbc30ceb149afbabc3d388b71ea20.
+- Real-process integration: 6/6 passed; artifacts/integration/f420d2a9975b46e1acba79ee457fc880.
+- GUI create, rename, launch and graceful stop exercised with an isolated root; actual running PID and stopped state observed.
+- Static installed-app inspection still reports Desktop 2.12.2; no credentials inspected.
+- Packaging uses scripts/Publish.ps1; scripts/Test-Package.ps1 verifies actual .lnk launch after rename and duplicate-launch behavior. See FINAL_REPORT.md for the release record.
+- Final package: artifacts/package/20260908-115335/AGProfileHub-win-x64.zip; packaged shortcut lifecycle 5/5 passed, self-contained GUI startup and executable-picker opening observed. GUI doctor returned current version and manual-auth requirement.
 
-## Pending
-Complete the manual Google login checklist, including cross-restart persistence and callback routing. Workspace forwarding, shortcuts, tray integration, standalone CLI/headless identity, and Git worktree orchestration remain future work.
+## Remaining release gate
+Run MANUAL_TEST_PLAN.md with two Google accounts: separate login, persistence across restarts, simultaneous distinct identities, independent settings, callback routing. Keep experimental/manual-verification-required until direct user observations are recorded. Directory/process evidence does not establish account isolation.
 
-## Known Issues
-- Antigravity 2.12.2 uses both userData and process-home .gemini; user-data-only is insufficient.
-- Follow-up visible probe observed two rendered first-run windows and clean shutdown; authenticated behavior still pending.
-- Shared OAuth protocol/Credential Manager/DPAPI are not proved isolated.
-- Synthetic home can hide existing tool config; never copy credentials to work around it.
-- Vendor stdout contains ephemeral secrets; probe now discards output.
+## Deferred scope
+Vendor workspace forwarding is unsupported by the verified launch contract; stored workspace metadata is implemented. Tray, standalone CLI/headless identity and Agent Safe Git worktrees remain optional future scope. Destructive profile-data purge is not provided.
 
-## Key Decisions
-.NET 10/WPF; N UUID profiles; independent process home + user-data; CLI first; metadata workspace until verified; conservative process ownership; no profile-data purge.
-
-## Build Status
-.NET SDK 10.0.400 is installed locally in `.tools/dotnet`. `scripts/Build.ps1 -Test` builds all four projects with zero warnings/errors and reports 12/12 tests passed. `scripts/Publish.ps1` produced a self-contained win-x64 package and SHA-256 sidecar at `artifacts/package/20260907-213404/`.
-
-## Test Status
-On September 7, 2026: Core/process assertions 12/12 passed; `scripts/Test-CliConcurrency.py` passed 12 checks; `scripts/Test-Integration.ps1` passed 6 checks; packaged CLI help and packaged GUI startup smoke passed. Phase 0 probe evidence remains under `artifacts/probe`. Google login persistence, account separation, and OAuth callback routing remain manual verification requirements.
-
-## Next Actions
-Run `MANUAL_TEST_PLAN.md` with two test Google accounts. Preserve `manual-verification-required` and `unknown` capability statuses unless the user records direct evidence. Do not copy or inspect credentials while performing the test.
+## Working tree note
+scripts/Inspect-InstalledApp.py already had uncommitted additions for loading-overlay/retry inspection before this continuation. Those changes were preserved and run successfully; do not silently include them in unrelated commits.

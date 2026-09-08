@@ -19,3 +19,5 @@ Apply READ → PLAN → IMPLEMENT → BUILD → TEST → VERIFY → DOCUMENT to 
 | 12 optional | Worktree/Agent Safe mode | deferred | Dedicated future design and destructive safeguards | Do not delete existing worktrees |
 
 Release gate: automated tests/build pass, runnable CLI/GUI delivered, limitations explicit. Full product acceptance additionally requires Phase 6. Use an experimental label until then. Workspace CLI forwarding is a separate unverified capability, not a reason to misreport Phase 6 success.
+
+September 8 update: Phase 8 desktop shortcuts are implemented and verified through COM assertions and actual packaged .lnk lifecycle tests. GUI executable settings and operation/status feedback are implemented. Phase 6 remains pending user testing; Phase 9 workspace association is implemented as metadata, while vendor forwarding is unsupported. Phase 12 and tray remain deferred.

@@ -16,11 +16,11 @@ This tracks release evidence, not merely the presence of code. Authenticated Goo
 | Stop/restart isolation | A stops/restarts while B identity/root remains | passed (real integration) |
 | Removal preserves data | Unregister profile, marker file remains | passed (unit + CLI concurrency + real integration) |
 | Workspace honesty | Unsupported forwarding produces clear error; metadata association validated | passed (CLI concurrency script stores/clears metadata; forwarding intentionally unsupported) |
-| Update guard | Version/path changes invalidate previous exact-version evidence | implemented; dedicated regression test pending |
-| Logging | Allowed event schema; no vendor output or secret-shaped parameters | implemented; manual log review recommended |
-| GUI | Real create/rename/select/status/doctor interactions | build + startup smoke passed; interactive operations remain manual |
-| Shortcut | Link targets CLI + immutable UUID, no vendor argument duplication | pending tests |
-| Packaging | Self-contained win-x64 CLI help and GUI startup | passed (`artifacts/package/20260907-213404`) |
+| Update guard | Version/path changes invalidate previous exact-version evidence | passed: unknown-version launch leaves directories untouched; executable change clears attestation |
+| Logging | Allowed event schema; no vendor output or secret-shaped parameters | six integration events checked: only allowed fields and fixed sanitized command templates |
+| GUI | Real create/rename/select/status/doctor interactions | create/rename/launch/graceful stop, status and doctor observed September 8; packaged executable picker opens; exhaustive interaction coverage remains partial |
+| Shortcut | Link targets CLI + immutable UUID, no vendor argument duplication | COM regression and actual packaged .lnk lifecycle passed, including rename, duplicate launch and stop |
+| Packaging | Self-contained win-x64 CLI help and GUI startup | passed: artifacts/package/20260908-115335; package shortcut lifecycle 5/5 |
 | Real Google A/B | Distinct identities survive restarts and concurrent operation | manual-verification-required |
 | Callback routing | Reauthentication reaches intended profile with two apps active | manual-verification-required |
 

@@ -1,33 +1,22 @@
-# Final report
+# Delivery report — 2026-09-08
 
-## Delivery status
+## Status
+Antigravity Profile Hub 0.1.1 is an experimental Windows profile manager. Core, CLI, WPF GUI, desktop shortcuts and packaging are implemented. Full authenticated multi-account acceptance is not complete: the user will perform the Google A/B checklist later.
 
-Antigravity Profile Hub is an experimental Windows desktop manager for multiple local Antigravity Desktop profiles. The repository includes a native Core library, CLI, WPF GUI, capability probe, safety documentation, and a portable packaging script. The final release status below is updated only after build and runtime checks.
+## Delivered behavior
+N immutable UUID profiles; rename without moving data; workspace metadata; launch, stop, restart, status and batch operations; live process reconciliation; duplicate-launch handling; safe unregistering with data preserved; doctor and structured logs.
 
-## What was built
+The GUI adds an executable picker, operation locking, status detail wrapping, explicit incomplete-stop messages and an isolated --data-root option. Desktop shortcuts call the CLI with the UUID and original data root. They still work after a profile rename; existing links are not overwritten. Moving the package requires recreating shortcuts.
 
-The repository now contains the Core profile/storage/process service, CLI commands, WPF GUI project, capability probes, safety documentation, automated Core/process checks, and the portable packaging script. The experimental package is buildable and runnable; authenticated account separation remains a manual acceptance item.
+## Verification
+September 8: Release build has zero warnings/errors; Core/process/shortcut assertions pass 16/16; independent CLI concurrency checks pass 12/12; real-process integration passes 6/6. GUI create, rename, launch and graceful stop were exercised against an isolated test root, including visible running and stopped status. Windows shortcut tests verify target/arguments, Unicode names, rename stability and preservation of existing links.
 
-The CLI manages UUID-backed profiles, metadata-only workspaces, launch/stop/restart/status, duplicate-launch detection, batch operations, diagnostics, structured logs, and safe unregistering that preserves profile data. The GUI exposes the same core lifecycle actions through a compact WPF window and keeps the authentication warning visible.
+scripts/Publish.ps1 produces the self-contained win-x64 package under artifacts/package/<timestamp>/AGProfileHub with a ZIP and SHA-256 sidecar. scripts/Test-Package.ps1 performs actual Windows .lnk launch, duplicate launch and stop checks against disposable profiles. The September 7 package remains a historical build; use the newest verified package for this continuation.
 
-## Capability evidence
+Verified current package: artifacts/package/20260908-115335/AGProfileHub-win-x64.zip. Packaged shortcut lifecycle passed 5/5 (artifacts/package-smoke/70ebc158a2bd434a89d10c0e121071bf). The self-contained GUI started with the isolated test profile, displayed wrapped details, and opened the executable picker. The GUI doctor displayed Desktop 2.12.2 and manual-verification-required. Six integration log events were checked for allowed fields and fixed sanitized command templates; no unexpected fields/templates were found.
 
-Antigravity Desktop 2.12.2 was found at the current user's LocalAppData installation path. A disposable probe observed two independent process homes, Electron user-data directories, backend process trees, and two visible first-run windows. Stopping one probe instance left the other alive. No Google credentials were read or copied. Authenticated A/B persistence and OAuth callback routing remain manual verification requirements.
+## Manual acceptance
+MANUAL_TEST_PLAN.md remains authoritative. Verify two real Google identities, restart persistence, concurrent operation, settings behavior and OAuth callback routing. The user confirmed these checks have not yet been done. No credential inspection or automation of authentication was performed.
 
-## Installation and use
-
-`scripts/Publish.ps1` is the package entry point. The verified self-contained package is at `artifacts/package/20260907-213404/AGProfileHub/`; the archive is `artifacts/package/20260907-213404/AGProfileHub-win-x64.zip` and its SHA-256 sidecar is next to the archive. Read the sidecar to verify the archive after copying it.
-
-Package smoke checks passed: `cli/AGProfileHub.Cli.exe help` returned the command list, and `hub/AGProfileHub.Gui.exe` opened a window and exited cleanly after the smoke run. Use `README.md` and `MANUAL_TEST_PLAN.md` for profile creation and authenticated verification.
-
-## Security model
-
-Hub manages local paths and processes. It does not store, inspect, export, copy, or proxy Google passwords, tokens, cookies, browser sessions, or authorization headers. Profile isolation is a same-Windows-user path/process arrangement and is not a security boundary. See `SECURITY.md`.
-
-## Testing
-
-On September 7, 2026, `scripts/Build.ps1 -Test` built the four-project solution with zero warnings/errors and passed 12/12 automated Core/process checks. `scripts/Test-CliConcurrency.py` passed 12 checks covering concurrent profile creation, camelCase JSON, workspace metadata, config rejection, UUID stability, and data preservation. `scripts/Test-Integration.ps1` passed 6 real-process checks covering CLI survival after exit, duplicate launch, two independent roots, restart/stop isolation, and data preservation. Packaged CLI help and GUI startup smoke also passed for the final package listed above. Automated tests do not perform Google login; `MANUAL_TEST_PLAN.md` is the authority for authenticated identity separation.
-
-## Known limitations and roadmap
-
-OAuth callback routing, Credential Manager/DPAPI behavior, settings persistence after real login, and Desktop workspace forwarding require manual or future capability work. The current workspace metadata command intentionally does not claim to forward a workspace into the Antigravity Desktop window. Standalone CLI/headless identity, shortcuts, tray integration, and Agent Safe Git worktrees remain later phases.
+## Limits
+Compatibility is pinned to locally observed Desktop 2.12.2. Shared OS OAuth registration and credential facilities are not proved isolated. Synthetic home changes tool configuration lookup. Workspace forwarding is unsupported; workspace association stores metadata only. Tray, standalone CLI/headless identity and Git worktree orchestration remain deferred. See SECURITY.md for path-isolation boundaries.

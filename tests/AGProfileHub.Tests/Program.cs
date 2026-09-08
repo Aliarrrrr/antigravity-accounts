@@ -14,6 +14,10 @@ var tests = new (string Name, Func<Task> Run)[]
     ("future runtime schema is rejected", TestRuntimeSchemaAsync),
     ("concurrent restarts remain serialized", TestConcurrentRestartAsync),
     ("malformed configured executable is a configuration error", TestMalformedExecutableAsync),
+    ("unknown versions cannot create launch directories", TestUnknownVersionAsync),
+    ("executable changes clear prior authentication attestation", TestExecutableChangeAsync),
+    ("reused PID never receives close or focus", TestReusedPidAsync),
+    ("shortcut binds UUID and quoted data root without overwriting", TestShortcutAsync),
 };
 
 var failures = new List<string>();
@@ -146,6 +150,75 @@ static async Task TestMalformedExecutableAsync()
 }
 
 static string Escape(string value) => value.Replace("\\", "\\\\", StringComparison.Ordinal);
+static Task TestUnknownVersionAsync()
+{
+    using var fixture = new Fixture();
+    var id = Guid.NewGuid();
+    var driver = new AntigravityDriver(fixture.Paths, fixture.Repository);
+    Throws<HubException>(() => driver.BuildLaunchPlan(new AntigravityInstallation(fixture.Executable, "99.0.0", false, "Unverified version"), id));
+    True(!Directory.Exists(fixture.Paths.ProfileRoot(id)), "unsupported version must not mutate profile data");
+    return Task.CompletedTask;
+}
+
+static async Task TestExecutableChangeAsync()
+{
+    using var fixture = new Fixture();
+    await fixture.Repository.WriteSettingsAsync(new HubSettings
+    {
+        AntigravityExecutablePath = fixture.Executable,
+        AuthIsolationAttestedUtc = DateTimeOffset.UtcNow,
+        AuthIsolationAttestedVersion = "2.12.2"
+    });
+    var same = await fixture.Hub.ConfigureExecutableAsync(fixture.Executable);
+    True(same.AuthIsolationAttestedUtc is not null);
+    var replacement = Path.Combine(fixture.Root, "replacement.exe");
+    File.WriteAllBytes(replacement, []);
+    var changed = await fixture.Hub.ConfigureExecutableAsync(replacement);
+    True(changed.AuthIsolationAttestedUtc is null && changed.AuthIsolationAttestedVersion is null);
+}
+
+static async Task TestReusedPidAsync()
+{
+    using var fixture = new Fixture();
+    var profile = await fixture.Hub.CreateProfileAsync("A");
+    await fixture.Hub.LaunchAsync(profile.Id);
+    fixture.World.ReuseRootPid();
+    Equal(RuntimeState.Unknown, (await fixture.Hub.GetStatusAsync(profile.Id)).State);
+    await ThrowsAsync<ProcessOwnershipException>(() => fixture.Hub.StopAsync(profile.Id, force: true));
+    await ThrowsAsync<ProcessOwnershipException>(() => fixture.Hub.LaunchAsync(profile.Id));
+    Equal(0, fixture.World.CloseCalls + fixture.World.FocusCalls);
+    Equal(1, fixture.World.RootCount);
+}
+
+static async Task TestShortcutAsync()
+{
+    if (!OperatingSystem.IsWindows()) return;
+    using var fixture = new Fixture();
+    var profile = await fixture.Hub.CreateProfileAsync("测试 / A");
+    var directory = Path.Combine(fixture.Root, "桌面 with spaces");
+    Directory.CreateDirectory(directory);
+    var path = await fixture.Hub.CreateShortcutAsync(profile.Id, fixture.Executable, directory);
+    var shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell", true)!);
+    object? link = null;
+    try
+    {
+        link = ((dynamic)shell!).CreateShortcut(path);
+        Equal(fixture.Executable, (string)((dynamic)link).TargetPath);
+        Equal($"--data-root {DesktopShortcut.QuoteArgument(fixture.Paths.DataRoot)} launch {profile.Id:D}", (string)((dynamic)link).Arguments);
+        await fixture.Hub.RenameProfileAsync(profile.Id, "Renamed");
+        True(((string)((dynamic)link).Arguments).EndsWith(profile.Id.ToString("D")));
+    }
+    finally
+    {
+        if (link is not null) System.Runtime.InteropServices.Marshal.FinalReleaseComObject(link);
+        if (shell is not null) System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shell);
+    }
+    var bytes = File.ReadAllBytes(path);
+    await fixture.Hub.RenameProfileAsync(profile.Id, profile.Name);
+    await ThrowsAsync<HubException>(() => fixture.Hub.CreateShortcutAsync(profile.Id, fixture.Executable, directory));
+    True(bytes.SequenceEqual(File.ReadAllBytes(path)), "existing shortcut must be preserved");
+    Equal("\"D:\\data root\\\\\"", DesktopShortcut.QuoteArgument("D:\\data root\\"));
+}
 static void True(bool condition, string? message = null) { if (!condition) throw new InvalidOperationException(message ?? "Expected true."); }
 static void Equal<T>(T expected, T actual) { if (!EqualityComparer<T>.Default.Equals(expected, actual)) throw new InvalidOperationException($"Expected '{expected}', got '{actual}'."); }
 static void Throws<T>(Action action) where T : Exception { try { action(); } catch (T) { return; } throw new InvalidOperationException($"Expected {typeof(T).Name}."); }
@@ -228,6 +301,15 @@ sealed class FakeProcessWorld(HubPaths paths, string executable) : IProcessCatal
         }
     }
     public void AddClaim(Guid profileId, DateTimeOffset started) { lock (_gate) _items.Add(new ProcessSnapshot(_nextPid++, 0, started, executable, $"\"{executable}\" \"--user-data-dir={paths.UserData(profileId)}\"", 1)); }
+    public void ReuseRootPid()
+    {
+        lock (_gate)
+        {
+            var root = _items.Single(item => item.ParentProcessId == 0);
+            _items.Clear();
+            _items.Add(root with { StartTimeUtc = root.StartTimeUtc.AddMinutes(1), CommandLine = "unrelated process" });
+        }
+    }
     private bool Contains(ProcessSnapshot expected) => _items.Any(item => Same(item, expected));
     private static bool Same(ProcessSnapshot left, ProcessSnapshot right) => left.ProcessId == right.ProcessId && left.StartTimeUtc == right.StartTimeUtc && string.Equals(left.ExecutablePath, right.ExecutablePath, StringComparison.OrdinalIgnoreCase);
 }

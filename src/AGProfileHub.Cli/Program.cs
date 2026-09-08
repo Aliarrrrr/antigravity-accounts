@@ -155,6 +155,12 @@ internal static class CliApplication
                 var settings = await hub.ConfigureExecutableAsync(tail[0]).ConfigureAwait(false);
                 if (!json) Console.WriteLine($"Configured {settings.AntigravityExecutablePath}");
                 return settings;
+            case "shortcut":
+                var shortcutDirectory = TakeOption(tail, "--directory");
+                RequireCount(tail, 1, "shortcut <id> [--directory <path>]");
+                var shortcut = await hub.CreateShortcutAsync(ParseId(tail[0]), DesktopShortcut.FindCliExecutable(AppContext.BaseDirectory), shortcutDirectory).ConfigureAwait(false);
+                if (!json) Console.WriteLine($"Created shortcut: {shortcut}");
+                return new { shortcut };
             case "help":
                 if (json) return new { help = HelpText() };
                 PrintHelp();
@@ -270,6 +276,7 @@ internal static class CliApplication
           launch <id> [--workspace <path>] | launch-all
           stop <id> [--force] | stop-all [--force] | restart <id> [--force]
           open-data [id] | open-logs | configure-executable <path>
+          shortcut <id> [--directory <path>]
         Authentication is performed only by official Antigravity; account isolation requires manual verification.
         """;
 
