@@ -499,11 +499,16 @@ static async Task TestShortcutAsync()
     var directory = Path.Combine(fixture.Root, "桌面 with spaces");
     Directory.CreateDirectory(directory);
     var path = await fixture.Hub.CreateShortcutAsync(profile.Id, fixture.Executable, directory);
+    True(File.Exists(path) && Path.GetDirectoryName(path) == directory, "shortcut must be created in the Unicode destination");
+    // WScript.Shell cannot reopen a Unicode .lnk path on the English hosted runner.
+    // Inspect an exact copy at an ASCII path while retaining the original for no-overwrite checks.
+    var inspectionPath = Path.Combine(fixture.Root, "inspect.lnk");
+    File.Copy(path, inspectionPath);
     var shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell", true)!);
     object? link = null;
     try
     {
-        link = ((dynamic)shell!).CreateShortcut(path);
+        link = ((dynamic)shell!).CreateShortcut(inspectionPath);
         Equal(fixture.Executable, (string)((dynamic)link).TargetPath);
         Equal($"--data-root {DesktopShortcut.QuoteArgument(fixture.Paths.DataRoot)} launch {profile.Id:D}", (string)((dynamic)link).Arguments);
         await fixture.Hub.RenameProfileAsync(profile.Id, "Renamed");
