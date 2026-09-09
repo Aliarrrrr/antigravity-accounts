@@ -2,8 +2,8 @@
 
 ## 0.2.3 experimental — 2026-09-09
 
-- Retain the atomic no-overwrite shortcut move while retrying only transient Windows I/O failures where the temporary link still exists and the destination is still absent.
-- Include the underlying Windows error in shortcut failures to make environment-specific diagnostics actionable.
+- Replace the locale-sensitive `WScript.Shell` shortcut writer with the native Unicode `IShellLinkW`/`IPersistFile` interfaces, fixing non-ASCII Profile and destination paths on English Windows runners.
+- Retain the atomic no-overwrite move and include the underlying Windows error in shortcut failures.
 
 ## 0.2.2 experimental — 2026-09-09
 
