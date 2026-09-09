@@ -1,4 +1,4 @@
-# Project state — 2026-09-10
+# Project state — 2026-09-09
 
 ## Current phase
 
@@ -16,7 +16,7 @@ The root cause is the language server's fixed Windows Credential Manager target 
 - Refused silent attachment to an existing unregistered box. `iso-prepare --fresh` is now an explicit acknowledgement that the box has never been used to sign in.
 - Added direct-write inspection against actual numbered Sandboxie `OpenFilePath` settings. Doctor warns when expected Profile/workspace paths are absent.
 - Hardened the elevated write-through script: validate all inputs before clearing rules, verify writes, and restore prior rules on failure.
-- Included both Sandboxie setup scripts and the keyring report in packaging; package manifest is now 0.2.2 and records the tested external dependency.
+- Included both Sandboxie setup scripts and the keyring report in packaging; package manifest is now 0.2.3 and records the tested external dependency.
 - Replaced the final machine-specific Python write-through workaround with a single parameterized packaged PowerShell script. It removes stale indexed/bare rules for only the selected box, preserves configuration encoding, verifies the exact set, restarts the shared service only after explicit all-boxes-stopped confirmation, and rolls back on failure.
 
 ## Verification
@@ -27,7 +27,7 @@ The root cause is the language server's fixed Windows Credential Manager target 
 - Host shim safety check passed: direct invocation returned `shim_outside_isolation`; host entry metadata was unchanged before/after.
 - Live read-only reconciliation found both accepted A/B roots still running under their two recorded boxes with 11 processes each and unchanged root PIDs during the takeover work.
 - WPF visual smoke passed from source and from the self-contained package: both rows, compact isolation status, all new actions, enabled isolated `Launch all`, and the updated Doctor dialog rendered correctly.
-- The previous 0.2.0 and 0.2.1 packages are historical. A fresh self-contained 0.2.2 package must be used for daily operation.
+- The previous 0.2.0 through 0.2.2 packages are historical. A fresh self-contained 0.2.3 package must be used for daily operation.
 
 ## Current live readiness
 
@@ -46,4 +46,4 @@ Vendor workspace forwarding remains unsupported; association and direct-write va
 
 ## Working tree note
 
-The takeover builds on Work Buddy's completed changes. Machine-specific raw forensic helpers are excluded from the product repository; production source, tests, release scripts, installer definition and CI workflows are sealed in the 0.2.2 release commit.
+The takeover builds on Work Buddy's completed changes. Machine-specific raw forensic helpers are excluded from the product repository; production source, tests, release scripts, installer definition and CI workflows are sealed in the 0.2.3 release commit.

@@ -1,8 +1,8 @@
-# Delivery report — 2026-09-10
+# Delivery report — 2026-09-09
 
 ## Status
 
-Antigravity Profile Hub 0.2.2 is an experimental Windows multi-Profile manager for the exact tested combination of Antigravity Desktop 2.12.2 and Sandboxie Plus 1.18.2 / core 5.73.2. The core requirement—two official Desktop windows under one Windows user, concurrently retaining different Google accounts—passed manual acceptance after the fixed `gemini:antigravity` credential collision was isolated per box.
+Antigravity Profile Hub 0.2.3 is an experimental Windows multi-Profile manager for the exact tested combination of Antigravity Desktop 2.12.2 and Sandboxie Plus 1.18.2 / core 5.73.2. The core requirement—two official Desktop windows under one Windows user, concurrently retaining different Google accounts—passed manual acceptance after the fixed `gemini:antigravity` credential collision was isolated per box.
 
 Normal Core, CLI, WPF and desktop-shortcut lifecycle entry points now use the prepared box automatically. Unprepared Profiles retain the safe serial fallback.
 
@@ -26,7 +26,7 @@ Normal Core, CLI, WPF and desktop-shortcut lifecycle entry points now use the pr
 - Host shim safety: direct call returned `shim_outside_isolation`; shared entry metadata stayed present at 503 bytes before/after.
 - Live reconciliation during takeover: both accepted boxes retained 11 processes and their original root PIDs.
 - Source and packaged WPF visual smoke passed, including both Profile rows, isolation status/actions, `Launch all`, and Doctor capability output.
-- Packaged CLI help, 0.2.2 manifest, required scripts and SHA-256 sidecar were verified.
+- Packaged CLI help, 0.2.3 manifest, required scripts and SHA-256 sidecar were verified.
 
 Artifact: the newest `artifacts/package/<timestamp>/AGProfileHub-win-x64.zip` produced from this report. The repository `PROJECT_STATE.md` records the exact verified path and SHA-256.
 

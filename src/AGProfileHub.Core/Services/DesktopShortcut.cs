@@ -6,6 +6,8 @@ namespace AGProfileHub.Core;
 
 public static class DesktopShortcut
 {
+    private static readonly int[] MoveRetryDelaysMs = [25, 50, 100, 200, 400, 800];
+
     public static string FindCliExecutable(string baseDirectory)
     {
         var candidates = new[]
@@ -77,16 +79,33 @@ public static class DesktopShortcut
                     shell = null;
                 }
             }
-            File.Move(temporary, destination, overwrite: false);
+            MoveWithoutOverwrite(temporary, destination);
             return destination;
         }
         catch (IOException ex)
         {
-            throw new HubException("Shortcut could not be created; any existing link was preserved. Choose another directory or remove the old link yourself.", "shortcut_write_failed", ex);
+            throw new HubException($"Shortcut could not be created; any existing link was preserved. Windows reported: {ex.Message}", "shortcut_write_failed", ex);
         }
         finally
         {
             if (File.Exists(temporary)) File.Delete(temporary);
         }
+    }
+
+    private static void MoveWithoutOverwrite(string source, string destination)
+    {
+        foreach (var delayMs in MoveRetryDelaysMs)
+        {
+            try
+            {
+                File.Move(source, destination, overwrite: false);
+                return;
+            }
+            catch (IOException) when (File.Exists(source) && !File.Exists(destination))
+            {
+                Thread.Sleep(delayMs);
+            }
+        }
+        File.Move(source, destination, overwrite: false);
     }
 }

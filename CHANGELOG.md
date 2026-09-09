@@ -1,8 +1,13 @@
 # Changelog
 
-## 0.2.2 experimental — 2026-09-10
+## 0.2.3 experimental — 2026-09-09
 
-- Release the Windows Shell COM shortcut object before moving the temporary `.lnk`, fixing shortcut creation on GitHub-hosted Windows runners and other stricter file-locking environments.
+- Retain the atomic no-overwrite shortcut move while retrying only transient Windows I/O failures where the temporary link still exists and the destination is still absent.
+- Include the underlying Windows error in shortcut failures to make environment-specific diagnostics actionable.
+
+## 0.2.2 experimental — 2026-09-09
+
+- Release the Windows Shell COM shortcut object before moving the temporary `.lnk`, reducing its file-handle lifetime; hosted runners still exposed transient locks addressed in 0.2.3.
 - Ignore local Playwright CLI session artifacts so browser checks cannot dirty the source tree.
 
 ## 0.2.1 experimental — 2026-09-09
