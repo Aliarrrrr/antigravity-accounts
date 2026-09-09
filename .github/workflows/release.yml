@@ -55,4 +55,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create $env:GITHUB_REF_NAME (Get-ChildItem $env:RELEASE_ROOT -File | Where-Object { $_.Extension -in '.zip','.exe','.json' } | ForEach-Object FullName) --title "Antigravity Profile Hub $env:GITHUB_REF_NAME" --generate-notes
+        run: |
+          $assets = Get-ChildItem $env:RELEASE_ROOT -File | Where-Object { $_.Extension -in '.zip','.exe','.json' } | ForEach-Object FullName
+          $notes = "Experimental Windows x64 release. Validated only with Antigravity Desktop 2.12.2 and Sandboxie Plus 1.18.2 / core 5.73.2. Re-run acceptance after either dependency changes. Authentication remains in official Antigravity; this project does not import passwords, OAuth tokens, or cookies."
+          gh release create $env:GITHUB_REF_NAME $assets --title "Antigravity Profile Hub $env:GITHUB_REF_NAME (experimental)" --prerelease --latest=false --verify-tag --notes $notes --generate-notes
