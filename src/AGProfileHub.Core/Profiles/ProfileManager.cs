@@ -8,15 +8,28 @@ public sealed class ProfileManager(ConfigRepository repository, HubPaths paths)
     public async Task<ProfileRegistration> GetAsync(Guid id, CancellationToken cancellationToken = default) =>
         (await repository.ReadProfilesAsync(cancellationToken)).Profiles.SingleOrDefault(p => p.Id == id) ?? throw new ProfileNotFoundException(id);
 
-    public async Task<ProfileRegistration> CreateAsync(string name, string? workspacePath = null, CancellationToken cancellationToken = default)
+    public async Task<ProfileRegistration> CreateAsync(string name, string? workspacePath = null,
+        ProfileBackend backend = ProfileBackend.Direct, string? boxId = null, CancellationToken cancellationToken = default)
     {
         name = ValidateName(name);
         workspacePath = ValidateWorkspace(workspacePath);
+        var id = Guid.NewGuid();
+        if (backend == ProfileBackend.Sandboxie)
+        {
+            boxId = string.IsNullOrWhiteSpace(boxId) ? WindowsSandboxieRuntime.DefaultBoxId(id) : boxId.Trim();
+            WindowsSandboxieRuntime.ValidateBoxId(boxId);
+        }
+        else
+        {
+            boxId = null;
+        }
         var now = DateTimeOffset.UtcNow;
-        var profile = new ProfileRegistration(Guid.NewGuid(), name, workspacePath, now, now);
+        var profile = new ProfileRegistration(id, name, workspacePath, now, now, backend, boxId);
         paths.EnsureProfileLayout(profile.Id);
         return await repository.UpdateProfilesAsync(document =>
         {
+            if (backend == ProfileBackend.Sandboxie && document.Profiles.Any(p => string.Equals(p.BoxId, boxId, StringComparison.OrdinalIgnoreCase)))
+                throw new ConfigurationException($"Sandbox box '{boxId}' is already used by another profile.", "duplicate_box_id");
             var profiles = document.Profiles.ToList();
             profiles.Add(profile);
             return (document with { Profiles = profiles }, profile);

@@ -4,10 +4,29 @@ namespace AGProfileHub.Core;
 
 public static class SchemaVersions
 {
-    public const int Current = 1;
+    public const int Current = 2;
 }
 
-public sealed record ProfileRegistration(Guid Id, string Name, string? WorkspacePath, DateTimeOffset CreatedUtc, DateTimeOffset UpdatedUtc);
+/// <summary>
+/// How a profile is launched and isolated.
+/// Direct keeps the historical single-root serial gate.
+/// Sandboxie runs the official Desktop inside a dedicated box and claims an
+/// in-box credential entry so host token fall-through is blocked.
+/// </summary>
+public enum ProfileBackend
+{
+    Direct = 0,
+    Sandboxie = 1
+}
+
+public sealed record ProfileRegistration(
+    Guid Id,
+    string Name,
+    string? WorkspacePath,
+    DateTimeOffset CreatedUtc,
+    DateTimeOffset UpdatedUtc,
+    ProfileBackend Backend = ProfileBackend.Direct,
+    string? BoxId = null);
 
 public sealed record ProfilesDocument
 {
@@ -24,6 +43,7 @@ public sealed record HubSettings
     public int ProbeStrategyRevision { get; init; } = 1;
     public DateTimeOffset? AuthIsolationAttestedUtc { get; init; }
     public string? AuthIsolationAttestedVersion { get; init; }
+    public string? SandboxieHome { get; init; }
 }
 
 public enum RuntimeState { Stopped, Running, Unknown }
@@ -48,6 +68,8 @@ public sealed record LaunchBarrierRecord
     public string UserDataPath { get; init; } = string.Empty;
     public DateTimeOffset CreatedUtc { get; init; }
     public ProcessIdentity? Root { get; init; }
+    public ProfileBackend Backend { get; init; } = ProfileBackend.Direct;
+    public string? BoxId { get; init; }
 }
 
 public sealed record ProfileStatus(Guid ProfileId, string Name, RuntimeState State, ProcessIdentity? Root, string? Detail, string? WorkspacePath);
@@ -62,6 +84,16 @@ public sealed record DoctorReport(DateTimeOffset CheckedUtc, string DataRoot, st
 
 public sealed record LaunchPlan(string ExecutablePath, string Version, IReadOnlyList<string> Arguments,
     IReadOnlyDictionary<string, string> Environment, string SanitizedCommandTemplate);
+
+public sealed record KeyringShimMarker
+{
+    public int SchemaVersion { get; init; } = SchemaVersions.Current;
+    public Guid ProfileId { get; init; }
+    public string Target { get; init; } = string.Empty;
+    public DateTimeOffset ClaimedUtc { get; init; }
+    public int ExitCode { get; init; }
+    public int BlobSizeAfter { get; init; }
+}
 
 public sealed record ProcessSnapshot(int ProcessId, int ParentProcessId, DateTimeOffset StartTimeUtc,
     string ExecutablePath, string CommandLine, nint MainWindowHandle);
@@ -88,5 +120,6 @@ public sealed class LaunchStateUncertainException(string message, Exception? inn
 [JsonSerializable(typeof(LaunchResult))]
 [JsonSerializable(typeof(StopResult))]
 [JsonSerializable(typeof(DoctorReport))]
+[JsonSerializable(typeof(KeyringShimMarker))]
 [JsonSerializable(typeof(List<ProfileStatus>))]
 public partial class HubJsonContext : JsonSerializerContext;

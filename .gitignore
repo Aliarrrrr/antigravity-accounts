@@ -9,3 +9,7 @@ TestResults/
 .vs/
 capability-report.json
 Antigravity Profile Hub — Codex Master Prompt.md
+
+.dotnet-home/
+.nuget/
+

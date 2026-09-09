@@ -2,6 +2,8 @@ using AGProfileHub.Core;
 
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("agent envelope errors never imply readiness or expose secrets", AgentProbeTests.ClassifierAsync),
+    ("keyring primitives report size without reading the secret", TestKeyringPrimitivesAsync),
     ("profile CRUD preserves stable ID and data", TestProfileCrudAsync),
     ("concurrent creates retain every profile", TestConcurrentCreatesAsync),
     ("corrupt and future config are rejected without overwrite", TestInvalidConfigAsync),
@@ -19,7 +21,9 @@ var tests = new (string Name, Func<Task> Run)[]
     ("runtime write failure retains the launch barrier", TestRuntimeWriteFailureBarrierAsync),
     ("future launch barrier fails closed", TestFutureLaunchBarrierAsync),
     ("unregistered configured-executable root blocks launch", TestUnregisteredRootGateAsync),
+    ("unqualified configured-executable root blocks launch", TestUnqualifiedRootGateAsync),
     ("failed child termination leaves root running", TestFailedChildTerminationAsync),
+    ("force stop terminates descendants before root", TestForceStopOrderAsync),
     ("invalid creation time becomes unknown", TestInvalidCreationTimeAsync),
     ("future runtime schema is rejected", TestRuntimeSchemaAsync),
     ("concurrent restarts remain serialized", TestConcurrentRestartAsync),
@@ -28,6 +32,12 @@ var tests = new (string Name, Func<Task> Run)[]
     ("executable changes clear prior authentication attestation", TestExecutableChangeAsync),
     ("reused PID never receives close or focus", TestReusedPidAsync),
     ("shortcut binds UUID and quoted data root without overwriting", TestShortcutAsync),
+    ("schema v1 profiles remain Direct and load", TestSchemaV1MigrationAsync),
+    ("sandboxie create assigns unique box ids", TestSandboxieCreateBoxIdsAsync),
+    ("two sandboxie profiles can run concurrently", TestSandboxieConcurrentLaunchAsync),
+    ("launch-all starts multiple sandboxie profiles", TestLaunchAllSandboxieAsync),
+    ("launch-all still refuses multiple direct profiles", TestLaunchAllGateAsync),
+    ("sandboxie first launch runs credential-shim once", TestSandboxieKeyringShimOnceAsync),
 };
 
 var failures = new List<string>();
@@ -38,6 +48,33 @@ foreach (var test in tests)
 }
 Console.WriteLine($"{tests.Length - failures.Count}/{tests.Length} tests passed.");
 return failures.Count == 0 ? 0 : 1;
+
+static async Task TestKeyringPrimitivesAsync()
+{
+    var target = "AGProfileHub.Probe." + Guid.NewGuid().ToString("N");
+    True(AntigravityKeyring.IsProbeTarget(target), "probe prefix is recognised");
+    True(!AntigravityKeyring.IsProbeTarget("gemini:antigravity"), "vendor target is never treated as a probe");
+    try
+    {
+        True(!WindowsCredentialStore.GetInfo(target).Exists, "a fresh probe target must be absent");
+        True(WindowsCredentialStore.EnsurePlaceholder(target, "probe", System.Text.Encoding.UTF8.GetBytes("0123456789")), "first ensure creates the entry");
+        True(!WindowsCredentialStore.EnsurePlaceholder(target, "probe", System.Text.Encoding.UTF8.GetBytes("0123456789")), "second ensure is idempotent");
+        var info = WindowsCredentialStore.GetInfo(target);
+        True(info.Exists, "entry is visible after creation");
+        True(info.BlobSize == 10, "size is reported without exposing the blob");
+        WindowsCredentialStore.WritePlaceholder(target, "probe", System.Text.Encoding.UTF8.GetBytes("0123456789012345"));
+        True(WindowsCredentialStore.GetInfo(target).BlobSize == 16, "unconditional write overwrites");
+    }
+    finally
+    {
+        WindowsCredentialStore.Delete(target);
+    }
+    True(!WindowsCredentialStore.GetInfo(target).Exists, "probe entry is cleaned up");
+    var status = AntigravityKeyring.BuildStatus();
+    True(status.Target == "gemini:antigravity", "status targets the shared vendor entry");
+    True(status.Note.Length > 0, "status explains that the value is never read");
+    await Task.CompletedTask;
+}
 
 static async Task TestProfileCrudAsync()
 {
@@ -261,6 +298,16 @@ static async Task TestUnregisteredRootGateAsync()
     Equal(1, fixture.World.RootCount);
 }
 
+static async Task TestUnqualifiedRootGateAsync()
+{
+    using var fixture = new Fixture();
+    var profile = await fixture.Hub.CreateProfileAsync("A");
+    fixture.World.AddUnqualifiedRoot();
+    await ThrowsAsync<UnsupportedCapabilityException>(() => fixture.Hub.LaunchAsync(profile.Id));
+    Equal(0, fixture.World.LaunchCount);
+    Equal(1, fixture.World.RootCount);
+}
+
 static async Task TestFailedChildTerminationAsync()
 {
     using var fixture = new Fixture();
@@ -269,6 +316,20 @@ static async Task TestFailedChildTerminationAsync()
     fixture.World.FailChildTermination = true;
     await ThrowsAsync<ProcessOwnershipException>(() => fixture.Hub.StopAsync(profile.Id, force: true));
     Equal(1, fixture.World.RootCount);
+}
+
+static async Task TestForceStopOrderAsync()
+{
+    using var fixture = new Fixture();
+    var profile = await fixture.Hub.CreateProfileAsync("A");
+    await fixture.Hub.LaunchAsync(profile.Id);
+    var processTree = fixture.World.AddGrandchildToRunningTree();
+
+    var result = await fixture.Hub.StopAsync(profile.Id, force: true);
+
+    Equal(RuntimeState.Stopped, result.Status.State);
+    True(fixture.World.TerminationOrder.SequenceEqual([processTree.Grandchild, processTree.Child, processTree.Root]),
+        "force stop must terminate the deepest descendant first and the root last");
 }
 
 static async Task TestInvalidCreationTimeAsync()
@@ -379,6 +440,70 @@ static async Task TestShortcutAsync()
     True(bytes.SequenceEqual(File.ReadAllBytes(path)), "existing shortcut must be preserved");
     Equal("\"D:\\data root\\\\\"", DesktopShortcut.QuoteArgument("D:\\data root\\"));
 }
+
+static async Task TestSchemaV1MigrationAsync()
+{
+    using var fixture = new Fixture();
+    var id = Guid.NewGuid();
+    var created = DateTimeOffset.UtcNow.AddMinutes(-5);
+    var json = $$"""
+        {"schemaVersion":1,"profiles":[{"id":"{{id:D}}","name":"Legacy","workspacePath":null,"createdUtc":"{{created:O}}","updatedUtc":"{{created:O}}"}]}
+        """;
+    File.WriteAllText(fixture.Paths.ProfilesFile, json);
+    var profiles = await fixture.Hub.ListProfilesAsync();
+    Equal(1, profiles.Count);
+    Equal(ProfileBackend.Direct, profiles[0].Backend);
+    True(profiles[0].BoxId is null, "v1 profiles must not have a box id");
+}
+
+static async Task TestSandboxieCreateBoxIdsAsync()
+{
+    using var fixture = new Fixture();
+    var a = await fixture.Hub.CreateProfileAsync("A", backend: ProfileBackend.Sandboxie);
+    var b = await fixture.Hub.CreateProfileAsync("B", backend: ProfileBackend.Sandboxie);
+    Equal(ProfileBackend.Sandboxie, a.Backend);
+    True(!string.IsNullOrWhiteSpace(a.BoxId), "sandboxie profile gets a box id");
+    True(!string.Equals(a.BoxId, b.BoxId, StringComparison.OrdinalIgnoreCase), "box ids are unique");
+    Equal($"AGPH_{a.Id:N}", a.BoxId);
+    await ThrowsAsync<ConfigurationException>(() => fixture.Hub.CreateProfileAsync("C", backend: ProfileBackend.Sandboxie, boxId: a.BoxId));
+}
+
+static async Task TestSandboxieConcurrentLaunchAsync()
+{
+    using var fixture = new Fixture();
+    var a = await fixture.Hub.CreateProfileAsync("A", backend: ProfileBackend.Sandboxie);
+    var b = await fixture.Hub.CreateProfileAsync("B", backend: ProfileBackend.Sandboxie);
+    await fixture.Hub.LaunchAsync(a.Id);
+    await fixture.Hub.LaunchAsync(b.Id);
+    Equal(2, fixture.World.RootCount);
+    Equal(2, fixture.Sandbox.StartCalls);
+    Equal(2, fixture.Sandbox.ShimCalls);
+    Equal(RuntimeState.Running, (await fixture.Hub.GetStatusAsync(a.Id)).State);
+    Equal(RuntimeState.Running, (await fixture.Hub.GetStatusAsync(b.Id)).State);
+}
+
+static async Task TestLaunchAllSandboxieAsync()
+{
+    using var fixture = new Fixture();
+    await fixture.Hub.CreateProfileAsync("A", backend: ProfileBackend.Sandboxie);
+    await fixture.Hub.CreateProfileAsync("B", backend: ProfileBackend.Sandboxie);
+    var results = await fixture.Hub.LaunchAllAsync();
+    Equal(2, results.Count);
+    True(results.All(r => r.StartedNewProcess));
+    Equal(2, fixture.World.RootCount);
+}
+
+static async Task TestSandboxieKeyringShimOnceAsync()
+{
+    using var fixture = new Fixture();
+    var a = await fixture.Hub.CreateProfileAsync("A", backend: ProfileBackend.Sandboxie);
+    await fixture.Hub.LaunchAsync(a.Id);
+    Equal(1, fixture.Sandbox.ShimCalls);
+    await fixture.Hub.StopAsync(a.Id, force: true);
+    await fixture.Hub.LaunchAsync(a.Id);
+    Equal(1, fixture.Sandbox.ShimCalls);
+    True(File.Exists(fixture.Paths.KeyringMarkerFile(a.Id)), "marker is written after first claim");
+}
 static void True(bool condition, string? message = null) { if (!condition) throw new InvalidOperationException(message ?? "Expected true."); }
 static void Equal<T>(T expected, T actual) { if (!EqualityComparer<T>.Default.Equals(expected, actual)) throw new InvalidOperationException($"Expected '{expected}', got '{actual}'."); }
 static void Throws<T>(Action action) where T : Exception { try { action(); } catch (T) { return; } throw new InvalidOperationException($"Expected {typeof(T).Name}."); }
@@ -401,16 +526,22 @@ sealed class Fixture : IDisposable
         Profiles = new ProfileManager(Repository, Paths);
         Executable = Path.Combine(Root, "fake-antigravity.exe");
         File.WriteAllBytes(Executable, []);
+        FakeCli = Path.Combine(Root, "AGProfileHub.Cli.exe");
+        File.WriteAllBytes(FakeCli, [0x4D, 0x5A]);
         World = new FakeProcessWorld(Paths, Executable);
+        Sandbox = new FakeSandboxRuntime(World, Executable);
         Hub = HubBootstrap.CreateForTesting(Paths, Repository, Profiles, new FakeDriver(Paths, Executable), World, World, World,
+            sandbox: Sandbox, hubCliExecutable: FakeCli,
             launchVerificationAttempts: launchVerificationAttempts, launchVerificationDelay: launchVerificationDelay);
     }
     public string Root { get; }
     public string Executable { get; }
+    public string FakeCli { get; }
     public HubPaths Paths { get; }
     public ConfigRepository Repository { get; }
     public ProfileManager Profiles { get; }
     public FakeProcessWorld World { get; }
+    public FakeSandboxRuntime Sandbox { get; }
     public HubService Hub { get; }
     public void Dispose()
     {
@@ -434,6 +565,7 @@ sealed class FakeProcessWorld(HubPaths paths, string executable) : IProcessCatal
 {
     private readonly object _gate = new();
     private readonly List<ProcessSnapshot> _items = [];
+    private readonly List<int> _terminationOrder = [];
     private int _nextPid = 1000;
     public int LaunchCount { get; private set; }
     public int MaximumRootCount { get; private set; }
@@ -444,6 +576,7 @@ sealed class FakeProcessWorld(HubPaths paths, string executable) : IProcessCatal
     public bool HideSnapshots { get; set; }
     public Action? AfterStarted { get; set; }
     public int RootCount { get { lock (_gate) return _items.Count(item => item.ParentProcessId == 0); } }
+    public IReadOnlyList<int> TerminationOrder { get { lock (_gate) return _terminationOrder.ToList(); } }
     public Task<IReadOnlyList<ProcessSnapshot>> SnapshotAsync(string rootExecutablePath, CancellationToken cancellationToken = default) { lock (_gate) return Task.FromResult<IReadOnlyList<ProcessSnapshot>>(HideSnapshots ? [] : _items.ToList()); }
     public Task<LaunchedProcess> LaunchAsync(LaunchPlan plan, CancellationToken cancellationToken = default)
     {
@@ -465,6 +598,7 @@ sealed class FakeProcessWorld(HubPaths paths, string executable) : IProcessCatal
     {
         lock (_gate)
         {
+            _terminationOrder.Add(expected.ProcessId);
             if (FailChildTermination && expected.ParentProcessId != 0) return false;
             var index = _items.FindIndex(item => Same(item, expected));
             if (index < 0) return false;
@@ -473,6 +607,19 @@ sealed class FakeProcessWorld(HubPaths paths, string executable) : IProcessCatal
     }
     public void AddClaim(Guid profileId, DateTimeOffset started) { lock (_gate) _items.Add(new ProcessSnapshot(_nextPid++, 0, started, executable, $"\"{executable}\" \"--user-data-dir={paths.UserData(profileId)}\"", 1)); }
     public void AddUnregisteredRoot(string userDataPath) { lock (_gate) _items.Add(new ProcessSnapshot(_nextPid++, 0, DateTimeOffset.UtcNow, executable, $"\"{executable}\" \"--user-data-dir={userDataPath}\"", 1)); }
+    public void AddUnqualifiedRoot() { lock (_gate) _items.Add(new ProcessSnapshot(_nextPid++, 0, DateTimeOffset.UtcNow, executable, $"\"{executable}\"", 1)); }
+    public (int Root, int Child, int Grandchild) AddGrandchildToRunningTree()
+    {
+        lock (_gate)
+        {
+            var root = _items.Single(item => item.ParentProcessId == 0);
+            var child = _items.Single(item => item.ParentProcessId == root.ProcessId);
+            var grandchild = _nextPid++;
+            _items.Add(new ProcessSnapshot(grandchild, child.ProcessId, child.StartTimeUtc.AddMilliseconds(50), executable,
+                child.CommandLine + " --type=utility", 0));
+            return (root.ProcessId, child.ProcessId, grandchild);
+        }
+    }
     public ProcessLiveness ProbeLiveness(ProcessIdentity expected)
     {
         lock (_gate)
@@ -495,3 +642,88 @@ sealed class FakeProcessWorld(HubPaths paths, string executable) : IProcessCatal
     private bool Contains(ProcessSnapshot expected) => _items.Any(item => Same(item, expected));
     private static bool Same(ProcessSnapshot left, ProcessSnapshot right) => left.ProcessId == right.ProcessId && left.StartTimeUtc == right.StartTimeUtc && string.Equals(left.ExecutablePath, right.ExecutablePath, StringComparison.OrdinalIgnoreCase);
 }
+
+sealed class FakeSandboxRuntime(FakeProcessWorld world, string executable) : ISandboxRuntime
+{
+    private readonly object _gate = new();
+    private readonly Dictionary<string, HashSet<int>> _boxPids = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<string> _configuredBoxes = [];
+    public int EnsureBoxCalls { get; private set; }
+    public int ShimCalls { get; private set; }
+    public int StartCalls { get; private set; }
+    public int TerminateCalls { get; private set; }
+    public bool IsAvailable => true;
+    public string RuntimeDescription => "FakeSandboxRuntime";
+    public IReadOnlyList<string> ConfiguredBoxes { get { lock (_gate) return _configuredBoxes.ToList(); } }
+
+    public Task EnsureBoxAsync(string boxId, IReadOnlyList<string> openFilePaths, CancellationToken cancellationToken = default)
+    {
+        WindowsSandboxieRuntime.ValidateBoxId(boxId);
+        lock (_gate)
+        {
+            EnsureBoxCalls++;
+            if (!_configuredBoxes.Contains(boxId, StringComparer.OrdinalIgnoreCase)) _configuredBoxes.Add(boxId);
+            if (!_boxPids.ContainsKey(boxId)) _boxPids[boxId] = [];
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task RunInBoxAsync(string boxId, string executablePath, IReadOnlyList<string> arguments,
+        IReadOnlyDictionary<string, string> environment, TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        if (arguments.Count >= 1 && arguments[0].Equals("credential-shim", StringComparison.OrdinalIgnoreCase))
+        {
+            lock (_gate) ShimCalls++;
+            return Task.CompletedTask;
+        }
+        throw new HubException($"Unexpected in-box command: {string.Join(' ', arguments)}", "sandbox_command_failed");
+    }
+
+    public Task StartInBoxAsync(string boxId, string executablePath, IReadOnlyList<string> arguments,
+        IReadOnlyDictionary<string, string> environment, CancellationToken cancellationToken = default)
+    {
+        var plan = new LaunchPlan(executablePath, "2.12.2", arguments, environment, "sandbox fake launch");
+        var started = world.LaunchAsync(plan, cancellationToken).GetAwaiter().GetResult();
+        lock (_gate)
+        {
+            StartCalls++;
+            if (!_boxPids.TryGetValue(boxId, out var set))
+            {
+                set = [];
+                _boxPids[boxId] = set;
+            }
+            set.Add(started.ProcessId);
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyList<SandboxRuntimeSnapshot>> ListProcessesAsync(string boxId, CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            if (!_boxPids.TryGetValue(boxId, out var set)) return Task.FromResult<IReadOnlyList<SandboxRuntimeSnapshot>>([]);
+            return Task.FromResult<IReadOnlyList<SandboxRuntimeSnapshot>>(
+                set.Select(pid => new SandboxRuntimeSnapshot(pid, "Antigravity", executable)).ToList());
+        }
+    }
+
+    public Task TerminateBoxAsync(string boxId, CancellationToken cancellationToken = default)
+    {
+        List<int> pids;
+        lock (_gate)
+        {
+            TerminateCalls++;
+            if (!_boxPids.TryGetValue(boxId, out var set)) return Task.CompletedTask;
+            pids = set.ToList();
+            set.Clear();
+        }
+        var snapshots = world.SnapshotAsync(executable, cancellationToken).GetAwaiter().GetResult();
+        foreach (var pid in pids)
+        {
+            var snap = snapshots.FirstOrDefault(s => s.ProcessId == pid);
+            if (snap is not null) world.Terminate(snap);
+        }
+        return Task.CompletedTask;
+    }
+}
+

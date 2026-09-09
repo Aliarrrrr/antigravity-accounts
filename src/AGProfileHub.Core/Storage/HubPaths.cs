@@ -35,6 +35,7 @@ public sealed class HubPaths
     public string ProfileLock(Guid id) => Path.Combine(LocksRoot, $"profile-{id:D}.lock");
     public string RuntimeLock(Guid id) => Path.Combine(LocksRoot, $"runtime-{id:D}.lock");
     public string LogsLock => Path.Combine(LocksRoot, "logs.lock");
+    public string KeyringMarkerFile(Guid id) => Path.Combine(ProfileRoot(id), "keyring-shim-marker.json");
 
     public void EnsureBaseLayout()
     {

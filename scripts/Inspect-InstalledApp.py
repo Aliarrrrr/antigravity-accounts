@@ -34,6 +34,8 @@ with archive.open('rb') as stream:
     main = read_member('dist/main.js')
     paths = read_member('dist/paths.js')
     backend = read_member('dist/languageServer.js')
+    utils = read_member('dist/utils.js')
+    loading_overlay = read_member('dist/loadingOverlay.js')
     print(json.dumps({
         'schemaVersion': 1,
         'package': {key: package.get(key) for key in ['name', 'version', 'description']},
@@ -43,8 +45,11 @@ with archive.open('rb') as stream:
             'electronUserDataStorage': "getPath('userData')" in paths,
             'sharedProtocolRegistration': 'setAsDefaultProtocolClient(PROTOCOL)' in main,
             'backendNamedAppData': "'--app_data_dir'" in backend,
+            'windowHasDidFailLoadHandler': "'did-fail-load'" in utils,
+            'windowHasLoadRetry': '.reload(' in utils or 'loadURL(' in utils[utils.find("'did-fail-load'"):],
+            'windowHasLoadingOverlay': 'LoadingOverlay' in utils or 'loadingOverlay' in utils,
         },
-        'sourceHashes': {name: hashlib.sha256(content.encode()).hexdigest() for name, content in [('dist/main.js', main), ('dist/paths.js', paths), ('dist/languageServer.js', backend)]},
-        'authIsolation': 'manual-verification-required',
-        'note': 'Static inspection does not prove runtime/auth isolation.'
+        'sourceHashes': {name: hashlib.sha256(content.encode()).hexdigest() for name, content in [('dist/main.js', main), ('dist/paths.js', paths), ('dist/languageServer.js', backend), ('dist/utils.js', utils), ('dist/loadingOverlay.js', loading_overlay)]},
+        'authIsolation': 'not-evaluated-by-static-inspection',
+        'note': 'Static inspection does not evaluate authentication. Manual A/B verification found concurrent Google-account isolation incompatible on Desktop 2.12.2.'
     }, indent=2))

@@ -27,10 +27,27 @@ internal static class CliApplication
                 return 0;
             }
 
+            // Runs before any Hub bootstrap: this verb is executed inside
+            // isolation scopes (for example a sandbox) where the Hub data root
+            // must not be created or touched.
+            if (parsed.Command[0].Equals("credential-shim", StringComparison.OrdinalIgnoreCase))
+            {
+                var tail = parsed.Command.Skip(1).ToList();
+                var forceFresh = tail.Any(arg => arg.Equals("--force", StringComparison.OrdinalIgnoreCase))
+                    && tail.Any(arg => arg.Equals("--fresh", StringComparison.OrdinalIgnoreCase));
+                var shim = AntigravityKeyring.EnsureIsolation(forceFresh);
+                if (parsed.Json) WriteJson(shim);
+                else Console.WriteLine($"credential-shim: target={shim.Target} existedBefore={shim.ExistedBefore} created={shim.Created} blobSize={shim.BlobSize}");
+                // Exit codes let a caller that cannot capture sandboxed stdout
+                // still tell "claimed now" from "already owned".
+                return shim.Created ? 11 : 0;
+            }
+
             var hub = HubBootstrap.CreateDefault(parsed.DataRoot);
             var result = await ExecuteAsync(hub, parsed.Command, parsed.Json).ConfigureAwait(false);
             if (parsed.Json && result is not null)
                 WriteJson(result);
+            if (result is AgentProbeResult probe && probe.Outcome != "success") return 1;
             return 0;
         }
         catch (UsageException ex) { return WriteError(ex.Message, "usage_error", 2, jsonRequested); }
@@ -48,11 +65,32 @@ internal static class CliApplication
         var tail = command.Skip(1).ToList();
         switch (verb)
         {
+            case "agent-probe":
+                RequireNoArguments(tail, "agent-probe");
+                using (var cancellation = new CancellationTokenSource())
+                {
+                    ConsoleCancelEventHandler handler = (_, e) => { e.Cancel = true; cancellation.Cancel(); };
+                    Console.CancelKeyPress += handler;
+                    try
+                    {
+                        var installation = await hub.DoctorAsync().ConfigureAwait(false);
+                        if (installation.ExecutablePath is null) throw new HubException("Antigravity was not found.", "executable_not_found");
+                        var probe = await AgentRuntimeProbe.RunAsync(installation.ExecutablePath, hub.DataRoot, cancellation.Token).ConfigureAwait(false);
+                        if (!json) Console.WriteLine($"Agent probe: {probe.Outcome}; owned listener={probe.ListenerOwned}; CLI exit={probe.ExitCode}");
+                        return probe;
+                    }
+                    finally { Console.CancelKeyPress -= handler; }
+                }
             case "doctor":
                 RequireNoArguments(tail, "doctor");
                 var report = await hub.DoctorAsync().ConfigureAwait(false);
                 if (!json) PrintDoctor(report);
                 return report;
+            case "credential-status":
+                RequireNoArguments(tail, "credential-status");
+                var keyring = AntigravityKeyring.BuildStatus();
+                if (!json) PrintCredentialStatus(keyring);
+                return keyring;
             case "list":
                 RequireNoArguments(tail, "list");
                 var profiles = await hub.ListProfilesAsync().ConfigureAwait(false);
@@ -60,9 +98,15 @@ internal static class CliApplication
                 return profiles;
             case "create":
                 var createWorkspace = TakeOption(tail, "--workspace");
-                RequireCount(tail, 1, "create <name> [--workspace <path>]");
-                var created = await hub.CreateProfileAsync(tail[0], createWorkspace).ConfigureAwait(false);
-                if (!json) Console.WriteLine($"Created {created.Name} ({created.Id:D})");
+                var createBackend = TakeOption(tail, "--backend") ?? "direct";
+                RequireCount(tail, 1, "create <name> [--workspace <path>] [--backend direct|sandboxie]");
+                var backend = ParseBackend(createBackend);
+                var created = await hub.CreateProfileAsync(tail[0], createWorkspace, backend).ConfigureAwait(false);
+                if (!json)
+                {
+                    Console.WriteLine($"Created {created.Name} ({created.Id:D}) backend={created.Backend}" +
+                        (created.BoxId is null ? "" : $" box={created.BoxId}"));
+                }
                 return created;
             case "rename":
                 RequireCount(tail, 2, "rename <id> <new-name>");
@@ -259,6 +303,16 @@ internal static class CliApplication
         foreach (var warning in report.Warnings) Console.WriteLine($"WARNING: {warning}");
     }
 
+    private static void PrintCredentialStatus(KeyringStatusResult status)
+    {
+        Console.WriteLine($"Shared token target    : {status.Target}");
+        Console.WriteLine($"Present for this user  : {status.HostEntryExists}");
+        Console.WriteLine($"Entry size (bytes)     : {status.HostEntryBlobSize}");
+        Console.WriteLine($"Owned by vendor client : {status.HostEntryBelongsToVendor}");
+        Console.WriteLine($"Guidance               : {status.IsolationGuidance}");
+        Console.WriteLine($"Note                   : {status.Note}");
+    }
+
     private static void PrintHelp()
     {
         Console.WriteLine(HelpText());
@@ -269,13 +323,17 @@ internal static class CliApplication
         Global options: --data-root <absolute-path>  --json
         Commands:
           doctor | list | status [id] | show <id>
-          create <name> [--workspace <path>] | rename <id> <new-name>
+          agent-probe                          Mocked LS/official CLI diagnostic; no real account
+          credential-status                    Report the shared token entry (existence/size only)
+          credential-shim                      Claim an isolation-scoped entry; run inside a sandbox
+          create <name> [--workspace <path>] [--backend direct|sandboxie] | rename <id> <new-name>
           workspace <id> <path|none> | remove <id>
           launch <id> [--workspace <path>] | launch-all
           stop <id> [--force] | stop-all [--force] | restart <id> [--force]
           open-data [id] | open-logs | configure-executable <path>
           shortcut <id> [--directory <path>]
-        Authentication is performed only by official Antigravity. Concurrent Google-account profiles are unsupported on Desktop 2.12.2 after failed manual isolation validation.
+        Authentication is performed only by official Antigravity.
+        Direct profiles stay single-root (shared gemini:antigravity). Concurrent Google accounts require Sandboxie profiles; dual-account acceptance is still manual.
         """;
 
     private static void EnsureStopped(StopResult result)
@@ -283,6 +341,14 @@ internal static class CliApplication
         if (result.Status.State == RuntimeState.Stopped) return;
         throw new HubException(result.Status.Detail ?? "The profile is still running.", "graceful_close_pending");
     }
+
+    private static ProfileBackend ParseBackend(string value) =>
+        value.Trim().ToLowerInvariant() switch
+        {
+            "direct" => ProfileBackend.Direct,
+            "sandboxie" or "sandbox" => ProfileBackend.Sandboxie,
+            _ => throw new UsageException("Unknown backend. Use --backend direct|sandboxie.")
+        };
 
     private sealed class UsageException(string message) : Exception(message);
 }

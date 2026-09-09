@@ -2,17 +2,22 @@ namespace AGProfileHub.Core;
 
 public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repository, ProfileManager profiles,
     IAntigravityDriver driver, IProcessCatalog catalog, IProcessLauncher launcher, IProcessController controller, IHubLogger logger,
+    ISandboxRuntime? sandbox = null, string? hubCliExecutable = null,
     int launchVerificationAttempts = 20, TimeSpan? launchVerificationDelay = null)
 {
     private static readonly TimeSpan GracefulTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan ForcedTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan ShimTimeout = TimeSpan.FromSeconds(20);
+    private readonly ProcessOwnershipResolver ownership = new(paths, repository);
+    private readonly ISandboxRuntime _sandbox = sandbox ?? new UnsupportedSandboxRuntime();
+    private readonly string? _hubCliExecutable = hubCliExecutable;
 
     public async Task<ProfileStatus> GetStatusAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var profile = await profiles.GetAsync(id, cancellationToken).ConfigureAwait(false);
         var installation = await driver.DiscoverAsync(cancellationToken).ConfigureAwait(false);
         var snapshots = await catalog.SnapshotAsync(installation.ExecutablePath, cancellationToken).ConfigureAwait(false);
-        var status = await ResolveAsync(profile, installation, snapshots, cancellationToken).ConfigureAwait(false);
+        var status = await ownership.ResolveAsync(profile, installation, snapshots, cancellationToken).ConfigureAwait(false);
         return await ApplyLocalBarrierAsync(profile, status, cancellationToken).ConfigureAwait(false);
     }
 
@@ -25,7 +30,7 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
         var result = new List<ProfileStatus>(registrations.Count);
         foreach (var profile in registrations)
         {
-            var status = await ResolveAsync(profile, installation, snapshots, cancellationToken).ConfigureAwait(false);
+            var status = await ownership.ResolveAsync(profile, installation, snapshots, cancellationToken).ConfigureAwait(false);
             result.Add(await ApplyLocalBarrierAsync(profile, status, cancellationToken).ConfigureAwait(false));
         }
         return result;
@@ -45,18 +50,40 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
         var plan = driver.BuildLaunchPlan(installation, id);
         await ReconcileLaunchBarrierAsync(installation, cancellationToken).ConfigureAwait(false);
         var snapshots = await catalog.SnapshotAsync(installation.ExecutablePath, cancellationToken).ConfigureAwait(false);
-        var status = await ResolveAsync(profile, installation, snapshots, cancellationToken).ConfigureAwait(false);
+        var status = await ownership.ResolveAsync(profile, installation, snapshots, cancellationToken).ConfigureAwait(false);
         if (status.State == RuntimeState.Running)
         {
-            var existing = status.Root is null ? null : snapshots.FirstOrDefault(snapshot => SnapshotMatches(snapshot, status.Root));
+            var existing = status.Root is null ? null : snapshots.FirstOrDefault(snapshot => ownership.SnapshotMatches(snapshot, status.Root));
             if (existing is not null) controller.TryFocus(existing);
             return new LaunchResult(status with { Detail = "Already running; attempted to focus the existing window." }, false);
         }
         if (status.State == RuntimeState.Unknown)
             throw new ProcessOwnershipException(status.Detail ?? "Process ownership is unknown.");
 
-        if (snapshots.Any(snapshot => LooksLikeAnyRoot(snapshot, installation.ExecutablePath, snapshots)))
-            throw new UnsupportedCapabilityException("Another Antigravity root process is running. Manual validation found Google account isolation fails when profiles run concurrently on Desktop 2.12.2. Stop the other instance before launching this profile.");
+        if (profile.Backend == ProfileBackend.Direct)
+        {
+            // Direct backend cannot isolate the shared Windows credential entry.
+            // Keep the historical fail-closed single-root gate.
+            if (ownership.HasAnyRoot(installation.ExecutablePath, snapshots))
+                throw new UnsupportedCapabilityException("Another Antigravity root process is running. Manual validation found Google account isolation fails when profiles run concurrently on Desktop 2.12.2 with the Direct backend. Stop the other instance, or use a Sandboxie profile.");
+        }
+        else if (profile.Backend == ProfileBackend.Sandboxie)
+        {
+            var boxId = profile.BoxId ?? throw new ConfigurationException("Sandboxie profile is missing a box id.", "missing_box_id");
+            // A sandbox profile is exclusive to this profile's managed user-data
+            // path. Other boxes (and other profiles) may run concurrently.
+            var expectedUserData = paths.UserData(id);
+            var sameProfileRoots = snapshots.Where(snapshot =>
+                ownership.PathEquals(snapshot.ExecutablePath, installation.ExecutablePath) &&
+                ownership.PathEquals(CommandLineIdentity.TryGetUserDataPath(snapshot.CommandLine), expectedUserData) &&
+                ownership.IsRootCandidate(snapshot, installation.ExecutablePath, expectedUserData, snapshots)).ToList();
+            if (sameProfileRoots.Count > 0)
+                throw new UnsupportedCapabilityException($"Sandbox '{boxId}' already has a running Antigravity instance for this profile. Stop it before launching again.");
+        }
+        else
+        {
+            throw new UnsupportedCapabilityException($"Unsupported profile backend: {profile.Backend}.");
+        }
 
         cancellationToken.ThrowIfCancellationRequested();
         var barrier = new LaunchBarrierRecord
@@ -66,27 +93,17 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
             OriginDataRoot = paths.DataRoot,
             ExecutablePath = Path.GetFullPath(installation.ExecutablePath),
             UserDataPath = Path.GetFullPath(paths.UserData(id)),
-            CreatedUtc = DateTimeOffset.UtcNow
+            CreatedUtc = DateTimeOffset.UtcNow,
+            Backend = profile.Backend,
+            BoxId = profile.BoxId
         };
         await repository.WriteLaunchBarrierAsync(barrier, CancellationToken.None).ConfigureAwait(false);
 
         try
         {
-            var started = await launcher.LaunchAsync(plan, CancellationToken.None).ConfigureAwait(false);
-            var expected = new ProcessIdentity(started.ProcessId, started.StartTimeUtc,
-                installation.ExecutablePath, paths.UserData(id));
-            barrier = barrier with { Root = expected };
-            await repository.WriteLaunchBarrierAsync(barrier, CancellationToken.None).ConfigureAwait(false);
-            var verified = await FindLaunchedProcessAsync(installation.ExecutablePath, expected, CancellationToken.None).ConfigureAwait(false);
-            if (verified is null)
-                throw new LaunchStateUncertainException("Antigravity started but its process identity is not yet visible. The global launch barrier was retained and all new launches remain blocked.");
-
-            await repository.WriteRuntimeAsync(new RuntimeRecord { ProfileId = id, Root = expected, UpdatedUtc = DateTimeOffset.UtcNow }, CancellationToken.None).ConfigureAwait(false);
-            repository.DeleteLaunchBarrier();
-            await SafeLogAsync(new HubLogEvent(DateTimeOffset.UtcNow, "launch", id, installation.Version,
-                plan.SanitizedCommandTemplate, started.ProcessId, "started", null), CancellationToken.None).ConfigureAwait(false);
-            return new LaunchResult(new ProfileStatus(id, profile.Name, RuntimeState.Running, expected,
-                "Started and verified.", profile.WorkspacePath), true);
+            if (profile.Backend == ProfileBackend.Sandboxie)
+                return await LaunchSandboxieCoreAsync(id, profile, installation, plan, cancellationToken).ConfigureAwait(false);
+            return await LaunchDirectCoreAsync(id, profile, installation, plan, cancellationToken).ConfigureAwait(false);
         }
         catch (LaunchNotStartedException ex)
         {
@@ -107,6 +124,139 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
         }
     }
 
+    private async Task<LaunchResult> LaunchDirectCoreAsync(Guid id, ProfileRegistration profile,
+        AntigravityInstallation installation, LaunchPlan plan, CancellationToken cancellationToken)
+    {
+        var started = await launcher.LaunchAsync(plan, CancellationToken.None).ConfigureAwait(false);
+        var expected = new ProcessIdentity(started.ProcessId, started.StartTimeUtc,
+            installation.ExecutablePath, paths.UserData(id));
+        var barrier = new LaunchBarrierRecord
+        {
+            AttemptId = Guid.NewGuid(),
+            ProfileId = id,
+            OriginDataRoot = paths.DataRoot,
+            ExecutablePath = Path.GetFullPath(installation.ExecutablePath),
+            UserDataPath = Path.GetFullPath(paths.UserData(id)),
+            CreatedUtc = DateTimeOffset.UtcNow,
+            Root = expected,
+            Backend = ProfileBackend.Direct
+        };
+        await repository.WriteLaunchBarrierAsync(barrier, CancellationToken.None).ConfigureAwait(false);
+        var verified = await FindLaunchedProcessAsync(installation.ExecutablePath, expected, CancellationToken.None).ConfigureAwait(false);
+        if (verified is null)
+            throw new LaunchStateUncertainException("Antigravity started but its process identity is not yet visible. The global launch barrier was retained and all new launches remain blocked.");
+
+        await repository.WriteRuntimeAsync(new RuntimeRecord { ProfileId = id, Root = expected, UpdatedUtc = DateTimeOffset.UtcNow }, CancellationToken.None).ConfigureAwait(false);
+        repository.DeleteLaunchBarrier();
+        await SafeLogAsync(new HubLogEvent(DateTimeOffset.UtcNow, "launch", id, installation.Version,
+            plan.SanitizedCommandTemplate, started.ProcessId, "started", null), CancellationToken.None).ConfigureAwait(false);
+        return new LaunchResult(new ProfileStatus(id, profile.Name, RuntimeState.Running, expected,
+            "Started and verified.", profile.WorkspacePath), true);
+    }
+
+    private async Task<LaunchResult> LaunchSandboxieCoreAsync(Guid id, ProfileRegistration profile,
+        AntigravityInstallation installation, LaunchPlan plan, CancellationToken cancellationToken)
+    {
+        var boxId = profile.BoxId!;
+        if (!_sandbox.IsAvailable)
+            throw new UnsupportedCapabilityException(_sandbox.RuntimeDescription);
+
+        paths.EnsureProfileLayout(id);
+        var openPaths = new List<string>
+        {
+            paths.Home(id), paths.Roaming(id), paths.Local(id), paths.Temp(id), paths.UserData(id),
+            Path.GetDirectoryName(installation.ExecutablePath) ?? installation.ExecutablePath
+        };
+        await _sandbox.EnsureBoxAsync(boxId, openPaths, cancellationToken).ConfigureAwait(false);
+
+        // Claim an in-box gemini:antigravity entry on first launch only.
+        // forceFresh is safe only before any successful sign-in in this box.
+        var marker = await repository.ReadKeyringMarkerAsync(id, CancellationToken.None).ConfigureAwait(false);
+        if (marker is null)
+            await ClaimKeyringInBoxAsync(id, boxId, plan, cancellationToken).ConfigureAwait(false);
+
+        await _sandbox.StartInBoxAsync(boxId, installation.ExecutablePath, plan.Arguments, plan.Environment, cancellationToken).ConfigureAwait(false);
+
+        var expectedUserData = Path.GetFullPath(paths.UserData(id));
+        var identity = await DiscoverSandboxieRootAsync(installation.ExecutablePath, expectedUserData, cancellationToken).ConfigureAwait(false)
+            ?? throw new LaunchStateUncertainException("Sandboxie accepted the start request but no Antigravity root process became visible. The launch barrier was retained.");
+
+        var barrier = new LaunchBarrierRecord
+        {
+            AttemptId = Guid.NewGuid(),
+            ProfileId = id,
+            OriginDataRoot = paths.DataRoot,
+            ExecutablePath = Path.GetFullPath(installation.ExecutablePath),
+            UserDataPath = expectedUserData,
+            CreatedUtc = DateTimeOffset.UtcNow,
+            Root = identity,
+            Backend = ProfileBackend.Sandboxie,
+            BoxId = boxId
+        };
+        await repository.WriteLaunchBarrierAsync(barrier, CancellationToken.None).ConfigureAwait(false);
+        await repository.WriteRuntimeAsync(new RuntimeRecord { ProfileId = id, Root = identity, UpdatedUtc = DateTimeOffset.UtcNow }, CancellationToken.None).ConfigureAwait(false);
+        repository.DeleteLaunchBarrier();
+        await SafeLogAsync(new HubLogEvent(DateTimeOffset.UtcNow, "launch", id, installation.Version,
+            $"sandbox:{boxId} {plan.SanitizedCommandTemplate}", identity.ProcessId, "started", null), CancellationToken.None).ConfigureAwait(false);
+        return new LaunchResult(new ProfileStatus(id, profile.Name, RuntimeState.Running, identity,
+            $"Started in sandbox '{boxId}' and verified the vendor root process.", profile.WorkspacePath), true);
+    }
+
+    private async Task ClaimKeyringInBoxAsync(Guid id, string boxId, LaunchPlan plan, CancellationToken cancellationToken)
+    {
+        var cli = _hubCliExecutable ?? Environment.ProcessPath
+            ?? throw new HubException("The Hub CLI path is unknown; cannot run credential-shim inside the sandbox.", "cli_path_unknown");
+        if (!File.Exists(cli))
+            throw new HubException("The Hub CLI path does not exist; cannot run credential-shim inside the sandbox.", "cli_path_unknown");
+
+        // Run the Hub's own credential-shim inside the box so the write lands in
+        // the sandbox credential store, not on the host.
+        var environment = new Dictionary<string, string>(plan.Environment, StringComparer.OrdinalIgnoreCase);
+        // Exit 11 = newly claimed, 0 = already owned. Other codes are failures.
+        try
+        {
+            await _sandbox.RunInBoxAsync(boxId, cli, ["credential-shim", "--force", "--fresh"], environment, ShimTimeout, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (HubException ex) when (ex.Code == "sandbox_command_failed")
+        {
+            // Re-run is not possible without capturing the exit code. Treat as failure.
+            throw new HubException("credential-shim failed inside the sandbox. The profile was not launched.", "keyring_shim_failed", ex);
+        }
+
+        // Placeholder size is deliberately not a valid token; record only size.
+        var after = AntigravityKeyring.DescribeLocalEntry();
+        var marker = new KeyringShimMarker
+        {
+            ProfileId = id,
+            Target = AntigravityKeyring.Target,
+            ClaimedUtc = DateTimeOffset.UtcNow,
+            ExitCode = 11,
+            BlobSizeAfter = after.BlobSize
+        };
+        await repository.WriteKeyringMarkerAsync(marker, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    private async Task<ProcessIdentity?> DiscoverSandboxieRootAsync(string executablePath, string userDataPath, CancellationToken cancellationToken)
+    {
+        var attempts = Math.Max(1, launchVerificationAttempts);
+        var delay = launchVerificationDelay ?? TimeSpan.FromMilliseconds(250);
+        for (var attempt = 0; attempt < attempts; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var snapshots = await catalog.SnapshotAsync(executablePath, cancellationToken).ConfigureAwait(false);
+            var roots = snapshots.Where(snapshot =>
+                ownership.PathEquals(snapshot.ExecutablePath, executablePath) &&
+                ownership.PathEquals(CommandLineIdentity.TryGetUserDataPath(snapshot.CommandLine), userDataPath) &&
+                ownership.IsRootCandidate(snapshot, executablePath, userDataPath, snapshots)).ToList();
+            if (roots.Count == 1) return ownership.ToIdentity(roots[0], userDataPath);
+            if (roots.Count > 1)
+                throw new ProcessOwnershipException("Multiple Antigravity root processes claim this sandboxed profile.");
+            if (attempt + 1 < attempts) await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+        }
+        return null;
+    }
+
     public async Task<StopResult> StopAsync(Guid id, bool force = false, CancellationToken cancellationToken = default)
     {
         await using var launchHeld = await repository.LockLaunchAsync(cancellationToken).ConfigureAwait(false);
@@ -119,13 +269,13 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
         var profile = await profiles.GetAsync(id, cancellationToken).ConfigureAwait(false);
         var installation = await driver.DiscoverAsync(cancellationToken).ConfigureAwait(false);
         var snapshots = await catalog.SnapshotAsync(installation.ExecutablePath, cancellationToken).ConfigureAwait(false);
-        var status = await ResolveAsync(profile, installation, snapshots, cancellationToken).ConfigureAwait(false);
+        var status = await ownership.ResolveAsync(profile, installation, snapshots, cancellationToken).ConfigureAwait(false);
         if (status.State == RuntimeState.Stopped) return new StopResult(status, false, true);
         if (status.State == RuntimeState.Unknown || status.Root is null)
             throw new ProcessOwnershipException(status.Detail ?? "Process ownership is unknown.");
 
-        var rootSnapshot = snapshots.FirstOrDefault(snapshot => SnapshotMatches(snapshot, status.Root) &&
-            IsRootCandidate(snapshot, installation.ExecutablePath, status.Root.UserDataPath, snapshots));
+        var rootSnapshot = snapshots.FirstOrDefault(snapshot => ownership.SnapshotMatches(snapshot, status.Root) &&
+            ownership.IsRootCandidate(snapshot, installation.ExecutablePath, status.Root.UserDataPath, snapshots));
         if (rootSnapshot is null)
             throw new ProcessOwnershipException("The running root process could not be revalidated before close.");
 
@@ -146,28 +296,41 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
         }
 
         snapshots = await catalog.SnapshotAsync(installation.ExecutablePath, cancellationToken).ConfigureAwait(false);
-        var verified = await ResolveAsync(profile, installation, snapshots, cancellationToken).ConfigureAwait(false);
-        if (verified.State != RuntimeState.Running || verified.Root is null || !SameIdentity(verified.Root, status.Root))
+        var verified = await ownership.ResolveAsync(profile, installation, snapshots, cancellationToken).ConfigureAwait(false);
+        if (verified.State != RuntimeState.Running || verified.Root is null || !ownership.SameIdentity(verified.Root, status.Root))
             throw new ProcessOwnershipException("Process identity changed before force stop; no process was terminated.");
 
-        var descendants = DescendantsOf(verified.Root, snapshots)
-            .OrderByDescending(item => Depth(item, snapshots)).ToList();
+        if (profile.Backend == ProfileBackend.Sandboxie && !string.IsNullOrWhiteSpace(profile.BoxId))
+        {
+            // Prefer box-scoped terminate; never use a global terminate_all.
+            await _sandbox.TerminateBoxAsync(profile.BoxId, cancellationToken).ConfigureAwait(false);
+            var exited = await controller.WaitForExitAsync(verified.Root.ProcessId, ForcedTimeout, cancellationToken).ConfigureAwait(false);
+            if (!exited)
+                throw new HubException("Sandbox terminate completed but the vendor root process did not exit.", "stop_failed");
+            await repository.DeleteRuntimeAsync(id, cancellationToken).ConfigureAwait(false);
+            var final = verified with { State = RuntimeState.Stopped, Root = null, Detail = $"Force stopped sandbox '{profile.BoxId}'." };
+            await SafeLogAsync(new HubLogEvent(DateTimeOffset.UtcNow, "stop", id, installation.Version, null,
+                verified.Root.ProcessId, "forced", null), cancellationToken).ConfigureAwait(false);
+            return new StopResult(final, true, false);
+        }
+
+        var descendants = ownership.GetDescendantsDeepestFirst(verified.Root, snapshots);
         var failedChildren = descendants.Where(descendant => !controller.Terminate(descendant)).ToList();
         if (failedChildren.Count > 0)
             throw new ProcessOwnershipException($"Could not verify termination of {failedChildren.Count} owned child process(es); root was left running.");
 
-        var verifiedRoot = snapshots.SingleOrDefault(item => SnapshotMatches(item, verified.Root) &&
-            IsRootCandidate(item, installation.ExecutablePath, verified.Root.UserDataPath, snapshots));
+        var verifiedRoot = snapshots.SingleOrDefault(item => ownership.SnapshotMatches(item, verified.Root) &&
+            ownership.IsRootCandidate(item, installation.ExecutablePath, verified.Root.UserDataPath, snapshots));
         if (verifiedRoot is null || !controller.Terminate(verifiedRoot))
             throw new ProcessOwnershipException("Root identity could not be revalidated at termination time.");
-        var exited = await controller.WaitForExitAsync(verified.Root.ProcessId, ForcedTimeout, cancellationToken).ConfigureAwait(false);
-        if (!exited) throw new HubException("Verified process did not exit after force stop.", "stop_failed");
+        var forceExited = await controller.WaitForExitAsync(verified.Root.ProcessId, ForcedTimeout, cancellationToken).ConfigureAwait(false);
+        if (!forceExited) throw new HubException("Verified process did not exit after force stop.", "stop_failed");
 
         await repository.DeleteRuntimeAsync(id, cancellationToken).ConfigureAwait(false);
-        var final = verified with { State = RuntimeState.Stopped, Root = null, Detail = "Force stopped after ownership revalidation." };
+        var directFinal = verified with { State = RuntimeState.Stopped, Root = null, Detail = "Force stopped after ownership revalidation." };
         await SafeLogAsync(new HubLogEvent(DateTimeOffset.UtcNow, "stop", id, installation.Version, null,
             verified.Root.ProcessId, "forced", null), cancellationToken).ConfigureAwait(false);
-        return new StopResult(final, true, false);
+        return new StopResult(directFinal, true, false);
     }
 
     public async Task<LaunchResult> RestartAsync(Guid id, bool force = false, CancellationToken cancellationToken = default)
@@ -191,7 +354,7 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
     {
         var profile = await profiles.GetAsync(id, cancellationToken).ConfigureAwait(false);
         var snapshots = await catalog.SnapshotAsync(installation.ExecutablePath, cancellationToken).ConfigureAwait(false);
-        return await ResolveAsync(profile, installation, snapshots, cancellationToken).ConfigureAwait(false);
+        return await ownership.ResolveAsync(profile, installation, snapshots, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task ReconcileLaunchBarrierAsync(AntigravityInstallation installation, CancellationToken cancellationToken)
@@ -208,16 +371,16 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
 
         var visible = barrier.Root is null
             ? snapshots.Where(snapshot => snapshot.StartTimeUtc != DateTimeOffset.MinValue &&
-                LooksLikeRoot(snapshot, barrier.ExecutablePath, barrier.UserDataPath, snapshots)).ToList()
-            : snapshots.Where(snapshot => SnapshotMatches(snapshot, barrier.Root) &&
-                IsRootCandidate(snapshot, barrier.ExecutablePath, barrier.UserDataPath, snapshots)).ToList();
+                ownership.LooksLikeRoot(snapshot, barrier.ExecutablePath, barrier.UserDataPath, snapshots)).ToList()
+            : snapshots.Where(snapshot => ownership.SnapshotMatches(snapshot, barrier.Root) &&
+                ownership.IsRootCandidate(snapshot, barrier.ExecutablePath, barrier.UserDataPath, snapshots)).ToList();
 
         if (visible.Count == 1)
         {
-            if (PathEquals(barrier.OriginDataRoot, paths.DataRoot) && PathEquals(barrier.ExecutablePath, installation.ExecutablePath))
+            if (ownership.PathEquals(barrier.OriginDataRoot, paths.DataRoot) && ownership.PathEquals(barrier.ExecutablePath, installation.ExecutablePath))
             {
                 await profiles.GetAsync(barrier.ProfileId, cancellationToken).ConfigureAwait(false);
-                var identity = ToIdentity(visible[0], barrier.UserDataPath);
+                var identity = ownership.ToIdentity(visible[0], barrier.UserDataPath);
                 await repository.WriteRuntimeAsync(new RuntimeRecord
                 {
                     ProfileId = barrier.ProfileId,
@@ -242,7 +405,7 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
     private async Task<ProfileStatus> ApplyLocalBarrierAsync(ProfileRegistration profile, ProfileStatus status, CancellationToken cancellationToken)
     {
         var barrier = await repository.ReadLaunchBarrierAsync(cancellationToken).ConfigureAwait(false);
-        if (barrier is null || barrier.ProfileId != profile.Id || !PathEquals(barrier.OriginDataRoot, paths.DataRoot)) return status;
+        if (barrier is null || barrier.ProfileId != profile.Id || !ownership.PathEquals(barrier.OriginDataRoot, paths.DataRoot)) return status;
         if (status.State == RuntimeState.Running)
             return status with { Detail = status.Detail + " A retained launch barrier will be reconciled before the next launch." };
         return status with
@@ -251,63 +414,6 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
             Root = barrier.Root,
             Detail = "A previous launch is pending or could not be conclusively verified. New launches are blocked until reconciliation."
         };
-    }
-
-    private async Task<ProfileStatus> ResolveAsync(ProfileRegistration profile, AntigravityInstallation installation,
-        IReadOnlyList<ProcessSnapshot> snapshots, CancellationToken cancellationToken)
-    {
-        var expectedUserData = paths.UserData(profile.Id);
-        var claims = snapshots.Where(snapshot => PathEquals(snapshot.ExecutablePath, installation.ExecutablePath) &&
-            PathEquals(CommandLineIdentity.TryGetUserDataPath(snapshot.CommandLine), expectedUserData)).ToList();
-        var rootShapedClaims = claims.Where(snapshot => LooksLikeRoot(snapshot, installation.ExecutablePath, expectedUserData, snapshots)).ToList();
-        var unverifiable = rootShapedClaims.Any(snapshot => snapshot.StartTimeUtc == DateTimeOffset.MinValue);
-        var roots = rootShapedClaims.Where(snapshot => snapshot.StartTimeUtc != DateTimeOffset.MinValue).ToList();
-        if (unverifiable) return NewStatus(profile, RuntimeState.Unknown, null, "A process claims this profile but its creation time could not be verified.");
-        if (roots.Count > 1) return NewStatus(profile, RuntimeState.Unknown, null, "Multiple root processes claim this profile path.");
-        if (roots.Count == 1)
-        {
-            var root = ToIdentity(roots[0], expectedUserData);
-            return NewStatus(profile, RuntimeState.Running, root, "Owned root process verified from live state.");
-        }
-
-        var runtime = await repository.ReadRuntimeAsync(profile.Id, cancellationToken).ConfigureAwait(false);
-        if (runtime is not null)
-        {
-            var samePid = snapshots.FirstOrDefault(snapshot => snapshot.ProcessId == runtime.Root.ProcessId);
-            if (samePid is not null && !SnapshotMatches(samePid, runtime.Root))
-                return NewStatus(profile, RuntimeState.Unknown, null, "The recorded PID exists with a different creation time, executable, or profile argument.");
-        }
-        return NewStatus(profile, RuntimeState.Stopped, null, "No owned root process is running.");
-    }
-
-    private static bool IsRootCandidate(ProcessSnapshot snapshot, string executablePath, string userDataPath,
-        IReadOnlyList<ProcessSnapshot> snapshots)
-    {
-        if (!LooksLikeRoot(snapshot, executablePath, userDataPath, snapshots) || snapshot.StartTimeUtc == DateTimeOffset.MinValue) return false;
-        return true;
-    }
-
-    private static bool LooksLikeRoot(ProcessSnapshot snapshot, string executablePath, string userDataPath,
-        IReadOnlyList<ProcessSnapshot> snapshots)
-    {
-        if (!PathEquals(snapshot.ExecutablePath, executablePath)) return false;
-        var args = CommandLineIdentity.Split(snapshot.CommandLine);
-        if (args.Skip(1).Any(argument => argument.Equals("--type", StringComparison.OrdinalIgnoreCase) ||
-            argument.StartsWith("--type=", StringComparison.OrdinalIgnoreCase))) return false;
-        return !snapshots.Any(parent => parent.ProcessId == snapshot.ParentProcessId &&
-            parent.ProcessId != snapshot.ProcessId && PathEquals(parent.ExecutablePath, executablePath) &&
-            PathEquals(CommandLineIdentity.TryGetUserDataPath(parent.CommandLine), userDataPath));
-    }
-
-    private static bool LooksLikeAnyRoot(ProcessSnapshot snapshot, string executablePath,
-        IReadOnlyList<ProcessSnapshot> snapshots)
-    {
-        if (!PathEquals(snapshot.ExecutablePath, executablePath)) return false;
-        var args = CommandLineIdentity.Split(snapshot.CommandLine);
-        if (args.Skip(1).Any(argument => argument.Equals("--type", StringComparison.OrdinalIgnoreCase) ||
-            argument.StartsWith("--type=", StringComparison.OrdinalIgnoreCase))) return false;
-        return !snapshots.Any(parent => parent.ProcessId == snapshot.ParentProcessId &&
-            parent.ProcessId != snapshot.ProcessId && PathEquals(parent.ExecutablePath, executablePath));
     }
 
     private async Task<ProcessSnapshot?> FindLaunchedProcessAsync(string executablePath, ProcessIdentity expected,
@@ -319,63 +425,11 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
         {
             var snapshots = await catalog.SnapshotAsync(executablePath, cancellationToken).ConfigureAwait(false);
             var verified = snapshots.FirstOrDefault(snapshot => snapshot.ProcessId == expected.ProcessId &&
-                IsRootCandidate(snapshot, executablePath, expected.UserDataPath, snapshots) && SnapshotMatches(snapshot, expected));
+                ownership.IsRootCandidate(snapshot, executablePath, expected.UserDataPath, snapshots) && ownership.SnapshotMatches(snapshot, expected));
             if (verified is not null) return verified;
             if (attempt + 1 < attempts) await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
         }
         return null;
-    }
-
-    private static ProfileStatus NewStatus(ProfileRegistration profile, RuntimeState state, ProcessIdentity? root, string detail) =>
-        new(profile.Id, profile.Name, state, root,
-            profile.WorkspacePath is not null && !Directory.Exists(profile.WorkspacePath) ? detail + " Workspace is missing." : detail,
-            profile.WorkspacePath);
-
-    private static ProcessIdentity ToIdentity(ProcessSnapshot snapshot, string userData) =>
-        new(snapshot.ProcessId, snapshot.StartTimeUtc, Path.GetFullPath(snapshot.ExecutablePath), Path.GetFullPath(userData));
-
-    private static bool SnapshotMatches(ProcessSnapshot snapshot, ProcessIdentity identity) =>
-        snapshot.ProcessId == identity.ProcessId && snapshot.StartTimeUtc != DateTimeOffset.MinValue &&
-        Near(snapshot.StartTimeUtc, identity.StartTimeUtc) && PathEquals(snapshot.ExecutablePath, identity.ExecutablePath) &&
-        PathEquals(CommandLineIdentity.TryGetUserDataPath(snapshot.CommandLine), identity.UserDataPath);
-
-    private static bool SameIdentity(ProcessIdentity left, ProcessIdentity right) =>
-        left.ProcessId == right.ProcessId && left.StartTimeUtc != DateTimeOffset.MinValue &&
-        Near(left.StartTimeUtc, right.StartTimeUtc) && PathEquals(left.ExecutablePath, right.ExecutablePath) &&
-        PathEquals(left.UserDataPath, right.UserDataPath);
-
-    private static bool Near(DateTimeOffset left, DateTimeOffset right) => Math.Abs((left - right).TotalSeconds) < 1;
-
-    private static bool PathEquals(string? left, string? right)
-    {
-        if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right)) return false;
-        try { return string.Equals(Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar), Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase); }
-        catch { return false; }
-    }
-
-    private static IReadOnlyList<ProcessSnapshot> DescendantsOf(ProcessIdentity root, IReadOnlyList<ProcessSnapshot> snapshots)
-    {
-        var selected = new List<ProcessSnapshot>();
-        var parents = new Dictionary<int, DateTimeOffset> { [root.ProcessId] = root.StartTimeUtc };
-        bool added;
-        do
-        {
-            added = false;
-            foreach (var item in snapshots.Where(item => parents.TryGetValue(item.ParentProcessId, out var parentStarted) &&
-                item.ProcessId != root.ProcessId && item.StartTimeUtc != DateTimeOffset.MinValue && item.StartTimeUtc >= parentStarted.AddSeconds(-1)))
-            {
-                if (selected.Any(existing => existing.ProcessId == item.ProcessId)) continue;
-                selected.Add(item); parents[item.ProcessId] = item.StartTimeUtc; added = true;
-            }
-        } while (added);
-        return selected;
-    }
-
-    private static int Depth(ProcessSnapshot item, IReadOnlyList<ProcessSnapshot> snapshots)
-    {
-        var depth = 0; var parent = item.ParentProcessId; var visited = new HashSet<int>();
-        while (parent != 0 && visited.Add(parent)) { depth++; parent = snapshots.FirstOrDefault(candidate => candidate.ProcessId == parent)?.ParentProcessId ?? 0; }
-        return depth;
     }
 
     private async Task SafeLogAsync(HubLogEvent entry, CancellationToken cancellationToken)

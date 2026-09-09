@@ -20,7 +20,9 @@ public sealed class HubService
     public string GetProfileDataRoot(Guid id) => _paths.ProfileRoot(id);
     public Task<IReadOnlyList<ProfileRegistration>> ListProfilesAsync(CancellationToken cancellationToken = default) => _profiles.ListAsync(cancellationToken);
     public Task<ProfileRegistration> GetProfileAsync(Guid id, CancellationToken cancellationToken = default) => _profiles.GetAsync(id, cancellationToken);
-    public Task<ProfileRegistration> CreateProfileAsync(string name, string? workspacePath = null, CancellationToken cancellationToken = default) => _profiles.CreateAsync(name, workspacePath, cancellationToken);
+    public Task<ProfileRegistration> CreateProfileAsync(string name, string? workspacePath = null,
+        ProfileBackend backend = ProfileBackend.Direct, string? boxId = null, CancellationToken cancellationToken = default) =>
+        _profiles.CreateAsync(name, workspacePath, backend, boxId, cancellationToken);
     public Task<ProfileRegistration> RenameProfileAsync(Guid id, string name, CancellationToken cancellationToken = default) => _profiles.RenameAsync(id, name, cancellationToken);
     public Task<ProfileRegistration> SetWorkspaceAsync(Guid id, string? workspacePath, CancellationToken cancellationToken = default) => _profiles.SetWorkspaceAsync(id, workspacePath, cancellationToken);
     public Task<ProfileStatus> GetStatusAsync(Guid id, CancellationToken cancellationToken = default) => _processes.GetStatusAsync(id, cancellationToken);
@@ -29,9 +31,23 @@ public sealed class HubService
     public async Task<IReadOnlyList<LaunchResult>> LaunchAllAsync(CancellationToken cancellationToken = default)
     {
         var profiles = await _profiles.ListAsync(cancellationToken).ConfigureAwait(false);
-        if (profiles.Count > 1)
-            throw new UnsupportedCapabilityException("Launch all is disabled because this Desktop version cannot safely run Google-account profiles concurrently.");
-        return profiles.Count == 0 ? [] : [await _processes.LaunchAsync(profiles[0].Id, cancellationToken).ConfigureAwait(false)];
+        if (profiles.Count == 0) return [];
+
+        var directCount = profiles.Count(p => p.Backend == ProfileBackend.Direct);
+        if (directCount > 1)
+            throw new UnsupportedCapabilityException("Launch all cannot start multiple Direct profiles: Desktop 2.12.2 shares one Windows credential entry. Create Sandboxie profiles for concurrent Google accounts.");
+        if (directCount == 1 && profiles.Count > 1)
+            throw new UnsupportedCapabilityException("Launch all cannot mix a Direct profile with other profiles. Stop the Direct profile first, or convert the set to Sandboxie.");
+
+        // All Sandboxie (or a single Direct): sequential launches so each
+        // credential-shim and root verification completes before the next box.
+        var results = new List<LaunchResult>();
+        foreach (var profile in profiles)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            results.Add(await _processes.LaunchAsync(profile.Id, cancellationToken).ConfigureAwait(false));
+        }
+        return results;
     }
     public Task<StopResult> StopAsync(Guid id, bool force = false, CancellationToken cancellationToken = default) => _processes.StopAsync(id, force, cancellationToken);
     public async Task<string> CreateShortcutAsync(Guid id, string cliExecutable, string? directory = null, CancellationToken cancellationToken = default)
@@ -95,7 +111,8 @@ public sealed class HubService
         if (installation is not null && settings.AuthIsolationAttestedVersion is not null && !string.Equals(settings.AuthIsolationAttestedVersion, installation.Version, StringComparison.OrdinalIgnoreCase))
             warnings.Add("The saved manual authentication-isolation attestation belongs to another version and is invalid.");
         warnings.Add("Synthetic HOME isolates file paths but is not an OS security boundary and can hide existing Git/SSH/tool configuration.");
-        warnings.Add("Manual validation found that concurrent profiles can resolve to the same later-signed-in Google account. Do not use this Desktop version for separate Google accounts.");
+        warnings.Add("Direct profiles still share one Windows credential entry (gemini:antigravity). Concurrent Google accounts require Sandboxie profiles plus in-box credential-shim.");
+        warnings.Add("Sandboxie isolation is experimental and requires a local Sandboxie-Plus install. Dual-account acceptance still requires manual sign-in.");
         warnings.Add("The shared antigravity:// protocol registration can make OAuth callback routing ambiguous while multiple instances run.");
 
         var capabilities = new List<CapabilityFinding>
@@ -103,9 +120,12 @@ public sealed class HubService
             new("executableDiscovery", installation is null ? CapabilityState.Unknown : CapabilityState.Verified, installation is null ? "Executable was not found." : "Executable and file version were read without launching."),
             new("desktopRuntimeIsolation", installation?.IsKnownCompatible == true ? CapabilityState.Experimental : CapabilityState.Unknown, "Independent user-data and process-home roots were observed locally for Desktop 2.12.2."),
             new("visibleConcurrentWindows", CapabilityState.Unknown, "A prior disposable probe observed first-run windows; run the local probe again to attest the current installation."),
-            new("googleAccountIsolation", CapabilityState.Incompatible, "Manual validation showed concurrent profiles resolved to the Google account signed in later. Directory isolation does not isolate Google accounts on Desktop 2.12.2."),
+            new("directGoogleAccountIsolation", CapabilityState.Incompatible, "Direct backend shares gemini:antigravity. Concurrent Direct profiles must stay blocked."),
+            new("sandboxieBackend", CapabilityState.Experimental, "Opt-in Sandboxie backend plus in-box credential-shim blocks host token fall-through. Manual dual-account acceptance is still required."),
+            new("hostCredentialFallbackBlocked", CapabilityState.Experimental, "credential-shim claims gemini:antigravity inside each sandbox so reads do not fall through to the host entry."),
+            new("authenticatedConcurrentUse", CapabilityState.ManualVerificationRequired, "Complete two official sign-ins in separate Sandboxie profiles and verify concurrent non-interference."),
             new("workspaceForwarding", CapabilityState.Unsupported, "Workspace is metadata; no supported Desktop forwarding contract was found."),
-            new("credentialOperations", CapabilityState.Unsupported, "Hub never reads, copies, exports, or purges credentials.")
+            new("credentialOperations", CapabilityState.Unsupported, "Hub never reads, copies, exports, or purges credentials. credential-shim only writes a non-token placeholder inside an isolation scope.")
         };
         return new DoctorReport(DateTimeOffset.UtcNow, _paths.DataRoot, installation?.ExecutablePath, installation?.Version,
             installation is not null, installation?.IsKnownCompatible == true, capabilities, warnings, statuses);
@@ -132,17 +152,23 @@ public static class HubBootstrap
         var repository = new ConfigRepository(paths);
         var profiles = new ProfileManager(repository, paths);
         var driver = new AntigravityDriver(paths, repository);
+        ISandboxRuntime sandbox;
+        try { sandbox = new WindowsSandboxieRuntime(); }
+        catch { sandbox = new UnsupportedSandboxRuntime(); }
+        var hubCli = Environment.ProcessPath;
         var supervisor = new ProcessSupervisor(paths, repository, profiles, driver,
-            new WindowsProcessCatalog(), new WindowsProcessLauncher(), new WindowsProcessController(), new StructuredEventLogger(paths));
+            new WindowsProcessCatalog(), new WindowsProcessLauncher(), new WindowsProcessController(), new StructuredEventLogger(paths),
+            sandbox, hubCli);
         return new HubService(paths, repository, profiles, supervisor, driver);
     }
 
     public static HubService CreateForTesting(HubPaths paths, ConfigRepository repository, ProfileManager profiles,
         IAntigravityDriver driver, IProcessCatalog catalog, IProcessLauncher launcher, IProcessController controller, IHubLogger? logger = null,
+        ISandboxRuntime? sandbox = null, string? hubCliExecutable = null,
         int launchVerificationAttempts = 20, TimeSpan? launchVerificationDelay = null)
     {
         var supervisor = new ProcessSupervisor(paths, repository, profiles, driver, catalog, launcher, controller, logger ?? new NullHubLogger(),
-            launchVerificationAttempts, launchVerificationDelay);
+            sandbox, hubCliExecutable, launchVerificationAttempts, launchVerificationDelay);
         return new HubService(paths, repository, profiles, supervisor, driver);
     }
 }
