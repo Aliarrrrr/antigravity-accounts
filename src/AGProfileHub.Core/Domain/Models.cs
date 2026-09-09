@@ -50,7 +50,8 @@ public sealed record LaunchBarrierRecord
     public ProcessIdentity? Root { get; init; }
 }
 
-public sealed record ProfileStatus(Guid ProfileId, string Name, RuntimeState State, ProcessIdentity? Root, string? Detail, string? WorkspacePath);
+public sealed record ProfileStatus(Guid ProfileId, string Name, RuntimeState State, ProcessIdentity? Root, string? Detail, string? WorkspacePath,
+    string? IsolationBoxName = null, bool? WriteThroughReady = null);
 public sealed record LaunchResult(ProfileStatus Status, bool StartedNewProcess);
 public sealed record StopResult(ProfileStatus Status, bool WasRunning, bool Graceful);
 
@@ -89,4 +90,5 @@ public sealed class LaunchStateUncertainException(string message, Exception? inn
 [JsonSerializable(typeof(StopResult))]
 [JsonSerializable(typeof(DoctorReport))]
 [JsonSerializable(typeof(List<ProfileStatus>))]
+[JsonSerializable(typeof(IsolationStateDocument))]
 public partial class HubJsonContext : JsonSerializerContext;

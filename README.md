@@ -1,90 +1,78 @@
-# Antigravity Profile Hub — 实验版
+# Antigravity Profile Hub 0.2.1 — 实验版
 
-Windows 原生 Antigravity Desktop 多 Profile 串行管理器。管理任意数量的本地 Profile，让它们使用独立数据目录和进程主目录。Google 登录仍由官方 Antigravity 完成。
+Windows 原生 Antigravity Desktop 多 Profile 管理器。每个 Profile 使用独立的进程主目录、Electron user-data 和 Sandboxie 隔离盒；Google 登录仍完全由官方 Antigravity 完成。
 
-**兼容性范围：本机 Antigravity Desktop 2.12.2。** 已观察到独立进程树、状态目录和两个可见的首次运行窗口，但手工验收发现：两个 Profile 并发运行时都会显示后来登录的 Google 账号。**当前版本不支持同一 Windows 用户下的并发 Google 多账号。** Hub 会阻止第二个 Profile 启动；不能把目录隔离当作登录隔离。
+本机验收范围为 **Antigravity Desktop 2.12.2 + Sandboxie Plus 1.18.2 / core 5.73.2**。在这个组合上，两个官方 Desktop 窗口已实测可并发登录不同 Google 账号，并在重启其中一个实例后分别保持。直接目录隔离仍只能串行使用；并发账号必须为每个 Profile 准备独占隔离盒。
 
-## 运行便携包
+## 依赖与首次设置
 
-1. 解压 `AGProfileHub-win-x64.zip` 到普通本地目录，保留 `hub` 和 `cli` 的相对位置。
-2. 双击 `Start Hub.cmd`，或直接运行 `hub/AGProfileHub.Gui.exe`。
-3. 创建 `Pro A`、`Pro B`，分别启动并在官方应用中完成首次设置和登录；每次只运行一个 Profile。
-4. 不要在同一 Windows 用户下把两个已登录 Profile 同时用于不同 Google 账号。完整观察记录见 `MANUAL_TEST_PLAN.md`。
+- 已安装官方 Antigravity Desktop 2.12.2。
+- 已安装 Sandboxie Plus。Hub 不捆绑或静默安装它。
+- 新建 Sandboxie 盒、配置 `OpenFilePath` 需要一次管理员权限；之后的日常启动不需要提权。
 
-默认自包含 win-x64 包内含 .NET 运行时；无需单独安装 .NET。使用 Hub 前需要已经安装官方 Antigravity。Hub 不会导入原应用的登录信息。
+日常使用优先运行 `AGProfileHub-Setup-win-x64-<version>.exe`；也可以解压 `AGProfileHub-win-x64.zip`，保留 `hub`、`cli`、`scripts` 的相对位置并双击 `Start Hub.cmd`。安装器按当前用户安装到 `%LOCALAPPDATA%\Programs\AntigravityProfileHub`，卸载不会删除 `%LOCALAPPDATA%\AntigravityProfileHub` 中的 Profile 数据或 Sandboxie box。推荐流程：
+
+1. 创建 Profile，在 GUI 点击 `Prepare isolation`，或运行 `agprofile iso-prepare <profile-id>`。
+2. 如果盒子尚未创建，按错误提示在管理员 PowerShell 中运行包内 `scripts/New-IsolationBox.ps1`，随后用 `iso-prepare <id> --fresh` 确认该既有盒从未登录过并完成 keyring 声明。
+3. 首次配置直写前保存工作并停止所有 Sandboxie 盒。运行 `agprofile iso-writethrough <id>`，再从管理员 PowerShell 执行它输出的带 `-ConfirmAllBoxesStopped` 命令。
+4. 用 `agprofile iso-status` 或 GUI 的 Isolation 列确认 `boxExists=true`、`keyringClaimed=true`、`writeThroughReady=true`。
+5. 分别启动 A/B，在官方窗口完成登录；随后可使用 `launch-all` 并发启动。
+
+`--fresh` 会在该盒内写入一个明确无效的同名占位凭据，只能用于从未登录过的新盒。Core 会拒绝在宿主环境执行此写入，也不会读取、复制或输出真实 token。
 
 ## CLI
-
-便携包目录中可以使用 `agprofile.cmd`，或直接调用 `cli/AGProfileHub.Cli.exe`。以实际 `help` 输出为准。Profile 参数使用创建/列表结果中的 UUID，不使用显示名称。
 
 ```powershell
 .\agprofile.cmd doctor
 .\agprofile.cmd create "Pro A"
-.\agprofile.cmd create "Pro B"
 .\agprofile.cmd list
+.\agprofile.cmd iso-prepare <profile-id>
+.\agprofile.cmd iso-status
+.\agprofile.cmd iso-writethrough <profile-id>
 .\agprofile.cmd launch <profile-id>
-.\agprofile.cmd status
+.\agprofile.cmd launch-all
+.\agprofile.cmd status [profile-id]
 .\agprofile.cmd restart <profile-id>
 .\agprofile.cmd stop <profile-id>
-.\agprofile.cmd launch-all
 .\agprofile.cmd stop-all
 .\agprofile.cmd rename <profile-id> "新的显示名称"
-.\agprofile.cmd show <profile-id>
 .\agprofile.cmd workspace <profile-id> D:\Projects\Example
+.\agprofile.cmd shortcut <profile-id>
 .\agprofile.cmd open-data <profile-id>
 .\agprofile.cmd open-logs
 .\agprofile.cmd remove <profile-id>
-.\agprofile.cmd shortcut <profile-id>
 ```
 
-`--json` 输出 camelCase 机器可读 JSON；`--data-root <绝对路径>` 用于独立测试/便携数据目录。不同数据目录仍共享当前 Windows 用户的单实例启动门禁。**remove 只移除登记，保留 Profile 数据**。请先停止该 Profile。不要把 Profile 数据目录上传到 Git 或当普通诊断日志分享。
+`--json` 输出 camelCase JSON；`--data-root <绝对路径>` 可指定独立 Hub 数据根。Profile 参数使用 UUID，不使用显示名称。`remove` 只注销登记并保留 Profile 与沙箱数据；请先停止实例。隔离 Profile 的普通 `launch`、`stop`、`restart`、快捷方式、GUI 和批处理都会自动走同一 Core 隔离路由；未准备的 Profile 继续使用旧串行路径。
 
-GUI 的 `Workspace` 按钮只保存默认工作区元数据，`Data` 和顶部的 `Open logs` 按钮分别打开受管理的目录。当前版本没有声称把工作区参数转发进 Antigravity Desktop。
+`workspace` 目前保存默认工作区元数据，并把路径纳入直写检查；尚未发现 Desktop 2.12.2 支持启动时转发 workspace 的正式参数。不能把“已关联”理解为官方应用已自动打开该项目。
 
-`Shortcut` 按钮或 `shortcut <profile-id>` 在桌面创建绑定 UUID 的快捷方式；CLI 可用 `--directory <绝对目录>` 指定已有目录。快捷方式保存当前 Hub 数据目录，重命名 Profile 后仍可启动。已有同名链接不会被覆盖。移动便携包后请重新创建快捷方式。两个已登录 Profile 不能并发启动。GUI 的 `Settings` 用于选择官方 Antigravity 可执行文件。
+## 数据与安全边界
 
-GUI 也支持 `AGProfileHub.Gui.exe --data-root <绝对路径>`，可用于独立测试数据。操作期间会禁用按钮，状态详情显示异常或未完成的停止请求。
+默认数据根为 `%LOCALAPPDATA%/AntigravityProfileHub`：
 
-## 数据与限制
+- `config`：Profile 与普通设置；
+- `profiles/<uuid>`：独立 home、roaming、local、temp、user-data；
+- `isolation/state.json`：Profile 到盒子的原子、加锁映射，不包含 token；
+- `runtime`、`logs`：进程线索和白名单操作日志；
+- `global-launch-state`：所有 Hub 数据根共享的启动协调状态。
 
-默认 Hub 数据位于 `%LOCALAPPDATA%/AntigravityProfileHub`：config 保存普通配置，profiles 保存各实例数据，runtime 保存运行线索，logs 保存经过限制的 Hub 操作日志；`global-launch-state` 保存所有 Hub 数据目录共享的启动锁与临时启动屏障。工作区在用户自己的项目目录中，和 Profile 分开。
+隔离盒解决的是同一 Windows 用户下的应用状态与认证冲突，不是不同 Windows 用户之间的安全边界。Hub 不保存 Google 密码、不导出 OAuth token、不复制 Cookie、不代理认证、不修改服务端认证，也不清理原版 Antigravity 数据。盒内停止是按专属盒终止；操作前请保存工作。
 
-- 独立 `--user-data-dir` 加进程级主目录覆盖可隔离当前实测的目录与进程。Desktop 2 还使用主目录中的 `.gemini`，旧 IDE 的参数不能直接照搬。
-- 这是路径隔离，不是安全沙箱。仍是同一 Windows 用户；Credential Manager、DPAPI、系统 URL 协议和应用安装本体可能共享。
-- 当前手工验收已显示这些共享边界会破坏并发 Google 账号隔离：A/B 同时运行后均显示后来登录的账号。Hub 因此只允许一个受管 Antigravity 根实例运行；检测到同一已配置可执行文件的未登记根时也会阻止新启动。其他可执行文件副本不在实时根扫描的承诺范围内。
-- 独立主目录会改变 Git、SSH、插件和其他子工具寻找配置的位置。Hub 不自动复制密钥、Token 或浏览器数据。
-- 当前工作区关联只是元数据。没有验证 Desktop 2 接受工作区启动参数；不能据此声称启动时已切换官方应用内项目。
-- 应用更新后重新执行 doctor/probe；未知能力保持 unknown。完整账号验证步骤见 `MANUAL_TEST_PLAN.md`。
-- 独立 Antigravity CLI/headless、旧版 IDE、Git Worktree 编排和账号配额管理不属于本版已验证范围。
+应用或 Sandboxie 更新后必须重新运行 `doctor` 并复验。独立 Antigravity CLI/headless 身份、Tray、Git Worktree/Agent Safe Mode 和配额管理仍不在当前交付范围。
 
-## 从源码构建
+## 构建与验证
 
-需要 PowerShell 7、.NET 10 SDK（global.json 起点 10.0.400）和 Windows x64。本次机器使用仓库本地 `.tools/dotnet`，不更改系统 PATH。
+需要 PowerShell 7、.NET 10 SDK 和 Windows x64：
 
 ```powershell
 pwsh -NoProfile -File scripts/Build.ps1 -Test
 pwsh -NoProfile -File scripts/Test-Integration.ps1
 pwsh -NoProfile -File scripts/Publish.ps1
+pwsh -NoProfile -File scripts/Publish.ps1 -Installer
 pwsh -NoProfile -File scripts/Test-Package.ps1 -PackageRoot <发布包中的AGProfileHub目录>
 ```
 
-第一条构建解决方案并运行断言测试程序。第二条会启动真实的无登录测试实例，观察 CLI 生命周期，并把证据保存在被 Git 忽略的 artifacts/integration 随机目录。第三条先构建/测试，再产生带运行时的便携包和 SHA-256 文件；`-FrameworkDependent` 可输出依赖本机运行时的版本。
+`-Installer` 需要 Inno Setup 6，并从同一次自包含发布生成按用户安装的 Setup EXE。推送与拉取请求会运行 GitHub Actions 构建测试；推送与版本一致的 `v*` 标签会生成便携 ZIP、安装器、校验文件和 GitHub Release。公开分发前仍建议为 EXE 添加可信代码签名；未签名自用包可能触发 SmartScreen 提示。
 
-## 独立能力探针
-
-```powershell
-python scripts/Inspect-InstalledApp.py
-pwsh -NoProfile -File scripts/Probe-Antigravity.ps1
-pwsh -NoProfile -File scripts/Probe-Antigravity.ps1 -Visible -ObserveSeconds 35
-```
-
-静态检查只读取已安装应用代码，并输出证据布尔值与源码摘要。动态探针支持 `-Executable <路径>`，创建两个随机临时目录，检查进程和目录元数据，然后停止自己启动的进程、清理经过路径检查的测试目录。它不登录、不读取凭据。Antigravity 自身仍可能检查更新/协议注册。机器报告在 `artifacts/probe/capability-report.json`。
-
-## 工程文档
-
-- `PROJECT_STATE.md`：当前阶段、构建/测试状态、下一步。
-- `CAPABILITY_REPORT.md`：实测事实、未知能力、官方资料。
-- `ARCHITECTURE.md`、`DECISIONS.md`：技术分层和关键决策。
-- `IMPLEMENTATION_PLAN.md`、`ASTRA_HANDOFF.md`：阶段顺序和模型交接。
-- `SECURITY.md`、`MANUAL_TEST_PLAN.md`、`VERIFICATION_MATRIX.md`：安全边界与验收。
-- `FINAL_REPORT.md`：交付结果、实际验证和延期功能。
+真实账号登录永不自动化。`KEYRING_ISOLATION_REPORT.md` 记录根因和通过证据，`MANUAL_TEST_PLAN.md` 记录仍需人工确认的登出与 workspace 直写项目，`PROJECT_STATE.md` 是当前恢复入口。

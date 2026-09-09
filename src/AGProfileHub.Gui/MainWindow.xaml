@@ -15,7 +15,7 @@
                 BorderBrush="#E7C46A"
                 BorderThickness="1"
                 CornerRadius="4">
-            <TextBlock Text="Authentication stays in official Antigravity / Google flow. Concurrent Google-account profiles are unsupported on Desktop 2.12.2 after failed manual isolation validation."
+            <TextBlock Text="Authentication stays in the official Antigravity / Google flow. Concurrent accounts require one prepared isolation box per Profile; check direct-write readiness before editing projects."
                        TextWrapping="Wrap"
                        Foreground="#624B00" />
         </Border>
@@ -58,6 +58,13 @@
                     </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
                 <DataGridTextColumn Header="PID" Binding="{Binding RootProcessId}" Width="0.7*" />
+                <DataGridTextColumn Header="Isolation" Binding="{Binding Isolation}" Width="1.2*">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="ToolTip" Value="{Binding IsolationBoxName}" />
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
                 <DataGridTextColumn Header="Workspace" Binding="{Binding WorkspacePath}" Width="2.2*" />
                 <DataGridTemplateColumn Header="Actions" Width="4.8*">
                     <DataGridTemplateColumn.CellTemplate>
@@ -68,6 +75,8 @@
                                 <Button Content="Force stop" Tag="{Binding ProfileId}" Click="ForceStop_Click" Margin="2" Padding="8,3" />
                                 <Button Content="Restart" Tag="{Binding ProfileId}" Click="Restart_Click" Margin="2" Padding="8,3" />
                                 <Button Content="Force restart" Tag="{Binding ProfileId}" Click="ForceRestart_Click" Margin="2" Padding="8,3" />
+                                <Button Content="Prepare isolation" Tag="{Binding ProfileId}" Click="PrepareIsolation_Click" Margin="2" Padding="8,3" />
+                                <Button Content="Write-through" Tag="{Binding ProfileId}" Click="WriteThrough_Click" Margin="2" Padding="8,3" />
                                 <Button Content="Workspace" Tag="{Binding ProfileId}" Click="Workspace_Click" Margin="2" Padding="8,3" />
                                 <Button Content="Rename" Tag="{Binding ProfileId}" Click="Rename_Click" Margin="2" Padding="8,3" />
                                 <Button Content="Data" Tag="{Binding ProfileId}" Click="Data_Click" Margin="2" Padding="8,3" />

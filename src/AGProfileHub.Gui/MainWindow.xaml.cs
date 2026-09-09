@@ -41,9 +41,10 @@ public partial class MainWindow : Window
                 }
                 _rows.Add(new ProfileRow(status));
             }
-            LaunchAllButton.IsEnabled = _rows.Count <= 1;
-            LaunchAllButton.ToolTip = _rows.Count <= 1 ? null :
-                "Disabled because Desktop 2.12.2 cannot safely run multiple Google-account profiles concurrently.";
+            var allIsolated = _rows.All(row => row.IsolationBoxName is not null);
+            LaunchAllButton.IsEnabled = _rows.Count <= 1 || allIsolated;
+            LaunchAllButton.ToolTip = LaunchAllButton.IsEnabled ? null :
+                "Launch all requires every Profile to have a prepared isolation box.";
             StatusText.Text = $"{_rows.Count} profile(s) · Data: {_service.DataRoot}";
         }
         catch (Exception ex)
@@ -129,6 +130,37 @@ public partial class MainWindow : Window
     {
         if (TryGetProfileId(sender, out var id))
             await RunAsync(async () => { await _service.RestartAsync(id, force: true); await RefreshAsync(); });
+    }
+
+    private async void PrepareIsolation_Click(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetProfileId(sender, out var id)) return;
+        await RunAsync(async () =>
+        {
+            var result = await _service.PrepareIsolationAsync(id);
+            StatusText.Text = $"Isolation ready: {result.BoxName}. Check write-through before editing projects.";
+            await RefreshAsync();
+        });
+    }
+
+    private async void WriteThrough_Click(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetProfileId(sender, out var id)) return;
+        await RunAsync(async () =>
+        {
+            var result = await _service.GetWriteThroughAsync(id);
+            if (result.MissingPaths.Count == 0)
+            {
+                MessageBox.Show("All required direct-write paths are configured.", "Write-through", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            var text = new StringBuilder()
+                .AppendLine($"Box: {result.BoxName}")
+                .AppendLine("Missing direct-write paths:");
+            foreach (var path in result.MissingPaths) text.AppendLine(path);
+            text.AppendLine().AppendLine($"Run from an elevated packaged prompt: agprofile iso-writethrough {id:D}");
+            MessageBox.Show(text.ToString(), "Write-through setup required", MessageBoxButton.OK, MessageBoxImage.Warning);
+        });
     }
 
     private async void LaunchAll_Click(object sender, RoutedEventArgs e)
@@ -262,8 +294,11 @@ public partial class MainWindow : Window
     private static string FormatException(Exception ex) =>
         ex is HubException hub ? $"[{hub.Code}] {hub.Message}" : "Unexpected error.";
 
-    private sealed record ProfileRow(Guid ProfileId, string Name, RuntimeState State, int? RootProcessId, string? WorkspacePath, string? Detail)
+    private sealed record ProfileRow(Guid ProfileId, string Name, RuntimeState State, int? RootProcessId, string? WorkspacePath,
+        string? Detail, string? IsolationBoxName, string Isolation)
     {
-        public ProfileRow(ProfileStatus status) : this(status.ProfileId, status.Name, status.State, status.Root?.ProcessId, status.WorkspacePath, status.Detail) { }
+        public ProfileRow(ProfileStatus status) : this(status.ProfileId, status.Name, status.State, status.Root?.ProcessId,
+            status.WorkspacePath, status.Detail, status.IsolationBoxName,
+            status.IsolationBoxName is null ? "Direct / serial" : status.WriteThroughReady == true ? "Ready" : "Write missing") { }
     }
 }
