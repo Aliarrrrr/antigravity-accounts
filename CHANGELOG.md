@@ -4,6 +4,7 @@
 
 - Replace the locale-sensitive `WScript.Shell` shortcut writer with the native Unicode `IShellLinkW`/`IPersistFile` interfaces, fixing non-ASCII Profile and destination paths on English Windows runners.
 - Retain the atomic no-overwrite move and include the underlying Windows error in shortcut failures.
+- Move GitHub Actions to their Node.js 24 generations to remove hosted-runner deprecation warnings.
 
 ## 0.2.2 experimental — 2026-09-09
 

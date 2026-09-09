@@ -11,10 +11,10 @@ jobs:
   package:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
       - name: Publish portable package
@@ -42,7 +42,7 @@ jobs:
         shell: pwsh
         run: ./scripts/Test-Installer.ps1 -InstallerPath (Get-ChildItem $env:RELEASE_ROOT -Filter 'AGProfileHub-Setup-*.exe' | Select-Object -First 1 -ExpandProperty FullName)
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: AGProfileHub-${{ github.ref_name }}-win-x64
           path: |
