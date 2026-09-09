@@ -2,6 +2,7 @@
 **/obj/
 .tools/
 artifacts/
+.playwright-cli/
 scripts/__pycache__/
 TestResults/
 *.user

@@ -51,15 +51,32 @@ public static class DesktopShortcut
         object? link = null;
         try
         {
-            shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell", throwOnError: true)!);
-            link = ((dynamic)shell!).CreateShortcut(temporary);
-            dynamic shortcut = link;
-            shortcut.TargetPath = executable;
-            shortcut.Arguments = $"--data-root {QuoteArgument(Path.GetFullPath(dataRoot))} launch {profile.Id:D}";
-            shortcut.WorkingDirectory = Path.GetDirectoryName(executable)!;
-            shortcut.Description = $"Launch Antigravity profile: {profile.Name}";
-            shortcut.IconLocation = executable + ",0";
-            shortcut.Save();
+            try
+            {
+                shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell", throwOnError: true)!);
+                link = ((dynamic)shell!).CreateShortcut(temporary);
+                dynamic shortcut = link;
+                shortcut.TargetPath = executable;
+                shortcut.Arguments = $"--data-root {QuoteArgument(Path.GetFullPath(dataRoot))} launch {profile.Id:D}";
+                shortcut.WorkingDirectory = Path.GetDirectoryName(executable)!;
+                shortcut.Description = $"Launch Antigravity profile: {profile.Name}";
+                shortcut.IconLocation = executable + ",0";
+                shortcut.Save();
+            }
+            finally
+            {
+                // Release Windows Shell COM objects before moving the temporary link.
+                if (link is not null)
+                {
+                    Marshal.FinalReleaseComObject(link);
+                    link = null;
+                }
+                if (shell is not null)
+                {
+                    Marshal.FinalReleaseComObject(shell);
+                    shell = null;
+                }
+            }
             File.Move(temporary, destination, overwrite: false);
             return destination;
         }
@@ -69,8 +86,6 @@ public static class DesktopShortcut
         }
         finally
         {
-            if (link is not null) Marshal.FinalReleaseComObject(link);
-            if (shell is not null) Marshal.FinalReleaseComObject(shell);
             if (File.Exists(temporary)) File.Delete(temporary);
         }
     }

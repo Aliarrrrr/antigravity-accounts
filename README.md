@@ -1,4 +1,4 @@
-# Antigravity Profile Hub 0.2.1 — 实验版
+# Antigravity Profile Hub 0.2.2 — 实验版
 
 Windows 原生 Antigravity Desktop 多 Profile 管理器。每个 Profile 使用独立的进程主目录、Electron user-data 和 Sandboxie 隔离盒；Google 登录仍完全由官方 Antigravity 完成。
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2 experimental — 2026-09-10
+
+- Release the Windows Shell COM shortcut object before moving the temporary `.lnk`, fixing shortcut creation on GitHub-hosted Windows runners and other stricter file-locking environments.
+- Ignore local Playwright CLI session artifacts so browser checks cannot dirty the source tree.
+
 ## 0.2.1 experimental — 2026-09-09
 
 - Replaced the machine-specific Work Buddy write-through helper with one packaged, parameterized PowerShell implementation; it no longer depends on Python, hard-coded user paths, repository paths, or fixed Profile/box IDs.
