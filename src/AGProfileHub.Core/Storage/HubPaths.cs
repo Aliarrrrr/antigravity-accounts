@@ -21,6 +21,7 @@ public sealed class HubPaths
     public string ProfilesRoot => Path.Combine(DataRoot, "profiles");
     public string RuntimeStateRoot => Path.Combine(DataRoot, "runtime", "state");
     public string LocksRoot => Path.Combine(DataRoot, "runtime", "locks");
+    public string ElevationRoot => Path.Combine(DataRoot, "runtime", "elevations");
     public string IsolationStateFile => Path.Combine(DataRoot, "isolation", "state.json");
     public string IsolationLock => Path.Combine(LocksRoot, "isolation.lock");
     public string LogsRoot => Path.Combine(DataRoot, "logs");

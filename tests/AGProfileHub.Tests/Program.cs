@@ -38,6 +38,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("shortcut binds UUID and quoted data root without overwriting", TestShortcutAsync),
     ("sandboxie ini round-trips bare and indexed keys", TestSandboxieIniAsync),
     ("elevated helper writes direct-write rules and reports failures", TestElevationHelperAsync),
+    ("isolation setup is idempotent and honours legacy direct-write rules", TestIsolationSetupAsync),
 };
 
 var failures = new List<string>();
@@ -195,6 +196,58 @@ static async Task TestElevationHelperAsync()
     {
         try { Directory.Delete(root, recursive: true); } catch (IOException) { }
     }
+}
+
+static async Task TestIsolationSetupAsync()
+{
+    using var fixture = new Fixture();
+    var backend = new FakeIsolationBackend();
+    var elevation = new FakeElevationBridge(backend);
+    var launcher = new IsolatedProfileLauncher(fixture.Paths, new FakeDriver(fixture.Paths, fixture.Executable),
+        fixture.Repository, () => backend, () => (fixture.Executable, Array.Empty<string>()));
+    var setup = new IsolationSetup(launcher, elevation, () => backend);
+
+    // Fresh profile: the whole chain is applied in one call.
+    var id = Guid.NewGuid();
+    var report = await setup.EnsureReadyAsync(id, allowFreshBox: false);
+    True(report.Ready, "a fresh profile becomes ready in one call");
+    Equal(IsolationStage.Ready, report.Stage);
+    Equal(1, elevation.Calls.Count(c => c.Operation == AdminOperation.CreateBox));
+    Equal(1, elevation.Calls.Count(c => c.Operation == AdminOperation.WriteThrough));
+    Equal(1, backend.ShimCalls);
+
+    // The same call a second time must apply nothing.
+    elevation.Calls.Clear();
+    var shimBefore = backend.ShimCalls;
+    var again = await setup.EnsureReadyAsync(id, allowFreshBox: false);
+    True(again.Ready);
+    Equal(0, elevation.Calls.Count);
+    Equal(shimBefore, backend.ShimCalls);
+    True(again.Steps.All(step => !step.Applied), "a second run applies nothing");
+
+    // A pre-existing unowned box still requires an explicit acknowledgement.
+    var other = Guid.NewGuid();
+    backend.Boxes.Add(IsolatedProfileLauncher.BoxNameFor(other));
+    await ThrowsAsync<HubException>(() => setup.EnsureReadyAsync(other, allowFreshBox: false));
+    var claimed = await setup.EnsureReadyAsync(other, allowFreshBox: true);
+    True(claimed.Ready, "an acknowledged fresh box can be taken over");
+
+    // The legacy five-rule direct-write form is honoured as complete, so
+    // profiles configured before the one-rule form are not forced to reapply.
+    var legacy = Guid.NewGuid();
+    var legacyBox = IsolatedProfileLauncher.BoxNameFor(legacy);
+    backend.Boxes.Add(legacyBox);
+    await launcher.PrepareAsync(legacy, legacyBox, claimExistingFreshBox: true);
+    backend.SetConfig(legacyBox,
+        fixture.Paths.Home(legacy), fixture.Paths.Roaming(legacy), fixture.Paths.Local(legacy),
+        fixture.Paths.Temp(legacy), fixture.Paths.UserData(legacy));
+    Equal(IsolationStage.Ready, await setup.DetectAsync(legacy));
+
+    // Elevation failure is surfaced, never swallowed.
+    elevation.FailNext = true;
+    var blocked = Guid.NewGuid();
+    await ThrowsAsync<HubException>(() => setup.EnsureReadyAsync(blocked, allowFreshBox: false));
+    True((await launcher.FindAsync(blocked)) is null, "a failed elevation leaves no half-prepared mapping");
 }
 
 static async Task TestIsolationPreparationAsync()
@@ -773,6 +826,7 @@ sealed class FakeIsolationBackend : IIsolationBackend
     public int LaunchCalls { get; private set; }
     public bool BoxExists(string box) => Boxes.Contains(box);
     public void CreateBox(string box) => Boxes.Add(box);
+    public void SetConfig(string box, params string[] values) => _settings[box] = [.. values];
     public IReadOnlyList<int> ListPids(string box) => _pids.GetValueOrDefault(box, []).ToList();
     public IReadOnlyList<string> GetIndexedSettingValues(string box, string setting, int maximum = 64) =>
         _settings.GetValueOrDefault(box, []).ToList();
@@ -789,6 +843,32 @@ sealed class FakeIsolationBackend : IIsolationBackend
         LaunchCalls++;
         _pids[box] = [++_nextPid];
         return _nextPid;
+    }
+}
+
+sealed class FakeElevationBridge(FakeIsolationBackend backend) : IElevationBridge
+{
+    public bool IsAvailable => true;
+    public bool IsElevated => true;
+    public List<ElevationRequest> Calls { get; } = [];
+    public bool FailNext { get; set; }
+
+    public Task<ElevationResult> RunAsync(ElevationRequest request, CancellationToken cancellationToken = default)
+    {
+        Calls.Add(request);
+        if (FailNext) return Task.FromResult(ElevationResult.Failed("fake elevation failure"));
+        switch (request.Operation)
+        {
+            case AdminOperation.CreateBox:
+                backend.CreateBox(request.BoxName);
+                break;
+            case AdminOperation.WriteThrough:
+                backend.SetConfig(request.BoxName, [.. request.Paths]);
+                break;
+            default:
+                return Task.FromResult(ElevationResult.Failed($"unknown operation {request.Operation}"));
+        }
+        return Task.FromResult(ElevationResult.Ok());
     }
 }
 
