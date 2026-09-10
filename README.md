@@ -1,4 +1,4 @@
-# Antigravity Profile Hub 0.2.3 — 实验版
+# Antigravity Profile Hub 0.3.0 — 实验版
 
 Antigravity Profile Hub 是一个 Windows 原生的 Antigravity Desktop 多 Profile 管理器。它为每个 Profile 分配独立的进程主目录、Electron user-data 和 Sandboxie 隔离盒，让多个官方 Antigravity Desktop 窗口可以在同一个 Windows 用户下使用不同的 Google 账号。
 
@@ -9,6 +9,9 @@ Antigravity Profile Hub 是一个 Windows 原生的 Antigravity Desktop 多 Prof
 
 > [!IMPORTANT]
 > 多账号并发必须为每个 Profile 准备独占的 Sandboxie 隔离盒。未准备隔离盒的 Profile 会走旧的“Direct / serial”路径，只能串行运行，并共享当前 Windows 用户的宿主凭据。
+
+> [!TIP]
+> **0.3.0 起，隔离配置全部自动完成。** 日常只需要 `hub new`、`hub open`、`hub close`、`hub fix` 四条命令：建盒、声明 keyring、配置直写、以及在需要时请求一次管理员权限，都由 Hub 自己完成，不再需要复制脚本到管理员 PowerShell。旧命令仍然保留，作为高级操作与恢复手段。
 
 ## 目录
 
@@ -32,7 +35,9 @@ Antigravity Profile Hub 是一个 Windows 原生的 Antigravity Desktop 多 Prof
 | 独立 Profile 目录、Electron user-data 和进程树 | 已实现 |
 | 两个不同 Google 账号并发运行 | 已在指定兼容版本上人工验收 |
 | Profile 独立启动、停止、重启和桌面快捷方式 | 已实现 |
-| GUI 和 CLI 管理 | 已实现 |
+| 隔离盒、keyring 声明、直写规则的自动配置与自愈 | 已实现（`new` / `fix`，需要时自动请求一次管理员权限） |
+| 按名字（显示名 / 唯一前缀 / UUID）操作 Profile | 已实现 |
+| GUI 和 CLI 管理 | 已实现（GUI 含主题、状态徽章与自修复入口） |
 | 官方 Antigravity / Google 登录 | 支持，必须由用户在官方窗口手动完成 |
 | 自动输入账号、密码或授权码 | 不支持，也不会实现 |
 | Workspace 路径登记和直写检查 | 已实现 |
@@ -60,11 +65,11 @@ Hub 不会捆绑、下载或静默安装 Antigravity Desktop 和 Sandboxie Plus�
 
 ### 2. 选择安装包或便携包
 
-从 [v0.2.3 Release](https://github.com/Aliarrrrr/antigravity-profile-hub/releases/tag/v0.2.3) 下载文件。
+从 [v0.3.0 Release](https://github.com/Aliarrrrr/antigravity-profile-hub/releases/tag/v0.3.0) 下载文件。
 
 | 文件 | 适合场景 | 说明 |
 |---|---|---|
-| `AGProfileHub-Setup-win-x64-0.2.3.exe` | 推荐日常使用 | 按当前用户安装，开始菜单入口稳定，升级方便 |
+| `AGProfileHub-Setup-win-x64-0.3.0.exe` | 推荐日常使用 | 按当前用户安装，开始菜单入口稳定，升级方便 |
 | `AGProfileHub-win-x64.zip` | 免安装、U 盘或测试 | 解压后直接运行，移动目录后需重建快捷方式 |
 | 对应的 `.sha256.json` | 完整性校验 | 保存 Release 构建时计算的 SHA-256 |
 
@@ -73,7 +78,7 @@ Hub 不会捆绑、下载或静默安装 Antigravity Desktop 和 Sandboxie Plus�
 在下载目录打开 PowerShell。安装包示例：
 
 ```powershell
-$File = ".\AGProfileHub-Setup-win-x64-0.2.3.exe"
+$File = ".\AGProfileHub-Setup-win-x64-0.3.0.exe"
 $Expected = (Get-Content "$File.sha256.json" -Raw | ConvertFrom-Json).hash
 $Actual = (Get-FileHash $File -Algorithm SHA256).Hash
 
@@ -92,7 +97,7 @@ $File = ".\AGProfileHub-win-x64.zip"
 
 ### 4. 使用安装器部署
 
-1. 双击 `AGProfileHub-Setup-win-x64-0.2.3.exe`。
+1. 双击 `AGProfileHub-Setup-win-x64-0.3.0.exe`。
 2. 确认来源和 SHA-256 后完成安装。当前构建尚未进行可信代码签名，Windows SmartScreen 可能显示“未知发布者”。
 3. 可选勾选桌面快捷方式。
 4. 安装完成后，从开始菜单打开 **Antigravity Profile Hub**。
@@ -134,10 +139,10 @@ $Hub = Join-Path (Get-Location) "agprofile.cmd"
 安装或解压完成后先运行：
 
 ```powershell
-& $Hub doctor
+& $Hub setup
 ```
 
-重点检查：
+（`setup` 与 `doctor` 等价，名字更直白。）重点检查：
 
 - `Antigravity executable` 指向真实的 `Antigravity.exe`；
 - `Version` 为 `2.12.2`；
@@ -374,40 +379,41 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Set-IsolationW
 
 | 按钮 | 作用 |
 |---|---|
-| **Create profile** | 创建 Profile；名称为 1–80 个可打印字符 |
-| **Launch all** | 启动全部 Profile；多 Profile 时要求每个 Profile 都有可用的隔离盒 |
-| **Stop all** | 停止全部 Profile |
-| **Force stop all** | 强制停止全部 Profile；使用前先保存工作 |
-| **Refresh** | 重新读取 Profile、进程和隔离状态 |
+| **+ New profile** | 创建 Profile 并自动准备其隔离（建盒、keyring、直写）；名称为 1–80 个可打印字符 |
+| **Open all** | 启动全部 Profile；多 Profile 时要求每个 Profile 都有可用的隔离盒 |
+| **Stop all** | 停止全部 Profile；先保存工作 |
+| **Refresh** | 重新读取 Profile、进程和隔离状态（并行刷新） |
 | **Doctor** | 检查程序路径、兼容版本、隔离能力和风险警告 |
 | **Settings** | 手动选择 `Antigravity.exe` |
-| **Open data** | 打开 Hub 数据根目录 |
-| **Open logs** | 打开 Hub 结构化日志目录 |
+| **Data** | 打开 Hub 数据根目录 |
+| **Logs** | 打开 Hub 结构化日志目录 |
 
-当存在多个 Profile 且至少一个还没有隔离映射时，**Launch all** 会被禁用。即使按钮可用，也应先确保每个 Profile 的直写状态为 `Ready`。
+当存在多个 Profile 且至少一个还没有隔离映射时，**Open all** 会被禁用。按钮可用时也应先确保每个 Profile 的 Isolation 列为 `Ready`。
 
 ### Profile 行操作
 
-| 按钮 | 作用与注意事项 |
+每行只有两个操作：主按钮和 `⋯` 菜单。
+
+| 操作 | 作用与注意事项 |
 |---|---|
-| **Launch** | 启动当前 Profile；有隔离映射时自动走专属 box |
-| **Stop** | 停止当前 Profile；隔离 Profile 会终止专属 box，先保存工作 |
-| **Force stop** | Direct Profile 的显式强制停止；隔离 Profile 同样按专属 box 停止 |
-| **Restart** | 停止后重新启动 |
-| **Force restart** | Direct Profile 在普通关闭失败时强制重启 |
-| **Prepare isolation** | 创建或登记隔离盒；首次创建可能提示管理员脚本 |
-| **Write-through** | 检查缺失的直写路径，并提示需要运行的 CLI 命令 |
-| **Workspace** | 登记或清除 Workspace 元数据 |
-| **Rename** | 修改显示名称，不改变 UUID |
-| **Data** | 打开该 Profile 的托管数据目录 |
-| **Shortcut** | 在桌面创建绑定 UUID 和当前数据根的启动快捷方式 |
-| **Remove** | 只取消登记；Profile 数据和 Sandboxie box 会保留 |
+| **Open / Close**（主按钮） | 按当前状态显示。`Open` 会先补齐缺失的隔离配置再启动；`Close` 停止该 Profile；隔离 Profile 会终止专属 box，先保存工作 |
+| `⋯` → **Launch** | 直接启动，不做前置补齐 |
+| `⋯` → **Stop / Force stop** | 停止；Force stop 用于普通关闭失败时 |
+| `⋯` → **Restart / Force restart** | 停止后重新启动；Force restart 用于普通关闭失败时 |
+| `⋯` → **Fix isolation** | 自检并自动修复隔离（建盒、keyring、直写），需要时自己弹一次管理员确认 |
+| `⋯` → **Prepare isolation** | 只做建盒与登记，不触碰直写规则 |
+| `⋯` → **Workspace…** | 登记或清除 Workspace 元数据 |
+| `⋯` → **Rename…** | 修改显示名称，不改变 UUID |
+| `⋯` → **Open data folder** | 打开该 Profile 的托管数据目录 |
+| `⋯` → **Create shortcut** | 在桌面创建绑定 UUID 和当前数据根的启动快捷方式 |
+| `⋯` → **Remove…** | 只取消登记；Profile 数据和 Sandboxie box 会保留 |
 
-Isolation 列含义：
+其他界面元素：
 
-- `Direct / serial`：未准备隔离盒，只能串行；
-- `Write missing`：已有隔离映射，但缺少一个或多个直写规则；
-- `Ready`：当前 Profile 和已登记 Workspace 的直写规则完整。
+- **Status 徽章**：`Running`（绿）/ `Stopped`（灰）/ `Unknown`（黄）。`Unknown` 通常表示进程状态与隔离盒不一致，用 `⋯ → Fix isolation` 或 `Doctor` 排查。
+- **Isolation 列**：`Direct / serial` 未准备隔离盒（只能串行）；`Write missing` 缺直写规则；`Ready` 已就绪。
+- **顶部提示条**：当有 Profile 隔离未就绪时出现，并指出需要修复的数量；可关闭。
+- **空状态**：没有 Profile 时显示引导入口，直接创建第一个 Profile。
 
 ## CLI 使用教程
 
@@ -433,62 +439,101 @@ $Hub = Join-Path (Get-Location) "agprofile.cmd"
 & $Hub help
 ```
 
+### 日常命令
+
+这四条覆盖绝大多数使用场景：
+
+```powershell
+& $Hub setup                                  # 首次运行：检查 Antigravity / Sandboxie / 兼容版本
+& $Hub new "Pro A"                            # 建 Profile + 自动建盒 + 声明 keyring + 配置直写
+& $Hub new "Pro B" --workspace "D:\Projects\ProB"
+& $Hub ls                                     # 列表
+& $Hub open "Pro A"                           # 补齐缺失配置后启动
+& $Hub close "Pro A"                          # 停止
+& $Hub fix "Pro A"                            # 自检并自动修复隔离，输出每一步是否被应用
+```
+
+`new` 与 `fix` 在需要写入 `Sandboxie.ini` 时会自己请求一次管理员权限（UAC 弹窗）。被拒绝时命令返回失败并说明原因，不会留下半配置状态。
+
+可选参数：
+
+| 参数 | 作用 |
+|---|---|
+| `--workspace <path>` | 登记默认工作区元数据，并纳入直写检查 |
+| `--direct` | 跳过隔离，使用旧的串行 Direct 路径 |
+| `--fresh` | 明确确认“该隔离盒从未登录过”，允许接管一个已存在的未登记盒子 |
+
+### Profile 寻址
+
+所有命令都接受三种写法，不必再记 UUID：
+
+```powershell
+& $Hub open "Pro A"              # 显示名（不区分大小写）
+& $Hub open "Pro"                # 唯一前缀
+& $Hub open 3f2a1b8c-...         # UUID
+& $Hub open 3f2a1b8c             # UUID 前缀
+```
+
+匹配到多个时命令会失败并列出候选，不会猜。可以用 `ls` 或 `status` 查看当前名称与 UUID。
+
 ### Profile 管理
 
 ```powershell
 & $Hub create "Pro A"
 & $Hub create "Pro B" --workspace "D:\Projects\ProB"
 & $Hub list
-& $Hub show <profile-id>
-& $Hub rename <profile-id> "新的显示名称"
-& $Hub workspace <profile-id> "D:\Projects\Example"
-& $Hub workspace <profile-id> none
-& $Hub remove <profile-id>
+& $Hub show <name-or-id>
+& $Hub rename <name-or-id> "新的显示名称"
+& $Hub workspace <name-or-id> "D:\Projects\Example"
+& $Hub workspace <name-or-id> none
+& $Hub remove <name-or-id>
 ```
 
 注意：
 
-- `<profile-id>` 必须替换成 `list` 输出的 UUID；
-- Profile 名称不是命令身份，重命名不会影响 UUID；
+- Profile 名称不是身份，重命名不会影响 UUID；
 - Workspace 目录必须存在；
 - `remove` 前必须停止 Profile；
 - `remove` 只移除登记，不删除磁盘数据或 Sandboxie box。
 
-### 隔离管理
+### 隔离管理（高级）
+
+> [!NOTE]
+> 以下命令是 `new` / `fix` 的手工等价形式，用于排障、恢复或需要精细控制时。日常不需要使用。
 
 ```powershell
-& $Hub iso-prepare <profile-id>
-& $Hub iso-prepare <profile-id> --fresh
+& $Hub iso-prepare <name-or-id>
+& $Hub iso-prepare <name-or-id> --fresh
 & $Hub iso-status
-& $Hub iso-writethrough <profile-id>
+& $Hub iso-writethrough <name-or-id>
 ```
 
 `iso-launch` 和 `iso-stop` 是要求 Profile 已经存在隔离映射的显式命令：
 
 ```powershell
-& $Hub iso-launch <profile-id>
-& $Hub iso-stop <profile-id>
+& $Hub iso-launch <name-or-id>
+& $Hub iso-stop <name-or-id>
 ```
 
-日常无需特意选择它们；普通 `launch`、`stop` 和 `restart` 会根据 Profile 映射自动选择隔离或 Direct 路由。
+日常无需特意选择它们；普通 `launch`、`stop` 和 `restart` 会根据 Profile 映射自动选择隔离或 Direct 路由。`iso-writethrough` 只做检查；缺少规则时用 `fix <name-or-id>` 让 Hub 带提权自动补齐。
 
 ### 启动、状态和停止
 
 ```powershell
-& $Hub launch <profile-id>
+& $Hub launch <name-or-id>
 & $Hub launch-all
 & $Hub status
-& $Hub status <profile-id>
-& $Hub restart <profile-id>
-& $Hub stop <profile-id>
+& $Hub status <name-or-id>
+& $Hub restart <name-or-id>
+& $Hub stop <name-or-id>
 & $Hub stop-all
 ```
 
 Direct Profile 普通关闭失败时，先保存工作，再显式使用：
 
 ```powershell
-& $Hub stop <profile-id> --force
-& $Hub restart <profile-id> --force
+& $Hub stop <name-or-id> --force
+& $Hub restart <name-or-id> --force
 & $Hub stop-all --force
 ```
 
@@ -500,10 +545,10 @@ Direct Profile 普通关闭失败时，先保存工作，再显式使用：
 
 ```powershell
 & $Hub open-data
-& $Hub open-data <profile-id>
+& $Hub open-data <name-or-id>
 & $Hub open-logs
-& $Hub shortcut <profile-id>
-& $Hub shortcut <profile-id> --directory "D:\Shortcuts"
+& $Hub shortcut <name-or-id>
+& $Hub shortcut <name-or-id> --directory "D:\Shortcuts"
 ```
 
 自定义快捷方式目录必须是已经存在的绝对路径。Hub 不覆盖同名旧快捷方式；需要更新路径时，请删除旧快捷方式后重新创建。
@@ -514,7 +559,7 @@ Direct Profile 普通关闭失败时，先保存工作，再显式使用：
 
 ```powershell
 $Profiles = & $Hub --json list | ConvertFrom-Json
-$Status = & $Hub --json status <profile-id> | ConvertFrom-Json
+$Status = & $Hub --json status <name-or-id> | ConvertFrom-Json
 ```
 
 使用独立数据根：
@@ -540,23 +585,36 @@ GUI 也支持独立数据根，但需要直接启动 GUI 可执行文件：
 | `0` | 成功 |
 | `1` | 一般 Hub 错误或未预期错误 |
 | `2` | 命令参数错误 |
-| `3` | Profile 不存在 |
+| `3` | Profile 不存在（含名称无匹配） |
 | `4` | 当前能力或版本不支持 |
 | `5` | 无法安全确认进程所有权 |
 | `130` | 用户取消 |
 
-内部命令 `credential-shim` 不属于日常 CLI 接口，不要手动调用。
+常用错误码：
+
+| 错误码 | 含义与处理 |
+|---|---|
+| `elevation_declined` | 管理员确认被拒绝，`Sandboxie.ini` 未被修改；重新运行 `new` 或 `fix` 再确认一次 |
+| `sandbox_create_failed` | 沙箱盒创建失败，通常是 Sandboxie 未安装或未安装在受支持目录 |
+| `sandbox_writethrough_failed` | 直写规则写入或服务重载失败；旧配置已从备份回滚 |
+| `sandbox_timeout` | Sandboxie 命令 30 秒未返回，检查 Sandboxie 服务状态 |
+| `isolation_not_ready` | `open` 前置补齐后仍未就绪；运行 `fix <name-or-id>` 查看具体阶段 |
+| `profile_name_ambiguous` | 名称/前缀匹配到多个 Profile，用更长前缀或 UUID |
+
+内部命令 `credential-shim` 和 `admin-helper` 不属于日常 CLI 接口，不要手动调用。
 
 ## 日常使用与 Workspace
 
 推荐的日常流程：
 
-1. 打开 Hub，点击 **Refresh**，确认目标 Profile 为 `Ready`。
-2. 点击 **Launch**，或使用该 Profile 的桌面快捷方式。
-3. 多个 Profile 都已准备完成时，可以使用 **Launch all**。
+1. 打开 Hub，点击 **Refresh**，确认目标 Profile 的 Isolation 列为 `Ready`。若不是，用 `⋯ → Fix isolation` 修好，或直接点 **Open**（它会先补齐）。
+2. 点击该行的 **Open**，或使用该 Profile 的桌面快捷方式。
+3. 多个 Profile 都已准备完成时，可以使用 **Open all**。
 4. 在官方 Antigravity 窗口内工作和登录。
 5. 停止或重启前保存全部文件。
-6. 使用 Hub 的 **Stop** / **Restart**，不要按进程名批量结束 `Antigravity.exe`。
+6. 使用 Hub 的 **Close** / `⋯ → Restart`，不要按进程名批量结束 `Antigravity.exe`。
+
+顶部一旦出现提示条，说明有 Profile 的隔离未就绪；它只统计数量，具体修复按行操作即可。
 
 快捷方式绑定 Profile 的不可变 UUID、创建时使用的数据根以及当时包内 CLI 的绝对路径。安装版升级路径固定，旧快捷方式通常可继续使用；便携版移动目录后需要重建。
 
@@ -571,7 +629,7 @@ GUI 也支持独立数据根，但需要直接启动 GUI 可执行文件：
 
 - 启动 Profile 后仍需在官方应用内手动打开项目；
 - `launch <id> --workspace <path>` 会明确返回“不支持”，不会假装成功；
-- 新增、修改或清除 Workspace 后，应重新运行 `iso-writethrough <id>`；
+- 新增、修改或清除 Workspace 后，运行 `fix <name-or-id>` 让直写规则重新对齐；
 - 同一个仓库不要同时交给多个 Profile 修改；
 - Workspace 是外部路径，`remove` 不会删除它。
 
@@ -590,6 +648,7 @@ GUI 也支持独立数据根，但需要直接启动 GUI 可执行文件：
 | `profiles\<uuid>\` | 独立 home、roaming、local、temp 和 user-data |
 | `isolation\state.json` | Profile 与 box 的映射，不包含 token |
 | `runtime\` | 进程状态、锁和运行期记录 |
+| `runtime\elevations\` | 提权操作的请求/结果交换文件，可随时删除 |
 | `logs\` | Hub 白名单结构化日志 |
 | `global-launch-state\` | 所有 Hub 数据根共享的启动协调状态 |
 
@@ -651,17 +710,22 @@ Hub 数据备份不等于完整备份 Sandboxie：box 定义、box 容器和登�
 | `executable_not_found` | 没找到官方 Antigravity | GUI 点击 **Settings**，或运行 `configure-executable <绝对路径>` |
 | `version_unverified` | Antigravity 不是 2.12.2 | 不要绕过；恢复到已验证版本，或完成新版本适配与验收 |
 | `sandbox_not_found` | Sandboxie 未安装在受支持目录 | 确认 `Start.exe` 和 `SbieIni.exe` 位于标准安装目录 |
-| `sandbox_create_failed` / 拒绝访问 | 普通用户不能写系统级 Sandboxie 配置 | 从管理员 PowerShell 运行 `New-IsolationBox.ps1` |
-| 提示既有 box 需要确认 | Hub 不会静默接管未登记 box | 只有确认从未登录过时才运行 `iso-prepare <id> --fresh` |
-| `isolation_not_prepared` | Profile 没有隔离映射 | 完成 `iso-prepare` 流程 |
-| GUI 显示 `Write missing` | 缺少 `OpenFilePath` | 运行 `iso-writethrough <id>`，停止所有 box，再执行输出的管理员命令 |
-| 文件只存在于 sandbox 副本 | Workspace 或数据目录未直写 | 先保存并保留 box，不要清空；用 Sandboxie 检查盒内文件，再补齐直写并做行为验收 |
-| `launch-all` 被禁用或失败 | 至少一个 Profile 的映射、box、Sandboxie 或 keyring 未就绪 | 运行 `iso-status`、`status` 和 `iso-writethrough` 逐个修复 |
+| `elevation_declined` | 管理员确认被拒绝 | 配置未被修改；重新运行 `new` / `fix` 并在 UAC 弹窗点“是” |
+| `sandbox_create_failed` | 建盒失败或提权未完成 | 运行 `fix <name-or-id>` 重试；仍失败时确认 Sandboxie 服务正常 |
+| `sandbox_timeout` | Sandboxie 命令 30 秒未返回 | 检查 `SbieSvc` 服务状态与残留 box 进程 |
+| `sandbox_writethrough_failed` | 直写规则写入或服务重载失败 | 旧配置已自动从备份回滚；停止所有 box 后重试 `fix` |
+| 提示既有 box 需要确认 | Hub 不会静默接管未登记 box | 只有确认从未登录过时才用 `new <名字> --fresh` 或 `iso-prepare <name-or-id> --fresh` |
+| `isolation_not_prepared` | Profile 没有隔离映射 | 运行 `fix <name-or-id>` |
+| GUI 显示 `Write missing` | 缺少 `OpenFilePath` 规则 | 运行 `fix <name-or-id>`（Hub 会带提权自动补齐） |
+| 文件只存在于 sandbox 副本 | Workspace 或数据目录未直写 | 先保存并保留 box，不要清空；用 Sandboxie 检查盒内文件，再运行 `fix` 并做行为验收 |
+| `launch-all` 被禁用或失败 | 至少一个 Profile 的映射、box、Sandboxie 或 keyring 未就绪 | 顶部提示条会给出数量；逐个 `fix <name-or-id>` |
+| `isolation_not_ready` | `open` 前置补齐后仍未就绪 | 运行 `fix <name-or-id>` 查看卡在哪一步 |
+| `profile_name_ambiguous` | 名称或前缀匹配到多个 Profile | 用更长的前缀或 UUID（`ls` 可查看） |
 | 提示另一个 Antigravity root 正在运行 | 正在使用 Direct / serial 路径 | 停止另一个 Direct 实例，或为所有并发 Profile 准备隔离盒 |
-| `graceful_close_pending` | 普通关闭超时 | 检查未保存工作，再使用 `--force` |
-| `profile_not_stopped` | 运行中的 Profile 不能注销 | 先运行 `stop <id>` 并确认状态 |
+| `graceful_close_pending` | 普通关闭超时 | 检查未保存工作，再使用 `close <name-or-id> --force` |
+| `profile_not_stopped` | 运行中的 Profile 不能注销 | 先运行 `close <name-or-id>` 并确认状态 |
 | `cli_not_found` | 便携包目录被拆散 | 恢复完整 `hub`、`cli`、`scripts` 相对结构 |
-| 找不到 `scripts\...ps1` | 当前 PowerShell 不在包根目录 | 先 `Set-Location` 到安装或便携根目录 |
+| 找不到 `scripts\...ps1` | 当前 PowerShell 不在包根目录 | 先 `Set-Location` 到安装或便携根目录（仅高级/恢复路径需要） |
 | SmartScreen 显示未知发布者 | 当前 EXE 未签名 | 先核对 Release 来源和 SHA-256，只运行信任的构建 |
 | Workspace 没有自动打开 | 当前只保存元数据 | 启动后在官方 Antigravity 中手动打开项目 |
 | Doctor 报 retained global launch barrier | 上一次启动的进程状态不确定 | 不要手删状态文件；关闭残留实例、再次运行 `status` / `doctor`，仍失败时保留日志排查 |
@@ -670,9 +734,9 @@ Hub 数据备份不等于完整备份 Sandboxie：box 定义、box 容器和登�
 
 ```powershell
 & $Hub doctor
-& $Hub list
+& $Hub ls
 & $Hub status
-& $Hub iso-status
+& $Hub fix "<名字>"
 & $Hub open-logs
 ```
 
@@ -764,7 +828,7 @@ pwsh -NoProfile -File .\scripts\Test-Package.ps1 -PackageRoot ".\artifacts\packa
 
 - 推送到 `master` / `main` 或创建 Pull Request：运行 `scripts/Build.ps1 -Test`；
 - 推送 `v*` 标签：构建便携 ZIP、安装器、SHA-256 文件并创建 GitHub Pre-release；
-- 标签必须与 `Directory.Build.props` 中的版本完全一致，例如版本 `0.2.3` 对应标签 `v0.2.3`；
+- 标签必须与 `Directory.Build.props` 中的版本完全一致，例如版本 `0.3.0` 对应标签 `v0.3.0`；
 - Release workflow 会验证包结构和安装/卸载生命周期；
 - 公开分发前仍建议为 EXE 添加可信代码签名。
 

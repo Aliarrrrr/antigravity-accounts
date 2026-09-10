@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 unreleased — 2026-09-10
+## 0.3.0 experimental — 2026-09-10
 
 - Sandboxie.ini parsing consolidated into `Core/Isolation/SandboxieIniFile`; `SandboxieBackend` delegates to it so the read and write paths can no longer disagree.
 - Elevation is now in-house: `Core/Isolation/ElevationBridge` + `AdminOperations` and an internal `admin-helper` CLI verb. Box creation and direct-write rules no longer require hand-copied elevated scripts.
