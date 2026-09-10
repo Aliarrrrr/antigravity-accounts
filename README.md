@@ -162,62 +162,43 @@ $Hub = Join-Path (Get-Location) "agprofile.cmd"
 
 下面假设已经定义 `$Hub`。
 
-### 1. 创建两个 Profile
+### 1. 创建并启动第一个 Profile
 
 ```powershell
-$ProfileA = & $Hub --json create "Work A" | ConvertFrom-Json
-$ProfileB = & $Hub --json create "Work B" | ConvertFrom-Json
-
-$ProfileAId = $ProfileA.id
-$ProfileBId = $ProfileB.id
-
-& $Hub list
+& $Hub new "Work A"
+& $Hub open "Work A"
 ```
 
-后续 Profile 参数必须使用 UUID，例如 `$ProfileAId`，不能使用显示名称。
+`new` 会一次完成：创建 Profile、建隔离盒、声明 keyring、配置直写。需要管理员权限时 Hub 会自己弹一次 UAC，不需要复制任何命令。`open` 会补齐缺失的隔离配置再启动。
 
-### 2. 请求准备隔离盒
+### 2. 第二个账号
 
 ```powershell
-& $Hub iso-prepare $ProfileAId
-& $Hub iso-prepare $ProfileBId
+& $Hub new "Work B"
+& $Hub open "Work B"
 ```
 
-普通用户首次创建 box 时通常会收到需要管理员权限的提示。复制提示中的 box 名称，然后按下一节执行管理员脚本和 `--fresh` 确认。
+在各自弹出的官方 Antigravity 窗口内完成 Google 登录即可。
 
-### 3. 配置直写并检查
+### 3. 日常
 
 ```powershell
-& $Hub iso-writethrough $ProfileAId
-& $Hub iso-writethrough $ProfileBId
+& $Hub ls                 # 列表
+& $Hub open "Work A"      # 启动（名字即可，不用 UUID）
+& $Hub close "Work A"     # 停止
+& $Hub fix "Work A"       # 自检并修复隔离
+& $Hub launch-all         # 全部就绪后一键启动
 ```
 
-保存工作、停止所有 Sandboxie box，再从管理员 PowerShell 执行命令输出的 `Set-IsolationWriteThrough.ps1` 命令。
+名字寻址：所有命令都接受显示名、唯一前缀或 UUID，不再强制 32 位 UUID。
 
-最后检查：
-
-```powershell
-& $Hub --json iso-status
-& $Hub --json iso-writethrough $ProfileAId
-& $Hub --json iso-writethrough $ProfileBId
-```
-
-每个 box 至少应满足 `boxExists=true`、`keyringClaimed=true`，每个 `iso-writethrough` 结果应为 `ready=true`。
-
-### 4. 启动并登录
-
-```powershell
-& $Hub launch $ProfileAId
-& $Hub launch $ProfileBId
-```
-
-在各自弹出的官方 Antigravity 窗口内完成 Google 登录。以后可以使用：
-
-```powershell
-& $Hub launch-all
-```
+> [!NOTE]
+> 旧的手工步骤（`iso-prepare`、`iso-writethrough`、`New-IsolationBox.ps1`、`Set-IsolationWriteThrough.ps1`）仍然可用，但只作为高级操作或恢复手段，见「完整隔离配置教程」。日常只需要 `new` / `open` / `close` / `fix`。
 
 ## 完整隔离配置教程
+
+> [!TIP]
+> **现在这一整套已由 `hub new` 和 `hub fix` 自动完成**（建盒、声明 keyring、配置直写、提权）。本节保留的是每一步的手工等价命令与原理，供排障、恢复或理解 Hub 行为时参考。日常不需要逐条执行。
 
 这是多账号功能最关键的流程。每个 Profile 只需完整配置一次，但在更换 Workspace、Antigravity 版本或 Sandboxie 版本后需要重新检查。
 

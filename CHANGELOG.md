@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0 unreleased — 2026-09-10
+
+- Sandboxie.ini parsing consolidated into `Core/Isolation/SandboxieIniFile`; `SandboxieBackend` delegates to it so the read and write paths can no longer disagree.
+- Elevation is now in-house: `Core/Isolation/ElevationBridge` + `AdminOperations` and an internal `admin-helper` CLI verb. Box creation and direct-write rules no longer require hand-copied elevated scripts.
+- Added `Core/Isolation/IsolationSetup`: an idempotent state machine covering box, registration, keyring claim and direct-write rules; a second run is a provable no-op.
+- Direct-write rules converged from five managed sub-directories to one profile root (the legacy five-rule form is still honoured as complete, so existing profiles are not forced to reapply).
+- New everyday CLI verbs: `setup`, `new`, `ls`, `open`, `close`, `fix`. Every command now accepts a name, unique prefix or UUID (`ProfileManager.ResolveAsync`); UUID remains valid but is no longer required.
+- GUI rebuilt on `Themes/Theme.xaml`: design tokens, styled DataGrid with status badges, dynamic InfoBar, converged toolbar, per-row Open + ⋯ menu, empty state, themed `InputDialog`, parallel refresh.
+- Hardened `SandboxieBackend` `Start.exe` calls with `/silent` and a 30 s timeout (previously a single read could block forever).
+- Tests: 38/38. Build: 0 warnings, 0 errors.
+
 ## 0.2.3 experimental — 2026-09-09
 
 - Replace the locale-sensitive `WScript.Shell` shortcut writer with the native Unicode `IShellLinkW`/`IPersistFile` interfaces, fixing non-ASCII Profile and destination paths on English Windows runners.
