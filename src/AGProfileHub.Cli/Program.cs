@@ -107,13 +107,13 @@ internal static class CliApplication
                 var isoBox = TakeOption(tail, "--box");
                 var isoFresh = TakeFlag(tail, "--fresh");
                 RequireCount(tail, 1, "iso-prepare <id> [--box <existing-box-name>] [--fresh]");
-                var isoPrepare = await hub.PrepareIsolationAsync(ParseId(tail[0]), isoBox, isoFresh).ConfigureAwait(false);
+                var isoPrepare = await hub.PrepareIsolationAsync(await ResolveIdAsync(hub, tail[0]), isoBox, isoFresh).ConfigureAwait(false);
                 if (!json)
                     Console.WriteLine($"isolation: box={isoPrepare.BoxName} boxCreated={isoPrepare.BoxCreated} mappingCreated={isoPrepare.MappingCreated} keyringClaimed={isoPrepare.KeyringClaimed} shimExit={isoPrepare.ShimExitCode}");
                 return isoPrepare;
             case "iso-launch":
                 RequireCount(tail, 1, "iso-launch <id>");
-                var isoLaunchId = ParseId(tail[0]);
+                var isoLaunchId = await ResolveIdAsync(hub, tail[0]);
                 if (await hub.GetIsolationStatusAsync(isoLaunchId).ConfigureAwait(false) is null)
                     throw new HubException("This profile has no isolation box yet. Run iso-prepare first.", "isolation_not_prepared");
                 var isoLaunch = await hub.LaunchAsync(isoLaunchId).ConfigureAwait(false);
@@ -121,7 +121,7 @@ internal static class CliApplication
                 return isoLaunch;
             case "iso-stop":
                 RequireCount(tail, 1, "iso-stop <id>");
-                var isoStopId = ParseId(tail[0]);
+                var isoStopId = await ResolveIdAsync(hub, tail[0]);
                 if (await hub.GetIsolationStatusAsync(isoStopId).ConfigureAwait(false) is null)
                     throw new HubException("This profile has no isolation box yet. Run iso-prepare first.", "isolation_not_prepared");
                 var isoStopped = await hub.StopAsync(isoStopId, force: true).ConfigureAwait(false);
@@ -129,16 +129,15 @@ internal static class CliApplication
                 return isoStopped;
             case "iso-writethrough":
                 RequireCount(tail, 1, "iso-writethrough <id>");
-                var wtId = ParseId(tail[0]);
+                var wtId = await ResolveIdAsync(hub, tail[0]);
                 var wt = await hub.GetWriteThroughAsync(wtId).ConfigureAwait(false);
                 if (!json)
                 {
                     Console.WriteLine($"Box: {wt.BoxName}");
                     Console.WriteLine("These directories need direct-write rules, otherwise edits stay inside the sandbox:");
                     foreach (var item in wt.Paths) Console.WriteLine($"  {(wt.MissingPaths.Contains(item, StringComparer.OrdinalIgnoreCase) ? "MISSING" : "OK     ")}  {item}");
-                    Console.WriteLine();
-                    Console.WriteLine("Run once, elevated:");
-                    Console.WriteLine($"  powershell -ExecutionPolicy Bypass -File scripts\\Set-IsolationWriteThrough.ps1 -BoxName {wt.BoxName} -Path {string.Join(",", wt.Paths.Select(p => $"\"{p}\""))} -ConfirmAllBoxesStopped");
+                    if (wt.MissingPaths.Count > 0)
+                        Console.WriteLine($"Missing rules can be applied with elevation by the Hub itself: fix {tail[0]}");
                 }
                 return new { boxName = wt.BoxName, paths = wt.Paths, missingPaths = wt.MissingPaths, ready = wt.MissingPaths.Count == 0 };
             case "iso-status":
@@ -149,10 +148,68 @@ internal static class CliApplication
                         Console.WriteLine($"{item.BoxName}  profile={item.ProfileId}  boxExists={item.BoxExists}  keyringClaimed={item.KeyringClaimed}  writeThrough={item.WriteThroughReady}  processes={item.ProcessCount}");
                 return isoStatus;
             case "list":
+            case "ls":
                 RequireNoArguments(tail, "list");
                 var profiles = await hub.ListProfilesAsync().ConfigureAwait(false);
                 if (!json) PrintProfiles(profiles);
                 return profiles;
+            case "setup":
+                RequireNoArguments(tail, "setup");
+                var setupDoctor = await hub.DoctorAsync().ConfigureAwait(false);
+                if (!json) PrintDoctor(setupDoctor);
+                return setupDoctor;
+            case "new":
+                var newWorkspace = TakeOption(tail, "--workspace");
+                var newFresh = TakeFlag(tail, "--fresh");
+                var newDirect = TakeFlag(tail, "--direct");
+                RequireCount(tail, 1, "new <name> [--workspace <path>] [--direct] [--fresh]");
+                var newProfile = await hub.CreateProfileAsync(tail[0], newWorkspace).ConfigureAwait(false);
+                if (newDirect)
+                {
+                    if (!json) Console.WriteLine($"Created {newProfile.Name} ({newProfile.Id:D}) backend=direct");
+                    return newProfile;
+                }
+                try
+                {
+                    var ready = await hub.EnsureIsolationReadyAsync(newProfile.Id, newFresh).ConfigureAwait(false);
+                    if (!json) Console.WriteLine($"Created {newProfile.Name} ({newProfile.Id:D}); isolation {ready.Stage}.");
+                    return new { profile = newProfile, setup = ready };
+                }
+                catch (UnsupportedCapabilityException ex)
+                {
+                    if (!json) Console.WriteLine($"Created {newProfile.Name} ({newProfile.Id:D}); isolation unavailable: {ex.Message}");
+                    return newProfile;
+                }
+            case "open":
+                var openDirect = TakeFlag(tail, "--direct");
+                RequireCount(tail, 1, "open <name-or-id> [--direct]");
+                var openId = await ResolveIdAsync(hub, tail[0]).ConfigureAwait(false);
+                if (!openDirect && await hub.DetectIsolationStageAsync(openId).ConfigureAwait(false) != IsolationStage.BackendUnavailable)
+                {
+                    var ready = await hub.EnsureIsolationReadyAsync(openId, allowFreshBox: false).ConfigureAwait(false);
+                    if (!ready.Ready) throw new HubException($"Isolation is not ready: {ready.Stage}. Run 'fix {tail[0]}' to diagnose.", "isolation_not_ready");
+                }
+                var openResult = await hub.LaunchAsync(openId).ConfigureAwait(false);
+                if (!json) PrintStatus(openResult.Status);
+                return openResult;
+            case "close":
+                var closeForce = TakeFlag(tail, "--force");
+                RequireCount(tail, 1, "close <name-or-id> [--force]");
+                var closeId = await ResolveIdAsync(hub, tail[0]).ConfigureAwait(false);
+                var closed = await hub.StopAsync(closeId, closeForce).ConfigureAwait(false);
+                if (!json) PrintStatus(closed.Status);
+                return closed;
+            case "fix":
+                RequireCount(tail, 1, "fix <name-or-id>");
+                var fixId = await ResolveIdAsync(hub, tail[0]).ConfigureAwait(false);
+                var repaired = await hub.EnsureIsolationReadyAsync(fixId, allowFreshBox: false).ConfigureAwait(false);
+                if (!json)
+                {
+                    foreach (var step in repaired.Steps)
+                        Console.WriteLine($"  {(step.Applied ? "fixed" : "ok   ")}  {step.Stage} {(step.Detail ?? "")}");
+                    Console.WriteLine($"Isolation: {repaired.Stage}");
+                }
+                return repaired;
             case "create":
                 var createWorkspace = TakeOption(tail, "--workspace");
                 RequireCount(tail, 1, "create <name> [--workspace <path>]");
@@ -161,29 +218,29 @@ internal static class CliApplication
                 return created;
             case "rename":
                 RequireCount(tail, 2, "rename <id> <new-name>");
-                var renamed = await hub.RenameProfileAsync(ParseId(tail[0]), tail[1]).ConfigureAwait(false);
+                var renamed = await hub.RenameProfileAsync(await ResolveIdAsync(hub, tail[0]), tail[1]).ConfigureAwait(false);
                 if (!json) Console.WriteLine($"Renamed {renamed.Id:D} to {renamed.Name}");
                 return renamed;
             case "remove":
                 RequireCount(tail, 1, "remove <id>");
-                var removed = await hub.RemoveProfileAsync(ParseId(tail[0])).ConfigureAwait(false);
+                var removed = await hub.RemoveProfileAsync(await ResolveIdAsync(hub, tail[0])).ConfigureAwait(false);
                 if (!json) Console.WriteLine($"Unregistered {removed.Name}; profile data was preserved.");
                 return removed;
             case "show":
                 RequireCount(tail, 1, "show <id>");
-                var shown = await hub.GetProfileAsync(ParseId(tail[0])).ConfigureAwait(false);
+                var shown = await hub.GetProfileAsync(await ResolveIdAsync(hub, tail[0])).ConfigureAwait(false);
                 if (!json) PrintProfile(shown);
                 return shown;
             case "workspace":
                 RequireCount(tail, 2, "workspace <id> <path|none>");
                 var workspace = tail[1].Equals("none", StringComparison.OrdinalIgnoreCase) ? null : tail[1];
-                var updated = await hub.SetWorkspaceAsync(ParseId(tail[0]), workspace).ConfigureAwait(false);
+                var updated = await hub.SetWorkspaceAsync(await ResolveIdAsync(hub, tail[0]), workspace).ConfigureAwait(false);
                 if (!json) Console.WriteLine(updated.WorkspacePath is null ? "Workspace metadata cleared." : $"Workspace metadata: {updated.WorkspacePath}");
                 return updated;
             case "launch":
                 var launchWorkspace = TakeOption(tail, "--workspace");
                 RequireCount(tail, 1, "launch <id> [--workspace <path>]");
-                var launchId = ParseId(tail[0]);
+                var launchId = await ResolveIdAsync(hub, tail[0]);
                 if (launchWorkspace is not null)
                 {
                     await hub.LaunchWithWorkspaceAsync(launchId, launchWorkspace).ConfigureAwait(false);
@@ -200,7 +257,7 @@ internal static class CliApplication
             case "stop":
                 var forceStop = TakeFlag(tail, "--force");
                 RequireCount(tail, 1, "stop <id> [--force]");
-                var stopId = ParseId(tail[0]);
+                var stopId = await ResolveIdAsync(hub, tail[0]);
                 var stop = await hub.StopAsync(stopId, forceStop).ConfigureAwait(false);
                 if (!json) PrintStatus(stop.Status);
                 EnsureStopped(stop);
@@ -218,14 +275,14 @@ internal static class CliApplication
             case "restart":
                 var forceRestart = TakeFlag(tail, "--force");
                 RequireCount(tail, 1, "restart <id> [--force]");
-                var restart = await hub.RestartAsync(ParseId(tail[0]), forceRestart).ConfigureAwait(false);
+                var restart = await hub.RestartAsync(await ResolveIdAsync(hub, tail[0]), forceRestart).ConfigureAwait(false);
                 if (!json) PrintStatus(restart.Status);
                 return restart;
             case "status":
                 if (tail.Count > 1) throw new UsageException("Usage: status [id]");
                 if (tail.Count == 1)
                 {
-                    var one = await hub.GetStatusAsync(ParseId(tail[0])).ConfigureAwait(false);
+                    var one = await hub.GetStatusAsync(await ResolveIdAsync(hub, tail[0])).ConfigureAwait(false);
                     if (!json) PrintStatus(one);
                     return one;
                 }
@@ -234,7 +291,7 @@ internal static class CliApplication
                 return all;
             case "open-data":
                 if (tail.Count > 1) throw new UsageException("Usage: open-data [id]");
-                Guid? dataId = tail.Count == 1 ? ParseId(tail[0]) : null;
+                Guid? dataId = tail.Count == 1 ? await ResolveIdAsync(hub, tail[0]) : null;
                 hub.OpenDataFolder(dataId);
                 var opened = dataId is null ? hub.DataRoot : hub.GetProfileDataRoot(dataId.Value);
                 if (!json) Console.WriteLine($"Opened {opened}");
@@ -252,7 +309,7 @@ internal static class CliApplication
             case "shortcut":
                 var shortcutDirectory = TakeOption(tail, "--directory");
                 RequireCount(tail, 1, "shortcut <id> [--directory <path>]");
-                var shortcut = await hub.CreateShortcutAsync(ParseId(tail[0]), DesktopShortcut.FindCliExecutable(AppContext.BaseDirectory), shortcutDirectory).ConfigureAwait(false);
+                var shortcut = await hub.CreateShortcutAsync(await ResolveIdAsync(hub, tail[0]), DesktopShortcut.FindCliExecutable(AppContext.BaseDirectory), shortcutDirectory).ConfigureAwait(false);
                 if (!json) Console.WriteLine($"Created shortcut: {shortcut}");
                 return new { shortcut };
             case "help":
@@ -309,6 +366,12 @@ internal static class CliApplication
 
     private static Guid ParseId(string value) => Guid.TryParse(value, out var id) && id != Guid.Empty
         ? id : throw new UsageException($"Invalid profile ID '{value}'. Expected a UUID.");
+
+    private static async Task<Guid> ResolveIdAsync(HubService hub, string nameOrId)
+    {
+        var profile = await hub.ResolveProfileAsync(nameOrId).ConfigureAwait(false);
+        return profile.Id;
+    }
 
     private static void RequireCount(IReadOnlyCollection<string> values, int count, string usage)
     {
@@ -373,22 +436,31 @@ internal static class CliApplication
     private static string HelpText() => """
         Antigravity Profile Hub CLI (experimental)
         Global options: --data-root <absolute-path>  --json
-        Commands:
-          doctor | list | status [id] | show <id>
-          agent-probe                          Mocked LS/official CLI diagnostic; no real account
-          credential-status                    Report the shared token entry (existence/size only)
-          credential-shim --force --fresh      Internal: claim the keyring entry inside a fresh box
-          iso-prepare <id> [--box <name>] [--fresh]
+
+        Everyday commands (a profile may be given as a name, a unique prefix, or a UUID):
+          setup                                 First-run environment check
+          new <name> [--workspace <path>] [--direct] [--fresh]
+                                                Create a profile and prepare its isolation in one step
+          ls                                    List profiles
+          open <name-or-id> [--direct]          Prepare what is missing, then launch
+          close <name-or-id> [--force]          Stop a profile
+          status [name-or-id] | show <name-or-id> | doctor
+          fix <name-or-id>                      Diagnose and repair isolation readiness
+
+        Advanced commands (kept for scripting and recovery):
+          launch <name-or-id> | stop <name-or-id> [--force] | restart <name-or-id> [--force] | launch-all | stop-all [--force]
+          create <name> [--workspace <path>] | rename <name-or-id> <new-name> | remove <name-or-id> | workspace <name-or-id> <path|none>
+          iso-prepare <name-or-id> [--box <name>] [--fresh]
                                                 Prepare a dedicated box; --fresh acknowledges safe overwrite
-          iso-launch <id>                       Launch the unmodified desktop inside the profile's box
-          iso-stop <id>                         Terminate everything inside the profile's box
-          iso-status | iso-writethrough <id>    Inspect box and direct-write readiness
-          create <name> [--workspace <path>] | rename <id> <new-name>
-          workspace <id> <path|none> | remove <id>
-          launch <id> [--workspace <path>] | launch-all
-          stop <id> [--force] | stop-all [--force] | restart <id> [--force]
-          open-data [id] | open-logs | configure-executable <path>
-          shortcut <id> [--directory <path>]
+          iso-launch <name-or-id>               Launch the unmodified desktop inside the profile's box
+          iso-stop <name-or-id>                 Terminate everything inside the profile's box
+          iso-status | iso-writethrough <name-or-id>
+                                                Inspect box and direct-write readiness
+          open-data [name-or-id] | open-logs | configure-executable <path> | shortcut <name-or-id> [--directory <path>]
+          agent-probe                           Mocked LS/official CLI diagnostic; no real account
+          credential-status                     Report the shared token entry (existence/size only)
+          credential-shim --force --fresh       Internal: claim the keyring entry inside a fresh box
+
         Authentication is performed only by official Antigravity. Concurrent accounts require a prepared per-profile isolation box; the legacy direct path remains serial-only.
         """;
 

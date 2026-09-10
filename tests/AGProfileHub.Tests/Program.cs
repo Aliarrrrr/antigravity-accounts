@@ -39,6 +39,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("sandboxie ini round-trips bare and indexed keys", TestSandboxieIniAsync),
     ("elevated helper writes direct-write rules and reports failures", TestElevationHelperAsync),
     ("isolation setup is idempotent and honours legacy direct-write rules", TestIsolationSetupAsync),
+    ("profiles resolve by name or unique prefix", TestProfileResolveAsync),
 };
 
 var failures = new List<string>();
@@ -248,6 +249,21 @@ static async Task TestIsolationSetupAsync()
     var blocked = Guid.NewGuid();
     await ThrowsAsync<HubException>(() => setup.EnsureReadyAsync(blocked, allowFreshBox: false));
     True((await launcher.FindAsync(blocked)) is null, "a failed elevation leaves no half-prepared mapping");
+}
+
+static async Task TestProfileResolveAsync()
+{
+    using var fixture = new Fixture();
+    var alpha = await fixture.Profiles.CreateAsync("Work Alpha");
+    var beta = await fixture.Profiles.CreateAsync("Work Beta");
+    var personal = await fixture.Profiles.CreateAsync("Personal");
+
+    Equal(alpha.Id, (await fixture.Profiles.ResolveAsync(alpha.Id.ToString("D"))).Id);
+    Equal(beta.Id, (await fixture.Profiles.ResolveAsync("work beta")).Id);
+    Equal(personal.Id, (await fixture.Profiles.ResolveAsync("Pers")).Id);
+    Equal(alpha.Id, (await fixture.Profiles.ResolveAsync(alpha.Id.ToString("D")[..12])).Id);
+    await ThrowsAsync<HubException>(() => fixture.Profiles.ResolveAsync("missing"));
+    await ThrowsAsync<HubException>(() => fixture.Profiles.ResolveAsync("Work"));
 }
 
 static async Task TestIsolationPreparationAsync()
