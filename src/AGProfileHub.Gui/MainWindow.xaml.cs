@@ -2,7 +2,10 @@ using System.Collections.ObjectModel;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
 using AGProfileHub.Core;
+using AGProfileHub.Gui.Views;
 
 namespace AGProfileHub.Gui;
 
@@ -10,6 +13,7 @@ public partial class MainWindow : Window
 {
     private readonly HubService _service;
     private readonly ObservableCollection<ProfileRow> _rows = [];
+    private bool _busy;
 
     public MainWindow() : this(null) { }
 
@@ -18,6 +22,7 @@ public partial class MainWindow : Window
         _service = HubBootstrap.CreateDefault(dataRoot);
         InitializeComponent();
         ProfilesGrid.ItemsSource = _rows;
+        DataRootText.Text = _service.DataRoot;
         Loaded += async (_, _) => await RefreshAsync();
     }
 
@@ -26,26 +31,22 @@ public partial class MainWindow : Window
         try
         {
             var profiles = await _service.ListProfilesAsync().ConfigureAwait(true);
-            _rows.Clear();
-            foreach (var profile in profiles)
+            var tasks = profiles.Select(async profile =>
             {
-                ProfileStatus status;
                 try
                 {
-                    status = await _service.GetStatusAsync(profile.Id).ConfigureAwait(true);
+                    return ProfileRow.FromStatus(await _service.GetStatusAsync(profile.Id).ConfigureAwait(true));
                 }
                 catch (Exception ex)
                 {
-                    status = new ProfileStatus(profile.Id, profile.Name, RuntimeState.Unknown, null,
-                        FormatException(ex), profile.WorkspacePath);
+                    return ProfileRow.FromStatus(new ProfileStatus(profile.Id, profile.Name, RuntimeState.Unknown, null,
+                        FormatException(ex), profile.WorkspacePath));
                 }
-                _rows.Add(new ProfileRow(status));
-            }
-            var allIsolated = _rows.All(row => row.IsolationBoxName is not null);
-            LaunchAllButton.IsEnabled = _rows.Count <= 1 || allIsolated;
-            LaunchAllButton.ToolTip = LaunchAllButton.IsEnabled ? null :
-                "Launch all requires every Profile to have a prepared isolation box.";
-            StatusText.Text = $"{_rows.Count} profile(s) · Data: {_service.DataRoot}";
+            });
+            var rows = await Task.WhenAll(tasks).ConfigureAwait(true);
+            _rows.Clear();
+            foreach (var row in rows) _rows.Add(row);
+            UpdateChrome();
         }
         catch (Exception ex)
         {
@@ -53,15 +54,45 @@ public partial class MainWindow : Window
         }
     }
 
+    private void UpdateChrome()
+    {
+        var allIsolated = _rows.All(row => row.IsolationBoxName is not null);
+        LaunchAllButton.IsEnabled = _rows.Count <= 1 || allIsolated;
+        LaunchAllButton.ToolTip = LaunchAllButton.IsEnabled ? null :
+            "Launch all requires every Profile to have a prepared isolation box.";
+        EmptyState.Visibility = _rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        ProfilesGrid.Visibility = _rows.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        var needsFix = _rows.Count(row => row.NeedsFix);
+        if (needsFix > 0)
+        {
+            InfoText.Text = needsFix == 1
+                ? "1 profile has incomplete isolation. Use ⋯ → Fix isolation to repair it with one click."
+                : $"{needsFix} profiles have incomplete isolation. Use ⋯ → Fix isolation on each to repair it.";
+            InfoBar.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            InfoBar.Visibility = Visibility.Collapsed;
+        }
+        StatusText.Text = $"{_rows.Count} profile(s)";
+    }
+
+    private void DismissInfo_Click(object sender, RoutedEventArgs e) => InfoBar.Visibility = Visibility.Collapsed;
+
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RunAsync(RefreshAsync);
 
     private async void Create_Click(object sender, RoutedEventArgs e)
     {
-        var name = Prompt("Profile name:", "Create profile");
+        var name = InputDialog.Ask(this, "Create profile", "Profile name (1-80 printable characters). The Hub prepares its isolation automatically.");
         if (string.IsNullOrWhiteSpace(name)) return;
         await RunAsync(async () =>
         {
-            await _service.CreateProfileAsync(name);
+            var profile = await _service.CreateProfileAsync(name);
+            try
+            {
+                await _service.EnsureIsolationReadyAsync(profile.Id);
+            }
+            catch (UnsupportedCapabilityException) { }
             await RefreshAsync();
         });
     }
@@ -69,7 +100,7 @@ public partial class MainWindow : Window
     private async void Rename_Click(object sender, RoutedEventArgs e)
     {
         if (!TryGetProfileId(sender, out var id)) return;
-        var name = Prompt("New profile name:", "Rename profile");
+        var name = InputDialog.Ask(this, "Rename profile", "New display name. The UUID is unchanged.");
         if (string.IsNullOrWhiteSpace(name)) return;
         await RunAsync(async () =>
         {
@@ -81,7 +112,7 @@ public partial class MainWindow : Window
     private async void Workspace_Click(object sender, RoutedEventArgs e)
     {
         if (!TryGetProfileId(sender, out var id)) return;
-        var path = Prompt("Workspace path (leave blank to clear metadata):", "Workspace metadata");
+        var path = InputDialog.Ask(this, "Workspace metadata", "Workspace path (leave blank to clear). It is added to direct-write rules.");
         if (path is null) return;
         await RunAsync(async () =>
         {
@@ -93,7 +124,8 @@ public partial class MainWindow : Window
     private async void Remove_Click(object sender, RoutedEventArgs e)
     {
         if (!TryGetProfileId(sender, out var id)) return;
-        if (MessageBox.Show("Remove registration? Profile data is kept.", "Remove profile", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+        if (MessageBox.Show("Remove registration? Profile data and its isolation box are kept.", "Remove profile",
+                MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
         await RunAsync(async () =>
         {
@@ -102,10 +134,49 @@ public partial class MainWindow : Window
         });
     }
 
+    private async void PrimaryAction_Click(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetProfileId(sender, out var id)) return;
+        var running = _rows.FirstOrDefault(row => row.ProfileId == id)?.IsRunning == true;
+        await RunAsync(async () =>
+        {
+            if (running)
+            {
+                await _service.StopAsync(id);
+            }
+            else
+            {
+                await EnsureIsolationThenLaunchAsync(id);
+            }
+            await RefreshAsync();
+        });
+    }
+
+    private void Menu_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || button.ContextMenu is null) return;
+        button.ContextMenu.PlacementTarget = button;
+        button.ContextMenu.IsOpen = true;
+    }
+
+    private async Task EnsureIsolationThenLaunchAsync(Guid id)
+    {
+        try
+        {
+            if (await _service.DetectIsolationStageAsync(id) != IsolationStage.BackendUnavailable)
+            {
+                var ready = await _service.EnsureIsolationReadyAsync(id);
+                if (!ready.Ready) throw new HubException($"Isolation is not ready: {ready.Stage}.", "isolation_not_ready");
+            }
+        }
+        catch (UnsupportedCapabilityException) { }
+        await _service.LaunchAsync(id);
+    }
+
     private async void Launch_Click(object sender, RoutedEventArgs e)
     {
         if (TryGetProfileId(sender, out var id))
-            await RunAsync(async () => { await _service.LaunchAsync(id); await RefreshAsync(); });
+            await RunAsync(async () => { await EnsureIsolationThenLaunchAsync(id); await RefreshAsync(); });
     }
 
     private async void Stop_Click(object sender, RoutedEventArgs e)
@@ -132,34 +203,25 @@ public partial class MainWindow : Window
             await RunAsync(async () => { await _service.RestartAsync(id, force: true); await RefreshAsync(); });
     }
 
+    private async void Fix_Click(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetProfileId(sender, out var id)) return;
+        await RunAsync(async () =>
+        {
+            var report = await _service.EnsureIsolationReadyAsync(id);
+            StatusText.Text = report.Ready ? "Isolation is ready." : $"Isolation stage: {report.Stage}.";
+            await RefreshAsync();
+        });
+    }
+
     private async void PrepareIsolation_Click(object sender, RoutedEventArgs e)
     {
         if (!TryGetProfileId(sender, out var id)) return;
         await RunAsync(async () =>
         {
             var result = await _service.PrepareIsolationAsync(id);
-            StatusText.Text = $"Isolation ready: {result.BoxName}. Check write-through before editing projects.";
+            StatusText.Text = $"Isolation ready: {result.BoxName}.";
             await RefreshAsync();
-        });
-    }
-
-    private async void WriteThrough_Click(object sender, RoutedEventArgs e)
-    {
-        if (!TryGetProfileId(sender, out var id)) return;
-        await RunAsync(async () =>
-        {
-            var result = await _service.GetWriteThroughAsync(id);
-            if (result.MissingPaths.Count == 0)
-            {
-                MessageBox.Show("All required direct-write paths are configured.", "Write-through", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
-            var text = new StringBuilder()
-                .AppendLine($"Box: {result.BoxName}")
-                .AppendLine("Missing direct-write paths:");
-            foreach (var path in result.MissingPaths) text.AppendLine(path);
-            text.AppendLine().AppendLine($"Run from an elevated packaged prompt: agprofile iso-writethrough {id:D}");
-            MessageBox.Show(text.ToString(), "Write-through setup required", MessageBoxButton.OK, MessageBoxImage.Warning);
         });
     }
 
@@ -180,15 +242,6 @@ public partial class MainWindow : Window
             foreach (var profile in await _service.ListProfilesAsync()) results.Add(await _service.StopAsync(profile.Id));
             await RefreshAsync();
             foreach (var result in results) EnsureStopped(result);
-        });
-    }
-
-    private async void ForceStopAll_Click(object sender, RoutedEventArgs e)
-    {
-        await RunAsync(async () =>
-        {
-            foreach (var profile in await _service.ListProfilesAsync()) await _service.StopAsync(profile.Id, force: true);
-            await RefreshAsync();
         });
     }
 
@@ -241,15 +294,20 @@ public partial class MainWindow : Window
 
     private async Task RunAsync(Func<Task> action)
     {
-        if (!MainPanel.IsEnabled) return;
-        MainPanel.IsEnabled = false;
+        if (_busy) return;
+        _busy = true;
+        Mouse.OverrideCursor = Cursors.Wait;
         try { await action(); }
         catch (Exception ex)
         {
             MessageBox.Show(FormatException(ex), "Operation failed", MessageBoxButton.OK, MessageBoxImage.Error);
             await RefreshAsync();
         }
-        finally { MainPanel.IsEnabled = true; }
+        finally
+        {
+            _busy = false;
+            Mouse.OverrideCursor = null;
+        }
     }
 
     private static void OpenFolderSafely(Action action)
@@ -258,47 +316,58 @@ public partial class MainWindow : Window
         catch (Exception ex) { MessageBox.Show(FormatException(ex), "Open folder failed", MessageBoxButton.OK, MessageBoxImage.Error); }
     }
 
-    private static string? Prompt(string text, string title)
-    {
-        var window = new Window
-        {
-            Title = title,
-            Width = 420,
-            Height = 160,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Owner = Application.Current.MainWindow,
-            ResizeMode = ResizeMode.NoResize
-        };
-        var panel = new StackPanel { Margin = new Thickness(12) };
-        var box = new TextBox();
-        window.Loaded += (_, _) => box.Focus();
-        var ok = new Button
-        {
-            Content = "OK",
-            IsDefault = true,
-            Width = 70,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Margin = new Thickness(0, 10, 0, 0)
-        };
-        ok.Click += (_, _) => window.DialogResult = true;
-        panel.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap });
-        panel.Children.Add(box);
-        panel.Children.Add(ok);
-        window.Content = panel;
-        return window.ShowDialog() == true ? box.Text : null;
-    }
-
     private static bool TryGetProfileId(object sender, out Guid id) =>
-        Guid.TryParse((sender as Button)?.Tag?.ToString(), out id) && id != Guid.Empty;
+        Guid.TryParse((sender as FrameworkElement)?.Tag?.ToString(), out id) && id != Guid.Empty;
 
     private static string FormatException(Exception ex) =>
         ex is HubException hub ? $"[{hub.Code}] {hub.Message}" : "Unexpected error.";
 
-    private sealed record ProfileRow(Guid ProfileId, string Name, RuntimeState State, int? RootProcessId, string? WorkspacePath,
-        string? Detail, string? IsolationBoxName, string Isolation)
+    private static Brush Res(string key) => (Brush)Application.Current.Resources[key];
+
+    private sealed class ProfileRow
     {
-        public ProfileRow(ProfileStatus status) : this(status.ProfileId, status.Name, status.State, status.Root?.ProcessId,
-            status.WorkspacePath, status.Detail, status.IsolationBoxName,
-            status.IsolationBoxName is null ? "Direct / serial" : status.WriteThroughReady == true ? "Ready" : "Write missing") { }
+        public required Guid ProfileId { get; init; }
+        public required string Name { get; init; }
+        public required string StateText { get; init; }
+        public required Brush StateBg { get; init; }
+        public required Brush StateFg { get; init; }
+        public string? Detail { get; init; }
+        public int? RootProcessId { get; init; }
+        public string? WorkspacePath { get; init; }
+        public string Isolation { get; init; } = "";
+        public string? IsolationBoxName { get; init; }
+        public bool IsRunning { get; init; }
+
+        public string PrimaryActionText => IsRunning ? "Close" : "Open";
+        public string PidText => RootProcessId?.ToString() ?? "—";
+        public string WorkspaceText => string.IsNullOrWhiteSpace(WorkspacePath) ? "—" : WorkspacePath!;
+        public bool NeedsFix => Isolation != "Ready" && Isolation != "Direct / serial";
+
+        public static ProfileRow FromStatus(ProfileStatus status)
+        {
+            var (text, bg, fg) = status.State switch
+            {
+                RuntimeState.Running => ("Running", "Brush.SuccessBg", "Brush.Success"),
+                RuntimeState.Stopped => ("Stopped", "Brush.SurfaceAlt", "Brush.TextSecondary"),
+                _ => ("Unknown", "Brush.WarningBg", "Brush.Warning")
+            };
+            var isolation = status.IsolationBoxName is null
+                ? "Direct / serial"
+                : status.WriteThroughReady == true ? "Ready" : "Write missing";
+            return new ProfileRow
+            {
+                ProfileId = status.ProfileId,
+                Name = status.Name,
+                StateText = text,
+                StateBg = Res(bg),
+                StateFg = Res(fg),
+                Detail = status.Detail,
+                RootProcessId = status.Root?.ProcessId,
+                WorkspacePath = status.WorkspacePath,
+                Isolation = isolation,
+                IsolationBoxName = status.IsolationBoxName,
+                IsRunning = status.State == RuntimeState.Running
+            };
+        }
     }
 }
