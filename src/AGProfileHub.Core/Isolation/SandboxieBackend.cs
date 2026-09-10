@@ -93,7 +93,7 @@ public sealed class SandboxieBackend : IIsolationBackend
 
     public IReadOnlyList<int> ListPids(string box)
     {
-        var result = Run(StartPath, new[] { $"/box:{box}", "/listpids" }, wait: true);
+        var result = Run(StartPath, new[] { $"/box:{box}", "/silent", "/listpids" }, wait: true);
         if (result.ExitCode != 0)
             throw new HubException("Sandboxie could not inspect the isolation box.", "sandbox_status_failed");
         var pids = new List<int>();
@@ -109,53 +109,17 @@ public sealed class SandboxieBackend : IIsolationBackend
     {
         // SbieIni's indexed query form (Setting.N) cannot see bare repeated keys,
         // and the driver only honours bare keys, so parse the configuration file
-        // directly and accept both spellings.
-        var values = new List<string>();
-        var iniPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Sandboxie.ini");
-        if (!File.Exists(iniPath)) iniPath = Path.Combine(Home, "Sandboxie.ini");
-        if (!File.Exists(iniPath)) return values;
-
-        var raw = File.ReadAllBytes(iniPath);
-        System.Text.Encoding encoding;
-        if (raw.Length >= 2 && raw[0] == 0xFF && raw[1] == 0xFE) encoding = new System.Text.UnicodeEncoding(false, true);
-        else if (raw.Length >= 3 && raw[0] == 0xEF && raw[1] == 0xBB && raw[2] == 0xBF) encoding = new System.Text.UTF8Encoding(true);
-        else encoding = new System.Text.UTF8Encoding(false);
-        var text = encoding.GetString(raw);
-
-        var bare = setting + "=";
-        var insideBox = false;
-        foreach (var rawLine in text.Split('\n'))
-        {
-            var line = rawLine.TrimEnd('\r').Trim();
-            if (line.StartsWith('[') && line.EndsWith(']'))
-            {
-                insideBox = line[1..^1].Equals(box, StringComparison.OrdinalIgnoreCase);
-                continue;
-            }
-            if (!insideBox) continue;
-            if (line.StartsWith(bare, StringComparison.OrdinalIgnoreCase))
-            {
-                var value = line[bare.Length..].Trim();
-                if (value.Length > 0) values.Add(value);
-                continue;
-            }
-            var dotIndex = setting.Length;
-            if (line.Length > dotIndex + 1 &&
-                line.StartsWith(setting, StringComparison.OrdinalIgnoreCase) &&
-                line[dotIndex] == '.' &&
-                char.IsDigit(line[dotIndex + 1]) &&
-                line.Contains('=', StringComparison.Ordinal))
-            {
-                var value = line[(line.IndexOf('=') + 1)..].Trim();
-                if (value.Length > 0) values.Add(value);
-            }
-        }
-        return values;
+        // directly and accept both spellings. SandboxieIniFile owns that parsing
+        // so the read path and the write path can never disagree again.
+        var file = SandboxieIniFile.TryOpenSystem(Home);
+        if (file is null) return [];
+        var values = file.GetValues(box, setting);
+        return values.Count <= maximum ? values : [.. values.Take(maximum)];
     }
 
     public void Terminate(string box)
     {
-        var result = Run(StartPath, new[] { $"/box:{box}", "/terminate" }, wait: true);
+        var result = Run(StartPath, new[] { $"/box:{box}", "/silent", "/terminate" }, wait: true);
         if (result.ExitCode != 0)
             throw new HubException("Sandboxie could not terminate the isolation box.", "sandbox_stop_failed");
     }
@@ -164,7 +128,7 @@ public sealed class SandboxieBackend : IIsolationBackend
     public int RunInBox(string box, string executable, IReadOnlyList<string> arguments,
         IReadOnlyDictionary<string, string>? environment = null, bool wait = false)
     {
-        var all = new List<string> { $"/box:{box}" };
+        var all = new List<string> { $"/box:{box}", "/silent" };
         if (wait) all.Add("/wait");
         all.Add(executable);
         all.AddRange(arguments);
@@ -199,10 +163,28 @@ public sealed class SandboxieBackend : IIsolationBackend
             foreach (var pair in environment) info.Environment[pair.Key] = pair.Value;
 
         using var process = Process.Start(info) ?? throw new HubException($"Failed to start '{fileName}'.", "sandbox_tool_missing");
-        var stdout = process.StandardOutput.ReadToEnd();
-        var stderr = process.StandardError.ReadToEnd();
-        if (!wait) return new RunResult(0, stdout);
-        process.WaitForExit();
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        if (!wait)
+        {
+            _ = Task.Run(async () =>
+            {
+                try { await stdoutTask.ConfigureAwait(false); await stderrTask.ConfigureAwait(false); }
+                catch (Exception ex) when (ex is IOException or ObjectDisposedException) { }
+            });
+            return new RunResult(0, string.Empty);
+        }
+        // Never block indefinitely: Start.exe can hold a session open when a
+        // box is missing or the driver is busy. Fail loudly instead of hanging
+        // the Hub and every test that touches it.
+        if (!process.WaitForExit(30_000))
+        {
+            try { process.Kill(entireProcessTree: true); }
+            catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception) { }
+            throw new HubException($"Sandboxie command '{Path.GetFileName(fileName)}' timed out.", "sandbox_timeout");
+        }
+        var stdout = stdoutTask.GetAwaiter().GetResult();
+        var stderr = stderrTask.GetAwaiter().GetResult();
         if (stderr.Length > 0) stdout += "\n" + stderr;
         return new RunResult(process.ExitCode, stdout);
     }

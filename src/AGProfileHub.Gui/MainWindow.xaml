@@ -2,91 +2,170 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Antigravity Profile Hub"
-        Height="640"
-        Width="1080"
-        MinHeight="480"
-        MinWidth="820"
-        Background="#F7F8FA">
-    <DockPanel x:Name="MainPanel" Margin="18">
-        <Border DockPanel.Dock="Top"
-                Padding="12"
-                Margin="0,0,0,12"
-                Background="#FFF4D6"
-                BorderBrush="#E7C46A"
-                BorderThickness="1"
-                CornerRadius="4">
-            <TextBlock Text="Authentication stays in the official Antigravity / Google flow. Concurrent accounts require one prepared isolation box per Profile; check direct-write readiness before editing projects."
-                       TextWrapping="Wrap"
-                       Foreground="#624B00" />
+        Height="660"
+        Width="1100"
+        MinHeight="520"
+        MinWidth="880"
+        FontFamily="Segoe UI"
+        Background="{StaticResource Brush.SurfaceAlt}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Border Grid.Row="0" Padding="20,18,20,14">
+            <DockPanel>
+                <TextBlock x:Name="DataRootText" DockPanel.Dock="Right"
+                           Style="{StaticResource SecondaryText}" VerticalAlignment="Center"/>
+                <StackPanel Orientation="Horizontal">
+                    <Border Width="32" Height="32" CornerRadius="8"
+                            Background="{StaticResource Brush.Accent}" VerticalAlignment="Center">
+                        <TextBlock Text="A" Foreground="White" FontSize="15" FontWeight="SemiBold"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="Antigravity Profile Hub" FontSize="16" FontWeight="SemiBold"
+                                   Foreground="{StaticResource Brush.TextPrimary}"/>
+                        <TextBlock Text="Multiple profiles · separate accounts · official windows"
+                                   Style="{StaticResource SecondaryText}"/>
+                    </StackPanel>
+                </StackPanel>
+            </DockPanel>
         </Border>
 
-        <WrapPanel DockPanel.Dock="Top"
-                    Margin="0,0,0,12">
-            <Button Content="+ Create profile" Click="Create_Click" Padding="12,6" Margin="0,0,8,0" />
-            <Button x:Name="LaunchAllButton" Content="Launch all" Click="LaunchAll_Click" Padding="12,6" Margin="0,0,8,0" />
-            <Button Content="Stop all" Click="StopAll_Click" Padding="12,6" Margin="0,0,8,0" />
-            <Button Content="Force stop all" Click="ForceStopAll_Click" Padding="12,6" Margin="0,0,8,0" />
-            <Button Content="Refresh" Click="Refresh_Click" Padding="12,6" Margin="0,0,8,0" />
-            <Button Content="Doctor" Click="Doctor_Click" Padding="12,6" Margin="0,0,8,0" />
-            <Button Content="Settings" Click="Settings_Click" Padding="12,6" Margin="0,0,8,0" />
-            <Button Content="Open data" Click="OpenData_Click" Padding="12,6" Margin="0,0,8,0" />
-            <Button Content="Open logs" Click="OpenLogs_Click" Padding="12,6" />
-        </WrapPanel>
+        <!-- Info bar -->
+        <Border x:Name="InfoBar" Grid.Row="1" Margin="20,0,20,12"
+                Style="{StaticResource InfoBar}"
+                Background="{StaticResource Brush.WarningBg}" BorderBrush="#E7C46A"
+                Visibility="Collapsed">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Content="✕" Click="DismissInfo_Click"
+                        Style="{StaticResource CompactButton}" Background="Transparent"
+                        BorderThickness="0" Padding="6,1" Foreground="{StaticResource Brush.Warning}"/>
+                <TextBlock x:Name="InfoText" TextWrapping="Wrap" FontSize="12"
+                           Foreground="{StaticResource Brush.Warning}" VerticalAlignment="Center"/>
+            </DockPanel>
+        </Border>
 
-        <TextBlock x:Name="StatusText"
-                   DockPanel.Dock="Bottom"
-                   Margin="0,12,0,0"
-                   Foreground="#555555"
-                   TextWrapping="Wrap" />
+        <!-- Toolbar -->
+        <Border Grid.Row="2" Padding="20,0,20,12">
+            <WrapPanel VerticalAlignment="Center">
+                <Button Content="+ New profile" Style="{StaticResource AccentButton}"
+                        Click="Create_Click" Margin="0,0,8,0"/>
+                <Button x:Name="LaunchAllButton" Content="Open all" Style="{StaticResource ToolbarButton}" Click="LaunchAll_Click"/>
+                <Button Content="Stop all" Style="{StaticResource ToolbarButton}" Click="StopAll_Click"/>
+                <Button Content="Refresh" Style="{StaticResource ToolbarButton}" Click="Refresh_Click"/>
+                <Button Content="Doctor" Style="{StaticResource ToolbarButton}" Click="Doctor_Click"/>
+                <Button Content="Settings" Style="{StaticResource ToolbarButton}" Click="Settings_Click"/>
+                <Button Content="Data" Style="{StaticResource ToolbarButton}" Click="OpenData_Click"/>
+                <Button Content="Logs" Style="{StaticResource ToolbarButton}" Click="OpenLogs_Click"/>
+            </WrapPanel>
+        </Border>
 
-        <DataGrid x:Name="ProfilesGrid"
-                  AutoGenerateColumns="False"
-                  IsReadOnly="True"
-                  CanUserAddRows="False"
-                  SelectionMode="Single"
-                  HeadersVisibility="Column"
-                  GridLinesVisibility="Horizontal">
-            <DataGrid.Columns>
-                <DataGridTextColumn Header="Profile" Binding="{Binding Name}" Width="1.4*" />
-                <DataGridTextColumn Header="Status" Binding="{Binding State}" Width="0.9*" />
-                <DataGridTextColumn Header="Details" Binding="{Binding Detail}" Width="1.5*">
-                    <DataGridTextColumn.ElementStyle>
-                        <Style TargetType="TextBlock">
-                            <Setter Property="TextWrapping" Value="Wrap" />
-                            <Setter Property="ToolTip" Value="{Binding Detail}" />
-                        </Style>
-                    </DataGridTextColumn.ElementStyle>
-                </DataGridTextColumn>
-                <DataGridTextColumn Header="PID" Binding="{Binding RootProcessId}" Width="0.7*" />
-                <DataGridTextColumn Header="Isolation" Binding="{Binding Isolation}" Width="1.2*">
-                    <DataGridTextColumn.ElementStyle>
-                        <Style TargetType="TextBlock">
-                            <Setter Property="ToolTip" Value="{Binding IsolationBoxName}" />
-                        </Style>
-                    </DataGridTextColumn.ElementStyle>
-                </DataGridTextColumn>
-                <DataGridTextColumn Header="Workspace" Binding="{Binding WorkspacePath}" Width="2.2*" />
-                <DataGridTemplateColumn Header="Actions" Width="4.8*">
-                    <DataGridTemplateColumn.CellTemplate>
-                        <DataTemplate>
-                            <WrapPanel>
-                                <Button Content="Launch" Tag="{Binding ProfileId}" Click="Launch_Click" Margin="2" Padding="8,3" />
-                                <Button Content="Stop" Tag="{Binding ProfileId}" Click="Stop_Click" Margin="2" Padding="8,3" />
-                                <Button Content="Force stop" Tag="{Binding ProfileId}" Click="ForceStop_Click" Margin="2" Padding="8,3" />
-                                <Button Content="Restart" Tag="{Binding ProfileId}" Click="Restart_Click" Margin="2" Padding="8,3" />
-                                <Button Content="Force restart" Tag="{Binding ProfileId}" Click="ForceRestart_Click" Margin="2" Padding="8,3" />
-                                <Button Content="Prepare isolation" Tag="{Binding ProfileId}" Click="PrepareIsolation_Click" Margin="2" Padding="8,3" />
-                                <Button Content="Write-through" Tag="{Binding ProfileId}" Click="WriteThrough_Click" Margin="2" Padding="8,3" />
-                                <Button Content="Workspace" Tag="{Binding ProfileId}" Click="Workspace_Click" Margin="2" Padding="8,3" />
-                                <Button Content="Rename" Tag="{Binding ProfileId}" Click="Rename_Click" Margin="2" Padding="8,3" />
-                                <Button Content="Data" Tag="{Binding ProfileId}" Click="Data_Click" Margin="2" Padding="8,3" />
-                                <Button Content="Shortcut" Tag="{Binding ProfileId}" Click="Shortcut_Click" Margin="2" Padding="8,3" />
-                                <Button Content="Remove" Tag="{Binding ProfileId}" Click="Remove_Click" Margin="2" Padding="8,3" />
-                            </WrapPanel>
-                        </DataTemplate>
-                    </DataGridTemplateColumn.CellTemplate>
-                </DataGridTemplateColumn>
-            </DataGrid.Columns>
-        </DataGrid>
-    </DockPanel>
+        <!-- Content -->
+        <Grid Grid.Row="3" Margin="20,0,20,0">
+            <DataGrid x:Name="ProfilesGrid" IsReadOnly="True">
+                <DataGrid.Columns>
+                    <DataGridTemplateColumn Header="Profile" Width="2.2*">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="0,2">
+                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13"
+                                               Foreground="{StaticResource Brush.TextPrimary}"/>
+                                    <TextBlock Text="{Binding WorkspaceText}" FontSize="11"
+                                               Foreground="{StaticResource Brush.TextSecondary}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <DataGridTemplateColumn Header="Status" Width="0.9*">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource Badge}" Background="{Binding StateBg}" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding StateText}" FontSize="11" Foreground="{Binding StateFg}"/>
+                                </Border>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <DataGridTextColumn Header="Isolation" Binding="{Binding Isolation}" Width="1.1*">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
+                                <Setter Property="ToolTip" Value="{Binding IsolationBoxName}"/>
+                                <Setter Property="VerticalAlignment" Value="Center"/>
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+                    <DataGridTextColumn Header="PID" Binding="{Binding PidText}" Width="0.6*">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
+                                <Setter Property="VerticalAlignment" Value="Center"/>
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+                    <DataGridTemplateColumn Header="Details" Width="2*">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Detail}" FontSize="12" TextWrapping="Wrap"
+                                           ToolTip="{Binding Detail}" VerticalAlignment="Center"
+                                           Foreground="{StaticResource Brush.TextSecondary}"/>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <DataGridTemplateColumn Header="Actions" Width="1.5*">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Button Content="{Binding PrimaryActionText}" Tag="{Binding ProfileId}"
+                                            Click="PrimaryAction_Click" Style="{StaticResource CompactAccentButton}"/>
+                                    <Button Content="⋯" Tag="{Binding ProfileId}" Click="Menu_Click"
+                                            Style="{StaticResource CompactButton}" Margin="6,0,0,0" Padding="8,4">
+                                        <Button.ContextMenu>
+                                            <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                                <MenuItem Header="Launch" Tag="{Binding ProfileId}" Click="Launch_Click"/>
+                                                <MenuItem Header="Stop" Tag="{Binding ProfileId}" Click="Stop_Click"/>
+                                                <MenuItem Header="Force stop" Tag="{Binding ProfileId}" Click="ForceStop_Click"/>
+                                                <MenuItem Header="Restart" Tag="{Binding ProfileId}" Click="Restart_Click"/>
+                                                <MenuItem Header="Force restart" Tag="{Binding ProfileId}" Click="ForceRestart_Click"/>
+                                                <Separator/>
+                                                <MenuItem Header="Fix isolation" Tag="{Binding ProfileId}" Click="Fix_Click"/>
+                                                <MenuItem Header="Prepare isolation" Tag="{Binding ProfileId}" Click="PrepareIsolation_Click"/>
+                                                <Separator/>
+                                                <MenuItem Header="Workspace…" Tag="{Binding ProfileId}" Click="Workspace_Click"/>
+                                                <MenuItem Header="Rename…" Tag="{Binding ProfileId}" Click="Rename_Click"/>
+                                                <MenuItem Header="Open data folder" Tag="{Binding ProfileId}" Click="Data_Click"/>
+                                                <MenuItem Header="Create shortcut" Tag="{Binding ProfileId}" Click="Shortcut_Click"/>
+                                                <Separator/>
+                                                <MenuItem Header="Remove…" Tag="{Binding ProfileId}" Click="Remove_Click"/>
+                                            </ContextMenu>
+                                        </Button.ContextMenu>
+                                    </Button>
+                                </StackPanel>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <!-- Empty state -->
+            <StackPanel x:Name="EmptyState" Visibility="Collapsed" VerticalAlignment="Center" HorizontalAlignment="Center">
+                <TextBlock Text="No profiles yet" FontSize="17" FontWeight="SemiBold"
+                           Foreground="{StaticResource Brush.TextPrimary}" HorizontalAlignment="Center"/>
+                <TextBlock Text="Create one and the Hub prepares its isolation box and direct-write rules for you."
+                           Style="{StaticResource SecondaryText}" TextWrapping="Wrap" TextAlignment="Center"
+                           MaxWidth="380" Margin="0,8,0,0"/>
+                <Button Content="+ Create the first profile" Style="{StaticResource AccentButton}"
+                        Click="Create_Click" Margin="0,16,0,0" HorizontalAlignment="Center"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- Status bar -->
+        <Border Grid.Row="4" Padding="20,10" BorderBrush="{StaticResource Brush.Border}" BorderThickness="0,1,0,0">
+            <TextBlock x:Name="StatusText" Style="{StaticResource SecondaryText}"/>
+        </Border>
+    </Grid>
 </Window>

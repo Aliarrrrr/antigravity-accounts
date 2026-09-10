@@ -10,11 +10,12 @@ public sealed class HubService
     private readonly ProcessSupervisor _processes;
     private readonly IAntigravityDriver _driver;
     private readonly IProfileIsolation? _isolation;
+    private readonly IsolationSetup? _setup;
 
     internal HubService(HubPaths paths, ConfigRepository repository, ProfileManager profiles, ProcessSupervisor processes,
-        IAntigravityDriver driver, IProfileIsolation? isolation)
+        IAntigravityDriver driver, IProfileIsolation? isolation, IsolationSetup? setup = null)
     {
-        _paths = paths; _repository = repository; _profiles = profiles; _processes = processes; _driver = driver; _isolation = isolation;
+        _paths = paths; _repository = repository; _profiles = profiles; _processes = processes; _driver = driver; _isolation = isolation; _setup = setup;
     }
 
     public string DataRoot => _paths.DataRoot;
@@ -22,6 +23,7 @@ public sealed class HubService
     public string GetProfileDataRoot(Guid id) => _paths.ProfileRoot(id);
     public Task<IReadOnlyList<ProfileRegistration>> ListProfilesAsync(CancellationToken cancellationToken = default) => _profiles.ListAsync(cancellationToken);
     public Task<ProfileRegistration> GetProfileAsync(Guid id, CancellationToken cancellationToken = default) => _profiles.GetAsync(id, cancellationToken);
+    public Task<ProfileRegistration> ResolveProfileAsync(string nameOrId, CancellationToken cancellationToken = default) => _profiles.ResolveAsync(nameOrId, cancellationToken);
     public Task<ProfileRegistration> CreateProfileAsync(string name, string? workspacePath = null, CancellationToken cancellationToken = default) => _profiles.CreateAsync(name, workspacePath, cancellationToken);
     public Task<ProfileRegistration> RenameProfileAsync(Guid id, string name, CancellationToken cancellationToken = default) => _profiles.RenameAsync(id, name, cancellationToken);
     public Task<ProfileRegistration> SetWorkspaceAsync(Guid id, string? workspacePath, CancellationToken cancellationToken = default) => _profiles.SetWorkspaceAsync(id, workspacePath, cancellationToken);
@@ -111,6 +113,26 @@ public sealed class HubService
 
     public Task<IReadOnlyList<IsolationRuntimeStatus>> GetIsolationStatusesAsync(CancellationToken cancellationToken = default) =>
         _isolation is null ? Task.FromResult<IReadOnlyList<IsolationRuntimeStatus>>([]) : _isolation.StatusAsync(cancellationToken);
+
+    /// <summary>
+    /// Runs the idempotent setup chain (box, registration, keyring,
+    /// direct-write) and returns the stage that was reached. This is the
+    /// single entry point used by both the new-user commands and launch.
+    /// </summary>
+    public async Task<IsolationSetupReport> EnsureIsolationReadyAsync(Guid id, bool allowFreshBox = false,
+        CancellationToken cancellationToken = default)
+    {
+        var profile = await _profiles.GetAsync(id, cancellationToken).ConfigureAwait(false);
+        if (_setup is null) throw new UnsupportedCapabilityException("Isolation setup is not available in this environment.");
+        return await _setup.EnsureReadyAsync(id, allowFreshBox, profile.WorkspacePath, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<IsolationStage> DetectIsolationStageAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var profile = await _profiles.GetAsync(id, cancellationToken).ConfigureAwait(false);
+        return _setup is null ? IsolationStage.BackendUnavailable
+            : await _setup.DetectAsync(id, profile.WorkspacePath, cancellationToken).ConfigureAwait(false);
+    }
 
     public async Task<(string BoxName, IReadOnlyList<string> Paths, IReadOnlyList<string> MissingPaths)> GetWriteThroughAsync(
         Guid id, CancellationToken cancellationToken = default)
@@ -242,15 +264,26 @@ public static class HubBootstrap
         var supervisor = new ProcessSupervisor(paths, repository, profiles, driver,
             new WindowsProcessCatalog(), new WindowsProcessLauncher(), new WindowsProcessController(), new StructuredEventLogger(paths));
         var isolation = new IsolatedProfileLauncher(paths, driver, repository);
-        return new HubService(paths, repository, profiles, supervisor, driver, isolation);
+        IElevationBridge elevation;
+        try
+        {
+            var cli = DesktopShortcut.FindCliExecutable(AppContext.BaseDirectory);
+            elevation = new WindowsElevationBridge(cli, paths.ElevationRoot);
+        }
+        catch (HubException)
+        {
+            elevation = new UnavailableElevationBridge("The CLI executable could not be located, so elevation is unavailable.");
+        }
+        var setup = new IsolationSetup(isolation, elevation, () => SandboxieBackend.TryDiscover());
+        return new HubService(paths, repository, profiles, supervisor, driver, isolation, setup);
     }
 
     public static HubService CreateForTesting(HubPaths paths, ConfigRepository repository, ProfileManager profiles,
         IAntigravityDriver driver, IProcessCatalog catalog, IProcessLauncher launcher, IProcessController controller, IHubLogger? logger = null,
-        int launchVerificationAttempts = 20, TimeSpan? launchVerificationDelay = null, IProfileIsolation? isolation = null)
+        int launchVerificationAttempts = 20, TimeSpan? launchVerificationDelay = null, IProfileIsolation? isolation = null, IsolationSetup? setup = null)
     {
         var supervisor = new ProcessSupervisor(paths, repository, profiles, driver, catalog, launcher, controller, logger ?? new NullHubLogger(),
             launchVerificationAttempts, launchVerificationDelay);
-        return new HubService(paths, repository, profiles, supervisor, driver, isolation);
+        return new HubService(paths, repository, profiles, supervisor, driver, isolation, setup);
     }
 }

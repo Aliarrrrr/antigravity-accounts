@@ -36,6 +36,10 @@ var tests = new (string Name, Func<Task> Run)[]
     ("executable changes clear prior authentication attestation", TestExecutableChangeAsync),
     ("reused PID never receives close or focus", TestReusedPidAsync),
     ("shortcut binds UUID and quoted data root without overwriting", TestShortcutAsync),
+    ("sandboxie ini round-trips bare and indexed keys", TestSandboxieIniAsync),
+    ("elevated helper writes direct-write rules and reports failures", TestElevationHelperAsync),
+    ("isolation setup is idempotent and honours legacy direct-write rules", TestIsolationSetupAsync),
+    ("profiles resolve by name or unique prefix", TestProfileResolveAsync),
 };
 
 var failures = new List<string>();
@@ -74,6 +78,192 @@ static async Task TestKeyringPrimitivesAsync()
     if (!SandboxieBackend.IsCurrentProcessSandboxed())
         Throws<HubException>(() => AntigravityKeyring.EnsureIsolation(forceFresh: true));
     await Task.CompletedTask;
+}
+
+static async Task TestSandboxieIniAsync()
+{
+    var root = Path.Combine(Path.GetTempPath(), "agph-ini-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(root);
+    try
+    {
+        var utf16 = Path.Combine(root, "utf16.ini");
+        var body = System.Text.Encoding.Unicode.GetBytes(
+            "[GlobalSettings]\r\nFileRootPath=\\??\\%SystemDrive%\\Sandbox\r\n" +
+            "[AGPH_Test]\r\nEnabled=y\r\nOpenFilePath=C:\\One\r\nOpenFilePath.1=C:\\Two\r\nConfigLevel=10\r\n");
+        File.WriteAllBytes(utf16, new byte[] { 0xFF, 0xFE }.Concat(body).ToArray());
+
+        var file = SandboxieIniFile.Load(utf16);
+        var values = file.GetValues("AGPH_Test", "OpenFilePath");
+        Equal(2, values.Count);
+        True(values.Contains("C:\\One") && values.Contains("C:\\Two"), "legacy indexed keys are still read");
+        True(file.SectionExists("AGPH_Test"), "the box section is found");
+        True(!file.SectionExists("AGPH_Other"), "unrelated sections are not confused");
+
+        file.ReplaceValues("AGPH_Test", "OpenFilePath", new[] { "C:\\Three", "C:\\Four" });
+        file.Save();
+
+        var reloaded = SandboxieIniFile.Load(utf16);
+        var after = reloaded.GetValues("AGPH_Test", "OpenFilePath");
+        Equal(2, after.Count);
+        True(after.Contains("C:\\Three") && after.Contains("C:\\Four"), "saved values are read back");
+        var text = File.ReadAllText(utf16);
+        True(text.Contains("OpenFilePath=C:\\Three"), "writes use the bare key the driver honours");
+        True(!text.Contains("OpenFilePath.1"), "indexed keys are never written back");
+        True(text.Contains("ConfigLevel=10"), "unrelated settings survive");
+        True(text.Contains("[GlobalSettings]"), "other sections survive");
+        True(file.LastBackupPath is not null && File.Exists(file.LastBackupPath), "a backup is kept");
+
+        var utf8 = Path.Combine(root, "utf8.ini");
+        File.WriteAllText(utf8, "[AGPH_U8]\nOpenFilePath=D:/Alpha\nEnabled=y\n");
+        var plain = SandboxieIniFile.Load(utf8);
+        Equal(1, plain.GetValues("AGPH_U8", "OpenFilePath").Count);
+        plain.ReplaceValues("AGPH_U8", "OpenFilePath", new[] { "D:/Beta" });
+        plain.Save();
+        var plainText = File.ReadAllText(utf8);
+        True(plainText.Contains("D:/Beta"), "utf-8 without BOM is written back");
+        True(!plainText.Contains("D:/Alpha"), "replaced values are removed");
+        True(!plainText.Contains("OpenFilePath.1"), "utf-8 writes stay bare");
+
+        Throws<HubException>(() => SandboxieIniFile.Load(utf8).ReplaceValues("AGPH_Missing", "OpenFilePath", new[] { "X" }));
+        Throws<HubException>(() => SandboxieIniFile.Load(Path.Combine(root, "absent.ini")));
+        True(SandboxieIniFile.TryLoad(Path.Combine(root, "absent.ini")) is null, "try-load returns null instead of throwing");
+    }
+    finally
+    {
+        try { Directory.Delete(root, recursive: true); } catch (IOException) { }
+    }
+    await Task.CompletedTask;
+}
+
+static async Task TestElevationHelperAsync()
+{
+    var root = Path.Combine(Path.GetTempPath(), "agph-elev-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(root);
+    try
+    {
+        var request = new ElevationRequest(AdminOperation.WriteThrough, "AGPH_Test", new[] { "C:\\One", "C:\\Two" });
+        var encoded = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(request, HubJsonContext.Default.ElevationRequest);
+        var restored = System.Text.Json.JsonSerializer.Deserialize(encoded, HubJsonContext.Default.ElevationRequest)!;
+        Equal(AdminOperation.WriteThrough, restored.Operation);
+        Equal("AGPH_Test", restored.BoxName);
+        Equal(2, restored.Paths.Count);
+
+        var ini = Path.Combine(root, "Sandboxie.ini");
+        File.WriteAllText(ini, "[AGPH_Test]\nEnabled=y\nOpenFilePath=D:/Old\n[Other]\nEnabled=y\n");
+        var options = new AdminOperations.Options(ConfigurationPath: ini, RestartService: false, SkipRunningCheck: true);
+
+        var okRequest = Path.Combine(root, "ok.json");
+        var okResult = Path.Combine(root, "ok.result.json");
+        await File.WriteAllBytesAsync(okRequest, System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(
+            new ElevationRequest(AdminOperation.WriteThrough, "AGPH_Test", new[] { root }), HubJsonContext.Default.ElevationRequest));
+        Equal(0, AdminOperations.RunHelper(okRequest, okResult, options));
+        var written = File.ReadAllText(ini);
+        True(written.Contains("OpenFilePath=" + root), "direct-write rules land in bare form");
+        True(!written.Contains("OpenFilePath.1"), "indexed keys are never produced");
+        True(!written.Contains("D:/Old"), "previous rules are replaced");
+        True(written.Contains("[Other]"), "other boxes are untouched");
+        var ok = System.Text.Json.JsonSerializer.Deserialize(File.ReadAllBytes(okResult), HubJsonContext.Default.ElevationResult)!;
+        True(ok.Succeeded, "success is reported");
+        True(ok.BackupPath is not null && File.Exists(ok.BackupPath), "the backup path is reported back");
+
+        var absentRequest = Path.Combine(root, "absent.json");
+        var absentResult = Path.Combine(root, "absent.result.json");
+        await File.WriteAllBytesAsync(absentRequest, System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(
+            new ElevationRequest(AdminOperation.WriteThrough, "AGPH_Absent", new[] { root }), HubJsonContext.Default.ElevationRequest));
+        Equal(1, AdminOperations.RunHelper(absentRequest, absentResult, options));
+        var failed = System.Text.Json.JsonSerializer.Deserialize(File.ReadAllBytes(absentResult), HubJsonContext.Default.ElevationResult)!;
+        True(!failed.Succeeded, "a missing box section is a failure, not a silent no-op");
+        True(!string.IsNullOrWhiteSpace(failed.Detail), "failures carry a reason");
+
+        var unknownRequest = Path.Combine(root, "unknown.json");
+        var unknownResult = Path.Combine(root, "unknown.result.json");
+        await File.WriteAllBytesAsync(unknownRequest, System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(
+            new ElevationRequest("nuke-everything", "AGPH_Test", new[] { root }), HubJsonContext.Default.ElevationRequest));
+        Equal(1, AdminOperations.RunHelper(unknownRequest, unknownResult, options));
+        True(!System.Text.Json.JsonSerializer.Deserialize(File.ReadAllBytes(unknownResult), HubJsonContext.Default.ElevationResult)!.Succeeded,
+            "unknown operations are refused");
+
+        Equal(1, AdminOperations.RunHelper(Path.Combine(root, "nope.json"), Path.Combine(root, "nope.result.json"), options));
+
+        var bridge = new WindowsElevationBridge(Path.Combine(root, "absent.exe"), root);
+        True(!bridge.IsAvailable, "a missing helper is never advertised as usable");
+        var denied = await bridge.RunAsync(new ElevationRequest(AdminOperation.CreateBox, "AGPH_Test", Array.Empty<string>()));
+        True(!denied.Succeeded, "without a helper the bridge reports failure instead of pretending");
+        var unavailable = await new UnavailableElevationBridge("disabled").RunAsync(
+            new ElevationRequest(AdminOperation.CreateBox, "AGPH_Test", Array.Empty<string>()));
+        True(!unavailable.Succeeded && unavailable.Detail == "disabled", "the null bridge never succeeds");
+    }
+    finally
+    {
+        try { Directory.Delete(root, recursive: true); } catch (IOException) { }
+    }
+}
+
+static async Task TestIsolationSetupAsync()
+{
+    using var fixture = new Fixture();
+    var backend = new FakeIsolationBackend();
+    var elevation = new FakeElevationBridge(backend);
+    var launcher = new IsolatedProfileLauncher(fixture.Paths, new FakeDriver(fixture.Paths, fixture.Executable),
+        fixture.Repository, () => backend, () => (fixture.Executable, Array.Empty<string>()));
+    var setup = new IsolationSetup(launcher, elevation, () => backend);
+
+    // Fresh profile: the whole chain is applied in one call.
+    var id = Guid.NewGuid();
+    var report = await setup.EnsureReadyAsync(id, allowFreshBox: false);
+    True(report.Ready, "a fresh profile becomes ready in one call");
+    Equal(IsolationStage.Ready, report.Stage);
+    Equal(1, elevation.Calls.Count(c => c.Operation == AdminOperation.CreateBox));
+    Equal(1, elevation.Calls.Count(c => c.Operation == AdminOperation.WriteThrough));
+    Equal(1, backend.ShimCalls);
+
+    // The same call a second time must apply nothing.
+    elevation.Calls.Clear();
+    var shimBefore = backend.ShimCalls;
+    var again = await setup.EnsureReadyAsync(id, allowFreshBox: false);
+    True(again.Ready);
+    Equal(0, elevation.Calls.Count);
+    Equal(shimBefore, backend.ShimCalls);
+    True(again.Steps.All(step => !step.Applied), "a second run applies nothing");
+
+    // A pre-existing unowned box still requires an explicit acknowledgement.
+    var other = Guid.NewGuid();
+    backend.Boxes.Add(IsolatedProfileLauncher.BoxNameFor(other));
+    await ThrowsAsync<HubException>(() => setup.EnsureReadyAsync(other, allowFreshBox: false));
+    var claimed = await setup.EnsureReadyAsync(other, allowFreshBox: true);
+    True(claimed.Ready, "an acknowledged fresh box can be taken over");
+
+    // The legacy five-rule direct-write form is honoured as complete, so
+    // profiles configured before the one-rule form are not forced to reapply.
+    var legacy = Guid.NewGuid();
+    var legacyBox = IsolatedProfileLauncher.BoxNameFor(legacy);
+    backend.Boxes.Add(legacyBox);
+    await launcher.PrepareAsync(legacy, legacyBox, claimExistingFreshBox: true);
+    backend.SetConfig(legacyBox,
+        fixture.Paths.Home(legacy), fixture.Paths.Roaming(legacy), fixture.Paths.Local(legacy),
+        fixture.Paths.Temp(legacy), fixture.Paths.UserData(legacy));
+    Equal(IsolationStage.Ready, await setup.DetectAsync(legacy));
+
+    // Elevation failure is surfaced, never swallowed.
+    elevation.FailNext = true;
+    var blocked = Guid.NewGuid();
+    await ThrowsAsync<HubException>(() => setup.EnsureReadyAsync(blocked, allowFreshBox: false));
+    True((await launcher.FindAsync(blocked)) is null, "a failed elevation leaves no half-prepared mapping");
+}
+
+static async Task TestProfileResolveAsync()
+{
+    using var fixture = new Fixture();
+    var alpha = await fixture.Profiles.CreateAsync("Work Alpha");
+    var beta = await fixture.Profiles.CreateAsync("Work Beta");
+    var personal = await fixture.Profiles.CreateAsync("Personal");
+
+    Equal(alpha.Id, (await fixture.Profiles.ResolveAsync(alpha.Id.ToString("D"))).Id);
+    Equal(beta.Id, (await fixture.Profiles.ResolveAsync("work beta")).Id);
+    Equal(personal.Id, (await fixture.Profiles.ResolveAsync("Pers")).Id);
+    Equal(alpha.Id, (await fixture.Profiles.ResolveAsync(alpha.Id.ToString("D")[..12])).Id);
+    await ThrowsAsync<HubException>(() => fixture.Profiles.ResolveAsync("missing"));
+    await ThrowsAsync<HubException>(() => fixture.Profiles.ResolveAsync("Work"));
 }
 
 static async Task TestIsolationPreparationAsync()
@@ -652,6 +842,7 @@ sealed class FakeIsolationBackend : IIsolationBackend
     public int LaunchCalls { get; private set; }
     public bool BoxExists(string box) => Boxes.Contains(box);
     public void CreateBox(string box) => Boxes.Add(box);
+    public void SetConfig(string box, params string[] values) => _settings[box] = [.. values];
     public IReadOnlyList<int> ListPids(string box) => _pids.GetValueOrDefault(box, []).ToList();
     public IReadOnlyList<string> GetIndexedSettingValues(string box, string setting, int maximum = 64) =>
         _settings.GetValueOrDefault(box, []).ToList();
@@ -668,6 +859,32 @@ sealed class FakeIsolationBackend : IIsolationBackend
         LaunchCalls++;
         _pids[box] = [++_nextPid];
         return _nextPid;
+    }
+}
+
+sealed class FakeElevationBridge(FakeIsolationBackend backend) : IElevationBridge
+{
+    public bool IsAvailable => true;
+    public bool IsElevated => true;
+    public List<ElevationRequest> Calls { get; } = [];
+    public bool FailNext { get; set; }
+
+    public Task<ElevationResult> RunAsync(ElevationRequest request, CancellationToken cancellationToken = default)
+    {
+        Calls.Add(request);
+        if (FailNext) return Task.FromResult(ElevationResult.Failed("fake elevation failure"));
+        switch (request.Operation)
+        {
+            case AdminOperation.CreateBox:
+                backend.CreateBox(request.BoxName);
+                break;
+            case AdminOperation.WriteThrough:
+                backend.SetConfig(request.BoxName, [.. request.Paths]);
+                break;
+            default:
+                return Task.FromResult(ElevationResult.Failed($"unknown operation {request.Operation}"));
+        }
+        return Task.FromResult(ElevationResult.Ok());
     }
 }
 

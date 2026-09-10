@@ -168,14 +168,11 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
 
     public IReadOnlyList<string> WriteThroughPaths(Guid profileId, string? workspacePath = null)
     {
-        var result = new List<string>
-        {
-            _paths.Home(profileId),
-            _paths.Roaming(profileId),
-            _paths.Local(profileId),
-            _paths.Temp(profileId),
-            _paths.UserData(profileId)
-        };
+        // One rule for the whole profile root instead of five rules for its
+        // managed sub-directories. A path move or a new managed child no longer
+        // invalidates the configuration. The legacy five-rule form is still
+        // honoured as complete by IsWriteThroughCovered below.
+        var result = new List<string> { _paths.ProfileRoot(profileId) };
         if (!string.IsNullOrWhiteSpace(workspacePath))
         {
             try { result.Add(Path.GetFullPath(workspacePath)); }
@@ -287,9 +284,29 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
         if (!exists)
             return new IsolationRuntimeStatus(profileId, record.BoxName, true, false, record.KeyringClaimed, 0, false, expected);
         var configured = backend.GetIndexedSettingValues(record.BoxName, "OpenFilePath");
-        var missing = expected.Where(path => !configured.Any(value => PathEquals(value, path))).ToList();
+        var missing = expected.Where(path => !IsWriteThroughCovered(path, profileId, configured)).ToList();
         return new IsolationRuntimeStatus(profileId, record.BoxName, true, true, record.KeyringClaimed,
             backend.ListPids(record.BoxName).Count, missing.Count == 0, missing);
+    }
+
+    /// <summary>
+    /// The profile root is covered either by its own rule or by the legacy
+    /// five-rule form that opened every managed sub-directory individually.
+    /// Workspace paths must match exactly.
+    /// </summary>
+    private bool IsWriteThroughCovered(string expected, Guid profileId, IReadOnlyList<string> configured)
+    {
+        if (configured.Any(value => PathEquals(value, expected))) return true;
+        if (!PathEquals(expected, _paths.ProfileRoot(profileId))) return false;
+        var legacy = new[]
+        {
+            _paths.Home(profileId),
+            _paths.Roaming(profileId),
+            _paths.Local(profileId),
+            _paths.Temp(profileId),
+            _paths.UserData(profileId)
+        };
+        return legacy.All(child => configured.Any(value => PathEquals(value, child)));
     }
 
     public async Task<IReadOnlyList<IsolationRuntimeStatus>> StatusAsync(CancellationToken cancellationToken = default)
