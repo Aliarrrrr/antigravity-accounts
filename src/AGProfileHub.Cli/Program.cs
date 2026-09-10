@@ -44,6 +44,17 @@ internal static class CliApplication
                 return shim.Created ? 11 : 0;
             }
 
+            // Runs before any Hub bootstrap: this verb is the elevated helper
+            // launched by WindowsElevationBridge. It touches only the two paths
+            // it is given and never creates a Hub data root.
+            if (parsed.Command[0].Equals("admin-helper", StringComparison.OrdinalIgnoreCase))
+            {
+                var tail = parsed.Command.Skip(1).ToList();
+                if (tail.Count != 2)
+                    return WriteError("Usage: admin-helper <request-path> <result-path>", "usage_error", 2, parsed.Json);
+                return AdminOperations.RunHelper(tail[0], tail[1]);
+            }
+
             var hub = HubBootstrap.CreateDefault(parsed.DataRoot);
             var result = await ExecuteAsync(hub, parsed.Command, parsed.Json).ConfigureAwait(false);
             if (parsed.Json && result is not null)

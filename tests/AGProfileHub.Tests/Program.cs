@@ -37,6 +37,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("reused PID never receives close or focus", TestReusedPidAsync),
     ("shortcut binds UUID and quoted data root without overwriting", TestShortcutAsync),
     ("sandboxie ini round-trips bare and indexed keys", TestSandboxieIniAsync),
+    ("elevated helper writes direct-write rules and reports failures", TestElevationHelperAsync),
 };
 
 var failures = new List<string>();
@@ -130,6 +131,70 @@ static async Task TestSandboxieIniAsync()
         try { Directory.Delete(root, recursive: true); } catch (IOException) { }
     }
     await Task.CompletedTask;
+}
+
+static async Task TestElevationHelperAsync()
+{
+    var root = Path.Combine(Path.GetTempPath(), "agph-elev-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(root);
+    try
+    {
+        var request = new ElevationRequest(AdminOperation.WriteThrough, "AGPH_Test", new[] { "C:\\One", "C:\\Two" });
+        var encoded = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(request, HubJsonContext.Default.ElevationRequest);
+        var restored = System.Text.Json.JsonSerializer.Deserialize(encoded, HubJsonContext.Default.ElevationRequest)!;
+        Equal(AdminOperation.WriteThrough, restored.Operation);
+        Equal("AGPH_Test", restored.BoxName);
+        Equal(2, restored.Paths.Count);
+
+        var ini = Path.Combine(root, "Sandboxie.ini");
+        File.WriteAllText(ini, "[AGPH_Test]\nEnabled=y\nOpenFilePath=D:/Old\n[Other]\nEnabled=y\n");
+        var options = new AdminOperations.Options(ConfigurationPath: ini, RestartService: false, SkipRunningCheck: true);
+
+        var okRequest = Path.Combine(root, "ok.json");
+        var okResult = Path.Combine(root, "ok.result.json");
+        await File.WriteAllBytesAsync(okRequest, System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(
+            new ElevationRequest(AdminOperation.WriteThrough, "AGPH_Test", new[] { root }), HubJsonContext.Default.ElevationRequest));
+        Equal(0, AdminOperations.RunHelper(okRequest, okResult, options));
+        var written = File.ReadAllText(ini);
+        True(written.Contains("OpenFilePath=" + root), "direct-write rules land in bare form");
+        True(!written.Contains("OpenFilePath.1"), "indexed keys are never produced");
+        True(!written.Contains("D:/Old"), "previous rules are replaced");
+        True(written.Contains("[Other]"), "other boxes are untouched");
+        var ok = System.Text.Json.JsonSerializer.Deserialize(File.ReadAllBytes(okResult), HubJsonContext.Default.ElevationResult)!;
+        True(ok.Succeeded, "success is reported");
+        True(ok.BackupPath is not null && File.Exists(ok.BackupPath), "the backup path is reported back");
+
+        var absentRequest = Path.Combine(root, "absent.json");
+        var absentResult = Path.Combine(root, "absent.result.json");
+        await File.WriteAllBytesAsync(absentRequest, System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(
+            new ElevationRequest(AdminOperation.WriteThrough, "AGPH_Absent", new[] { root }), HubJsonContext.Default.ElevationRequest));
+        Equal(1, AdminOperations.RunHelper(absentRequest, absentResult, options));
+        var failed = System.Text.Json.JsonSerializer.Deserialize(File.ReadAllBytes(absentResult), HubJsonContext.Default.ElevationResult)!;
+        True(!failed.Succeeded, "a missing box section is a failure, not a silent no-op");
+        True(!string.IsNullOrWhiteSpace(failed.Detail), "failures carry a reason");
+
+        var unknownRequest = Path.Combine(root, "unknown.json");
+        var unknownResult = Path.Combine(root, "unknown.result.json");
+        await File.WriteAllBytesAsync(unknownRequest, System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(
+            new ElevationRequest("nuke-everything", "AGPH_Test", new[] { root }), HubJsonContext.Default.ElevationRequest));
+        Equal(1, AdminOperations.RunHelper(unknownRequest, unknownResult, options));
+        True(!System.Text.Json.JsonSerializer.Deserialize(File.ReadAllBytes(unknownResult), HubJsonContext.Default.ElevationResult)!.Succeeded,
+            "unknown operations are refused");
+
+        Equal(1, AdminOperations.RunHelper(Path.Combine(root, "nope.json"), Path.Combine(root, "nope.result.json"), options));
+
+        var bridge = new WindowsElevationBridge(Path.Combine(root, "absent.exe"), root);
+        True(!bridge.IsAvailable, "a missing helper is never advertised as usable");
+        var denied = await bridge.RunAsync(new ElevationRequest(AdminOperation.CreateBox, "AGPH_Test", Array.Empty<string>()));
+        True(!denied.Succeeded, "without a helper the bridge reports failure instead of pretending");
+        var unavailable = await new UnavailableElevationBridge("disabled").RunAsync(
+            new ElevationRequest(AdminOperation.CreateBox, "AGPH_Test", Array.Empty<string>()));
+        True(!unavailable.Succeeded && unavailable.Detail == "disabled", "the null bridge never succeeds");
+    }
+    finally
+    {
+        try { Directory.Delete(root, recursive: true); } catch (IOException) { }
+    }
 }
 
 static async Task TestIsolationPreparationAsync()
