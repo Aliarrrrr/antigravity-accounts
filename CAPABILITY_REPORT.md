@@ -1,48 +1,53 @@
-# Capability report — 2026-09-07
+# Capability report — 2026-09-09
 
 ## Verdict
-Desktop 2.12.2 supports the **observed runtime portion** of an experimental multi-profile strategy: independent process homes plus user-data directories. Manual acceptance showed that concurrently running profiles resolved to the Google account signed in later, so concurrent Google-account isolation under one Windows user is **incompatible**. Do not call the product a separate-account manager.
 
-## Environment
-Windows 11 Home x64 build 26200; PowerShell 7.6.5; Git 2.55.0.windows.2. Initially no .NET SDK, only .NET 7.0.20 runtime. Antigravity discovered at LocalApplicationData/Programs/antigravity/Antigravity.exe; file version 2.12.2, product 2.12.2.0. app.asar package reports version 2.12.2 and Agentic Desktop Application. No original Antigravity processes were running at inspection. Machine-specific evidence lives in ignored artifacts/probe/capability-report.json.
+Antigravity Desktop 2.12.2 can run concurrent Google-account Profiles under one Windows user when each instance uses both dedicated filesystem paths and a dedicated Sandboxie box whose local credential store already owns the fixed target `gemini:antigravity`. This exact combination passed manual A/B authentication and restart acceptance with Sandboxie Plus 1.18.2 / core 5.73.2.
 
-## Static inspection (installed application code only)
-Read ASAR header and packaged JavaScript; did not modify the application or inspect credential files. dist/main.js calls requestSingleInstanceLock(). dist/paths.js computes core state under os.homedir()/.gemini/antigravity and config under os.homedir()/.gemini/config/config.json; UI storage uses app.getPath('userData'). dist/languageServer.js passes --app_data_dir antigravity to its backend, inherits process environment, and creates separate local ports. Child command lines contain ephemeral secrets and must never be logged by Hub. The application only showed deep-link argv handling in inspected main code; desktop --help, --version, --profile, workspace arguments are not established contracts.
+Directory-only launch remains incompatible with concurrent accounts and is kept as a serial fallback. The result is version-bound and does not make a Sandboxie box a security boundary between Windows users.
 
-## Dynamic probe
-scripts/Probe-Antigravity.ps1 created two disposable directories under TEMP/AGProfileHub-Probes/<random-id>. Each launched the same executable with independent --user-data-dir and process-only home/appdata/temp variables. After staggered 15-second observations, roots 3724 and 3204 were alive concurrently with separate language_server children 10724 and 3180. Both created Local State, cache/session directories, and their own home/.gemini/{antigravity,config}. Closing/terminating A left B alive. Final process inspection found no Antigravity or language_server residue; probe reported cleanup completed. The probe does not log in, inspect credentials, or evaluate authentication.
+## Evidence chain
 
-| Capability | Result |
+- Static and dynamic app inspection established that Desktop 2.12.2 resolves `.gemini` through process home, Electron state through `--user-data-dir`, and launches a separate language server with dynamic local ports.
+- Disposable dual-process probes observed independent roots, language servers, home/user-data trees, Host Bridge ports, and visible windows.
+- The original authenticated A/B run failed despite those independent paths: both windows resolved to the later signed-in account.
+- Metadata-only Credential Manager inspection identified one generic entry with the hardcoded target `gemini:antigravity`. No token bytes were exported or logged.
+- Sandboxie testing proved asymmetric credential behavior: boxed writes are isolated, but a missing boxed read falls through to the host entry. The earlier synthetic test was a false positive because its host write had not been positively established.
+- A fresh box-local same-name invalid placeholder stopped that fall-through. The vendor then used its own isolated login storage behavior.
+- Final manual acceptance observed distinct accounts in two concurrent official windows, persistence after restarting A, no PID interruption in B, and unchanged host credential metadata.
+
+The release-safe root-cause and acceptance evidence is preserved in `KEYRING_ISOLATION_REPORT.md` and `TAKEOVER_REPORT.md`. Raw forensic captures remain local-only and are intentionally excluded from the product repository.
+
+## Current capability matrix
+
+| Capability | Current result |
 |---|---|
-| Executable/version discovery | verified |
-| Separate root and backend processes concurrently | observed |
-| Electron user-data and home .gemini paths | observed separate directory creation |
-| Stop A while B survives | observed |
-| Visible independent windows | observed on second visible probe; both rendered separate first-run screens |
-| Account A/B login persistence and non-overwrite | failed: sequential restart persistence passed, but concurrently running profiles both displayed the account signed in later |
-| OAuth protocol callback destination with two instances | blocked: concurrent authenticated operation is incompatible; shared protocol registration has no Profile identifier |
-| Windows Credential Manager / DPAPI isolation | unknown; no secret access performed |
-| Registry / mutex / IPC resources | scoped Electron singleton did not prevent test; exhaustive isolation unknown |
-| Settings contents independence across restart | not evaluated; this is not an authentication-isolation result |
-| Workspace positional launch | unknown |
-| IDE extensions separation | not applicable to Desktop 2; old IDE not probed |
+| Executable/version discovery | verified for installed Desktop 2.12.2 |
+| Independent root/backend processes | verified |
+| Independent home/user-data | verified |
+| Per-box keyring ownership | verified on tested Sandboxie version |
+| Distinct concurrent Google accounts | passed manual acceptance |
+| Restart one Profile without changing the other | passed manual acceptance |
+| Host login left unchanged | passed metadata/hash comparison; no token exported |
+| Normal CLI/GUI/shortcut isolation routing | implemented; deterministic regression coverage |
+| Duplicate isolated launch | returns existing box state instead of launching another root |
+| Mixed launch-all | fail-closed preflight; no partial start |
+| Direct-write configuration detection | implemented against actual `OpenFilePath.N` values |
+| Workspace host write-through | pending manual acceptance after current rules are corrected |
+| Logout non-interference | pending manual acceptance |
+| Workspace launch forwarding | unsupported by verified vendor contract; metadata only |
+| App or Sandboxie version changes | must be re-probed/re-accepted |
 | Standalone CLI/headless identity | not investigated |
 
-The first probe inherited vendor output unintentionally; subsequent code drains/discards stdout and stderr. Reports persist metadata only. No Google credential contents were read or copied. Synthetic home can affect Git, SSH, plugins and downstream tools. No guarantee that all future vendor code honors environment overrides.
+## Safety properties
 
-## Sources
-- [Google's 2.0 announcement](https://www.antigravity.google/blog/introducing-google-antigravity-2): a separate desktop application from the IDE.
-- [Google remote-control docs](https://antigravity.google/docs/remote-control/): Windows shared default .gemini/config location.
-- [Node os.homedir](https://nodejs.org/api/os.html): Windows uses USERPROFILE when defined.
-- [Electron app paths](https://www.electronjs.org/docs/latest/api/app): userData/sessionData semantics.
-- [Microsoft .NET support](https://learn.microsoft.com/en-us/dotnet/core/releases-and-support): .NET 10 LTS supported through November 2028.
+- Google login remains inside the official app.
+- The Hub does not collect passwords, token contents, cookies, OAuth codes, or authentication logs.
+- The same-name placeholder is invalid data, written only inside a process confirmed to have Sandboxie's injected `SbieDll.dll`.
+- Existing unregistered boxes are not claimed unless the caller explicitly passes `--fresh`; this acknowledgement is only valid for a never-signed-in box.
+- Missing boxes, unclaimed keyrings, duplicate mappings, corrupt/future isolation state, and unexpected shim exit codes fail closed.
+- Profile/workspace direct-write rules require explicit elevation and are reported separately from account-isolation success.
 
-Re-run probe on update. Preserve unknowns; directory creation alone never proves Google authentication isolation.
+## Current local observation
 
-## Manual authenticated acceptance
-On September 8, the user reported that A and B each kept their then-current session through a sequential Hub stop/relaunch. B initially displayed A's existing session; after the user signed out in B and completed a later login, B retained that session through restart. With A and B running concurrently, both then displayed the account signed in later. No credentials, cookies, tokens, account identifiers, or authentication screens were inspected or recorded. This is an account-isolation failure; both profile data directories are preserved for diagnosis.
-
-## Visible follow-up
-Re-ran `-Visible -ObserveSeconds 35` at 09:13 UTC. Roots 11088 and 2740 both had nonzero window handles. Windows computer-use inspection identified two distinct Antigravity windows (723210 and 68022), activated each, and observed each rendering the official first-run Security Notice & Data Use page. No onboarding choices, privacy settings or login actions were performed. Both process homes/state paths were separate; A stop left B alive; cleanup completed without process residue. This proves separate rendered first-run windows, not authenticated functionality.
-
-Further packaged main.js inspection confirms a shared `antigravity` URL protocol: it checks/registers the executable as default handler without a profile identifier, then routes received deep links to its own first window. This strengthens the callback-routing risk; no registry modifications by Hub are proposed. The vendor app itself can check protocol registration and updates when launched, so disposable-directory isolation is not a guarantee of zero system-wide vendor side effects.
+The two accepted boxes each contain 11 processes and report backend, box, keyring and direct-write readiness. The remaining workspace gate is behavioral: create a harmless file from inside a boxed workspace, confirm it appears on the host, and confirm it survives restart. This is a release-quality acceptance step, not a reversal of the account-isolation result.

@@ -1,5 +1,7 @@
 # 根因证据与后续方向 — 供后续维护
 
+> 历史记录（2026-09-08）：本文在固定 Credential Manager 目标被动态确认前写成。其“只能串行”的结论已由 `KEYRING_ISOLATION_REPORT.md` 和 ADR-012 取代；保留本文用于理解当时证据和继续取证的理由。
+
 日期：2026-09-08。本文档自包含：所有结论附证据与复现命令，不需要重做考古。
 当前权威状态见 `PROJECT_STATE.md` / `MANUAL_TEST_PLAN.md` / `CAPABILITY_REPORT.md`。
 

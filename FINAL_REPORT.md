@@ -1,22 +1,43 @@
-# Delivery report — 2026-09-08
+# Delivery report — 2026-09-09
 
 ## Status
-Antigravity Profile Hub 0.1.2 is an experimental Windows serial profile manager. Core, CLI, WPF GUI, desktop shortcuts and packaging are implemented. Sequential A/B restart-persistence checks passed, but authenticated multi-account isolation failed: with both profiles open, both showed the account signed in later. This release must not be described as supporting separate Google accounts; both profile data directories are preserved for diagnosis.
+
+Antigravity Profile Hub 0.2.3 is an experimental Windows multi-Profile manager for the exact tested combination of Antigravity Desktop 2.12.2 and Sandboxie Plus 1.18.2 / core 5.73.2. The core requirement—two official Desktop windows under one Windows user, concurrently retaining different Google accounts—passed manual acceptance after the fixed `gemini:antigravity` credential collision was isolated per box.
+
+Normal Core, CLI, WPF and desktop-shortcut lifecycle entry points now use the prepared box automatically. Unprepared Profiles retain the safe serial fallback.
 
 ## Delivered behavior
-N immutable UUID profiles; rename without moving data; workspace metadata; launch, stop, restart, status and batch operations; live process reconciliation; duplicate-launch handling; safe unregistering with data preserved; doctor and structured logs.
 
-The GUI adds an executable picker, operation locking, status detail wrapping, explicit incomplete-stop messages and an isolated --data-root option. It refreshes status after failed mutations and disables `Launch all` when multiple Profiles make that action unsafe. Desktop shortcuts call the CLI with the UUID and original data root. They still work after a profile rename; existing links are not overwritten. Moving the package requires recreating shortcuts.
+- UUID-backed create/list/rename/remove-with-data-preserved and workspace metadata.
+- Version-pinned launch plans with dedicated home/appdata/temp/user-data.
+- Per-Profile Sandboxie preparation, strict fresh-box acknowledgement, box/keyring/write-through status, launch, duplicate launch, stop and restart.
+- All-or-nothing `launch-all` preflight; mixed prepared/unprepared sets start nothing.
+- Atomic, locked, schema-checked Profile/settings/runtime/isolation state and unique box ownership.
+- Live PID/start-time/executable/user-data reconciliation for vendor roots.
+- Host-scope keyring-shim refusal; no password/token/cookie export or authentication automation.
+- WPF isolation status/actions, Doctor, CLI JSON, structured Hub logs and UUID-bound desktop shortcuts.
+- Validated elevated setup scripts with write-through verification/rollback.
+- Self-contained Windows x64 packaging with external-dependency manifest and required scripts.
 
 ## Verification
-September 8: Release build has zero warnings/errors; Core/process/shortcut and launch-barrier assertions pass 26/26; independent CLI metadata concurrency checks pass 12/12; real-process integration passes 12/12. The integration now races independent CLI processes both within one data root and across two data roots, and proves exactly one root starts. It also covers duplicate launch, sequential handoff, single-root restart and data-preserving removal. GUI create, rename, launch and graceful stop were exercised against an isolated test root, including visible running and stopped status. Windows shortcut tests verify target/arguments, Unicode names, rename stability and preservation of existing links.
 
-scripts/Publish.ps1 produces the self-contained win-x64 package under artifacts/package/<timestamp>/AGProfileHub with a ZIP and SHA-256 sidecar. scripts/Test-Package.ps1 performs actual Windows .lnk launch, duplicate launch and stop checks against disposable profiles. The September 7 package remains a historical build; use the newest verified package for this continuation.
+- Release build: 0 warnings, 0 errors.
+- Deterministic suite: 34/34 passed.
+- Host shim safety: direct call returned `shim_outside_isolation`; shared entry metadata stayed present at 503 bytes before/after.
+- Live reconciliation during takeover: both accepted boxes retained 11 processes and their original root PIDs.
+- Source and packaged WPF visual smoke passed, including both Profile rows, isolation status/actions, `Launch all`, and Doctor capability output.
+- Packaged CLI help, 0.2.3 manifest, required scripts and SHA-256 sidecar were verified.
 
-The newest timestamped `artifacts/package/*/AGProfileHub-win-x64.zip` built from this report is the verified 0.1.2 package; earlier packages predate the persistent cross-data-root launch barrier. Packaged shortcut lifecycle plus the launch-all gate pass 6/6. The current Doctor reports Desktop 2.12.2 and Google account isolation as incompatible. Ten integration log events were checked against the allowlist and one fixed sanitized command template; no unexpected fields or templates were found.
+Artifact: the newest `artifacts/package/<timestamp>/AGProfileHub-win-x64.zip` produced from this report. The repository `PROJECT_STATE.md` records the exact verified path and SHA-256.
 
-## Manual acceptance
-MANUAL_TEST_PLAN.md remains authoritative. Sequential restart persistence passed for A and B, including B after its first launch displayed A's session. In the concurrent A/B test, both profiles showed the account signed in later, so authenticated account isolation failed. Preserve the profile data directories; do not claim authenticated multi-account support. Cross-profile restart/stop, settings/project behavior, Hub recovery, shortcut identity, synthetic-home behavior, and OAuth callback routing remain unverified. No credential inspection or automation of authentication was performed.
+The real-process packaged shortcut smoke was not run because the accepted A/B Antigravity instances remain active; its disposable direct launch is intentionally blocked in that condition. Earlier 0.1.2 direct-path shortcut/integration evidence remains valid for that fallback.
+
+## Manual acceptance and open gates
+
+Passed: distinct A/B accounts concurrently, A restart persistence, B remaining uninterrupted while A restarted, and unchanged host authentication entry.
+
+The current default Profiles now report the correct configured `OpenFilePath` set. Still required: verify a boxed workspace edit appears on the host and survives restart, and verify logout/re-authentication in one Profile does not affect the other. These steps require user-visible application/authentication actions and were not automated.
 
 ## Limits
-Compatibility is pinned to locally observed Desktop 2.12.2. Direct manual observation showed authenticated account isolation failed for this build: concurrently launched profiles both showed the account signed in later. Static evidence strongly implicates a Windows-user-scoped credential facility, but the exact runtime storage contract was not dynamically traced and no credential contents were read. Synthetic home changes tool configuration lookup. Workspace forwarding is unsupported; workspace association stores metadata only. Tray, standalone CLI/headless identity and Git worktree orchestration remain deferred. See SECURITY.md for path-isolation boundaries.
+
+The box is an application-state isolation mechanism, not a security boundary between Windows users. Compatibility must be reopened after either tested dependency changes. Vendor workspace forwarding, standalone CLI/headless identity, Tray, Agent Safe Git worktrees, quota management, sandbox cleanup and destructive Profile purge are deferred.

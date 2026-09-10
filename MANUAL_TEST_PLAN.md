@@ -1,28 +1,58 @@
-# Manual verification — authenticated account-isolation failure
+# Manual verification — isolated multi-account backend
 
-September 8 user update: A and B passed sequential restart-persistence checks. B's first launch showed A's existing session; after the user signed out in B and completed a later login, B retained that session after a Hub stop/relaunch. When A and B then ran concurrently, both showed the account signed in later. Authenticated account isolation failed. Preserve both profile data directories and do not claim separate-account support. Engineering checks must not fill these account rows automatically.
+Real Google authentication is never automated. Do not send credentials, OAuth codes, token/cookie exports, account identifiers, or screenshots containing private account information. Record only pass/fail and non-sensitive behavior.
 
-Use two new Hub profiles; keep original installation profile untouched. Do not send credentials, OAuth codes, tokens, cookie exports or account screenshots to the developer. Record pass/fail and non-sensitive observations only.
+## Accepted on 2026-09-09
 
-1. Launch Pro A visibly. Confirm official Antigravity window is usable. Complete official Google A login yourself. Close A, relaunch; verify it still shows A.
-2. Stop A while performing first login for Pro B, to reduce ambiguity in the shared OS deep-link handler. Launch B, sign into Google B officially. Close/relaunch B; confirm B persists.
-3. Do not launch A/B concurrently for different Google accounts on the current Desktop version. This check already failed: both windows displayed the account signed in later. A future retry requires an official profile-scoped authentication contract or separate Windows identity boundary.
-4. Do not test cross-profile restart while both are authenticated on the current Desktop version. The Hub now blocks a second root; process-only restart behavior remains covered by disposable integration tests.
-5. Choose distinct themes/settings/projects in each app. Restart both and verify independence. Hub workspace association currently does not establish vendor positional workspace support.
-6. Do not trigger concurrent reauthentication on the current Desktop version. The shared `antigravity://` protocol has no Profile identifier, and concurrent authenticated use is incompatible. Do not compensate by moving auth files.
-7. Close Hub but leave profiles running. Reopen Hub, confirm correct status; duplicate launch must report running/focus. Close an app manually and refresh Hub.
-8. Check synthetic-home tool behavior: Git identity, SSH, plugins and tool configuration may be absent. Configure normal non-secret preferences separately as needed; no automatic credential copying.
-9. After vendor update, run doctor and repeat steps 1–6 before asserting long-term compatibility.
-10. Create each profile's desktop shortcut. Close Hub, launch the shortcut and verify the intended identity. Rename a profile in Hub and confirm the original shortcut still launches that profile. If the portable package moves, recreate the shortcuts.
+Using Antigravity Desktop 2.12.2 and Sandboxie Plus 1.18.2 / core 5.73.2:
 
-| Test | Status | Observation |
+| Test | Result | Non-sensitive observation |
 |---|---|---|
-| Visible separate windows | observed (first-run only) | Two different windows rendered official onboarding; authenticated usability pending |
-| A login survives restart | passed (sequential only) | `Manual Pro A` was stopped and relaunched through Hub; user confirmed its then-current session remained signed in. This does not establish identity independence after B was used. |
-| B login survives restart | passed (sequential only) | Initial B launch displayed A's existing session. After the user signed out in B and completed a later login, Hub stop/relaunch preserved that session. |
-| A/B concurrently keep distinct identity | failed | With A and B running concurrently, user confirmed both showed the account signed in later. |
-| Restart/stop does not affect other profile | pending | Process-only stop separation was observed automatically; authenticated account isolation has failed separately. |
-| Settings/project separation | pending | Directories observed, behavioral test pending |
-| OAuth callback routing | blocked | Concurrent authenticated operation is incompatible; shared OS protocol registration has no Profile identifier. |
+| Separate rendered windows | passed | One visible official Desktop window per box |
+| Distinct accounts concurrently | passed | User confirmed A and B displayed their intended different accounts |
+| Box-local authentication state | passed | A/B/host credential entry metadata and one-way fingerprints differed; token contents were not exported |
+| Restart persistence | passed | A retained its intended account after full box-process restart |
+| Cross-Profile restart isolation | passed | B root PID and process count stayed unchanged while A restarted |
+| Host login non-interference | passed | Host entry size/fingerprint stayed unchanged |
 
-Authenticated account isolation failed: preserve both data directories, do not claim separate-account support, and diagnose the driver before resuming authenticated acceptance. Never exchange tokens or move auth files as a workaround.
+The earlier directory-only and empty-box Sandboxie failures remain valuable historical evidence: a missing box-local `gemini:antigravity` read fell through to the host. The passing setup first claims that name inside each fresh box.
+
+## Required setup checks for every Profile
+
+1. `iso-status` reports `backendAvailable=true`, `boxExists=true`, and `keyringClaimed=true`.
+2. `iso-writethrough <id>` reports `ready=true`. If not, save work and stop the affected box, then run the emitted `Set-IsolationWriteThrough.ps1` command from an elevated prompt.
+3. `status <id>` reports the expected box name and exact owned root/user-data identity.
+4. Never use `iso-prepare --fresh` on a box that has already signed in; it is only an acknowledgement for an unregistered, never-used box.
+
+## Remaining manual gates
+
+### A. Workspace direct-write
+
+1. Create a disposable workspace outside the managed Profile root and associate it with A.
+2. Apply the exact write-through rules reported by `iso-writethrough A`.
+3. In A, create and modify a harmless marker file in that workspace.
+4. Confirm the host filesystem and a normal editor see the change immediately.
+5. Restart A and confirm the same file remains visible.
+6. Confirm B cannot accidentally redirect A's workspace through its own Profile mapping. Do not test simultaneous edits to the same repository; Agent Safe worktrees are deferred.
+
+### B. Logout non-interference
+
+1. With A and B running and showing their intended accounts, log out of A using the official UI.
+2. Confirm B remains logged into B without a process restart or account change.
+3. Reauthenticate A through the official flow and confirm B remains unchanged.
+4. Repeat with B logging out while A stays active.
+
+### C. Product entry points
+
+1. Launch A from GUI, B from its desktop shortcut, then run `launch-all`; no duplicate root should appear.
+2. Restart A from GUI; B must remain running.
+3. Close/reopen Hub while both remain active; both rows must reconcile to Running with their box names.
+4. Save work, stop each isolated Profile, and confirm only its dedicated box reaches zero processes.
+
+### D. Update revalidation
+
+After Antigravity or Sandboxie changes version, repeat setup checks and tests A-C before treating account isolation as supported. Unknown Antigravity versions must remain blocked by the driver.
+
+## Current machine note
+
+Both current default Profile mappings now report `writeThroughReady=true` with no missing paths. This proves the intended bare `OpenFilePath` rules are configured; it does not replace the live workspace file creation/restart test in section A.

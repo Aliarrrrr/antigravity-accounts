@@ -100,6 +100,6 @@ try {
     # Keep this owned test directory for diagnosis; never delete user profile data.
     try {$null=Invoke-Cli @('stop-all','--force')} catch {Write-Warning 'Test profiles may still be running; inspect this test data root before cleanup.'}
     try {$null=Invoke-CliAt -DataRoot $otherRoot -Arguments @('stop-all','--force')} catch {Write-Warning 'Second test data root may still have an owned profile running; inspect before cleanup.'}
-    @{schemaVersion=1;timestamp=[DateTime]::UtcNow.ToString('o');checks=@($results.ToArray());authIsolation='incompatible-on-current-desktop'} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $testRoot 'integration-report.json') -Encoding utf8
+    @{schemaVersion=1;timestamp=[DateTime]::UtcNow.ToString('o');checks=@($results.ToArray());authIsolation='not-evaluated-by-direct-process-test'} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $testRoot 'integration-report.json') -Encoding utf8
     Write-Output "Evidence: $testRoot"
 }

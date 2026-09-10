@@ -27,10 +27,28 @@ internal static class CliApplication
                 return 0;
             }
 
+            // Runs before any Hub bootstrap: this verb is executed inside
+            // isolation scopes (for example a sandbox) where the Hub data root
+            // must not be created or touched.
+            if (parsed.Command[0].Equals("credential-shim", StringComparison.OrdinalIgnoreCase))
+            {
+                var tail = parsed.Command.Skip(1).ToList();
+                var forceFresh = TakeFlag(tail, "--force") & TakeFlag(tail, "--fresh");
+                RequireNoArguments(tail, "credential-shim --force --fresh");
+                if (!forceFresh) throw new UsageException("credential-shim is an internal command and requires both --force and --fresh.");
+                var shim = AntigravityKeyring.EnsureIsolation(forceFresh);
+                if (parsed.Json) WriteJson(shim);
+                else Console.WriteLine($"credential-shim: target={shim.Target} existedBefore={shim.ExistedBefore} created={shim.Created} blobSize={shim.BlobSize}");
+                // Exit codes let a caller that cannot capture sandboxed stdout
+                // still tell "claimed now" from "already owned".
+                return shim.Created ? 11 : 0;
+            }
+
             var hub = HubBootstrap.CreateDefault(parsed.DataRoot);
             var result = await ExecuteAsync(hub, parsed.Command, parsed.Json).ConfigureAwait(false);
             if (parsed.Json && result is not null)
                 WriteJson(result);
+            if (result is AgentProbeResult probe && probe.Outcome != "success") return 1;
             return 0;
         }
         catch (UsageException ex) { return WriteError(ex.Message, "usage_error", 2, jsonRequested); }
@@ -48,11 +66,77 @@ internal static class CliApplication
         var tail = command.Skip(1).ToList();
         switch (verb)
         {
+            case "agent-probe":
+                RequireNoArguments(tail, "agent-probe");
+                using (var cancellation = new CancellationTokenSource())
+                {
+                    ConsoleCancelEventHandler handler = (_, e) => { e.Cancel = true; cancellation.Cancel(); };
+                    Console.CancelKeyPress += handler;
+                    try
+                    {
+                        var installation = await hub.DoctorAsync().ConfigureAwait(false);
+                        if (installation.ExecutablePath is null) throw new HubException("Antigravity was not found.", "executable_not_found");
+                        var probe = await AgentRuntimeProbe.RunAsync(installation.ExecutablePath, hub.DataRoot, cancellation.Token).ConfigureAwait(false);
+                        if (!json) Console.WriteLine($"Agent probe: {probe.Outcome}; owned listener={probe.ListenerOwned}; CLI exit={probe.ExitCode}");
+                        return probe;
+                    }
+                    finally { Console.CancelKeyPress -= handler; }
+                }
             case "doctor":
                 RequireNoArguments(tail, "doctor");
                 var report = await hub.DoctorAsync().ConfigureAwait(false);
                 if (!json) PrintDoctor(report);
                 return report;
+            case "credential-status":
+                RequireNoArguments(tail, "credential-status");
+                var keyring = AntigravityKeyring.BuildStatus();
+                if (!json) PrintCredentialStatus(keyring);
+                return keyring;
+            case "iso-prepare":
+                var isoBox = TakeOption(tail, "--box");
+                var isoFresh = TakeFlag(tail, "--fresh");
+                RequireCount(tail, 1, "iso-prepare <id> [--box <existing-box-name>] [--fresh]");
+                var isoPrepare = await hub.PrepareIsolationAsync(ParseId(tail[0]), isoBox, isoFresh).ConfigureAwait(false);
+                if (!json)
+                    Console.WriteLine($"isolation: box={isoPrepare.BoxName} boxCreated={isoPrepare.BoxCreated} mappingCreated={isoPrepare.MappingCreated} keyringClaimed={isoPrepare.KeyringClaimed} shimExit={isoPrepare.ShimExitCode}");
+                return isoPrepare;
+            case "iso-launch":
+                RequireCount(tail, 1, "iso-launch <id>");
+                var isoLaunchId = ParseId(tail[0]);
+                if (await hub.GetIsolationStatusAsync(isoLaunchId).ConfigureAwait(false) is null)
+                    throw new HubException("This profile has no isolation box yet. Run iso-prepare first.", "isolation_not_prepared");
+                var isoLaunch = await hub.LaunchAsync(isoLaunchId).ConfigureAwait(false);
+                if (!json) PrintStatus(isoLaunch.Status);
+                return isoLaunch;
+            case "iso-stop":
+                RequireCount(tail, 1, "iso-stop <id>");
+                var isoStopId = ParseId(tail[0]);
+                if (await hub.GetIsolationStatusAsync(isoStopId).ConfigureAwait(false) is null)
+                    throw new HubException("This profile has no isolation box yet. Run iso-prepare first.", "isolation_not_prepared");
+                var isoStopped = await hub.StopAsync(isoStopId, force: true).ConfigureAwait(false);
+                if (!json) PrintStatus(isoStopped.Status);
+                return isoStopped;
+            case "iso-writethrough":
+                RequireCount(tail, 1, "iso-writethrough <id>");
+                var wtId = ParseId(tail[0]);
+                var wt = await hub.GetWriteThroughAsync(wtId).ConfigureAwait(false);
+                if (!json)
+                {
+                    Console.WriteLine($"Box: {wt.BoxName}");
+                    Console.WriteLine("These directories need direct-write rules, otherwise edits stay inside the sandbox:");
+                    foreach (var item in wt.Paths) Console.WriteLine($"  {(wt.MissingPaths.Contains(item, StringComparer.OrdinalIgnoreCase) ? "MISSING" : "OK     ")}  {item}");
+                    Console.WriteLine();
+                    Console.WriteLine("Run once, elevated:");
+                    Console.WriteLine($"  powershell -ExecutionPolicy Bypass -File scripts\\Set-IsolationWriteThrough.ps1 -BoxName {wt.BoxName} -Path {string.Join(",", wt.Paths.Select(p => $"\"{p}\""))} -ConfirmAllBoxesStopped");
+                }
+                return new { boxName = wt.BoxName, paths = wt.Paths, missingPaths = wt.MissingPaths, ready = wt.MissingPaths.Count == 0 };
+            case "iso-status":
+                RequireNoArguments(tail, "iso-status");
+                var isoStatus = await hub.GetIsolationStatusesAsync().ConfigureAwait(false);
+                if (!json)
+                    foreach (var item in isoStatus)
+                        Console.WriteLine($"{item.BoxName}  profile={item.ProfileId}  boxExists={item.BoxExists}  keyringClaimed={item.KeyringClaimed}  writeThrough={item.WriteThroughReady}  processes={item.ProcessCount}");
+                return isoStatus;
             case "list":
                 RequireNoArguments(tail, "list");
                 var profiles = await hub.ListProfilesAsync().ConfigureAwait(false);
@@ -105,7 +189,8 @@ internal static class CliApplication
             case "stop":
                 var forceStop = TakeFlag(tail, "--force");
                 RequireCount(tail, 1, "stop <id> [--force]");
-                var stop = await hub.StopAsync(ParseId(tail[0]), forceStop).ConfigureAwait(false);
+                var stopId = ParseId(tail[0]);
+                var stop = await hub.StopAsync(stopId, forceStop).ConfigureAwait(false);
                 if (!json) PrintStatus(stop.Status);
                 EnsureStopped(stop);
                 return stop;
@@ -247,7 +332,7 @@ internal static class CliApplication
     }
 
     private static void PrintStatus(ProfileStatus status) =>
-        Console.WriteLine($"{status.ProfileId:D}  {status.Name}  {status.State}  PID {status.Root?.ProcessId.ToString() ?? "-"}  {status.Detail}");
+        Console.WriteLine($"{status.ProfileId:D}  {status.Name}  {status.State}  PID {status.Root?.ProcessId.ToString() ?? "-"}  BOX {status.IsolationBoxName ?? "-"}  {status.Detail}");
 
     private static void PrintDoctor(DoctorReport report)
     {
@@ -257,6 +342,16 @@ internal static class CliApplication
         foreach (var capability in report.Capabilities)
             Console.WriteLine($"{capability.Name,-24}: {capability.State} - {capability.Detail}");
         foreach (var warning in report.Warnings) Console.WriteLine($"WARNING: {warning}");
+    }
+
+    private static void PrintCredentialStatus(KeyringStatusResult status)
+    {
+        Console.WriteLine($"Shared token target    : {status.Target}");
+        Console.WriteLine($"Present for this user  : {status.HostEntryExists}");
+        Console.WriteLine($"Entry size (bytes)     : {status.HostEntryBlobSize}");
+        Console.WriteLine($"Owned by vendor client : {status.HostEntryBelongsToVendor}");
+        Console.WriteLine($"Guidance               : {status.IsolationGuidance}");
+        Console.WriteLine($"Note                   : {status.Note}");
     }
 
     private static void PrintHelp()
@@ -269,13 +364,21 @@ internal static class CliApplication
         Global options: --data-root <absolute-path>  --json
         Commands:
           doctor | list | status [id] | show <id>
+          agent-probe                          Mocked LS/official CLI diagnostic; no real account
+          credential-status                    Report the shared token entry (existence/size only)
+          credential-shim --force --fresh      Internal: claim the keyring entry inside a fresh box
+          iso-prepare <id> [--box <name>] [--fresh]
+                                                Prepare a dedicated box; --fresh acknowledges safe overwrite
+          iso-launch <id>                       Launch the unmodified desktop inside the profile's box
+          iso-stop <id>                         Terminate everything inside the profile's box
+          iso-status | iso-writethrough <id>    Inspect box and direct-write readiness
           create <name> [--workspace <path>] | rename <id> <new-name>
           workspace <id> <path|none> | remove <id>
           launch <id> [--workspace <path>] | launch-all
           stop <id> [--force] | stop-all [--force] | restart <id> [--force]
           open-data [id] | open-logs | configure-executable <path>
           shortcut <id> [--directory <path>]
-        Authentication is performed only by official Antigravity. Concurrent Google-account profiles are unsupported on Desktop 2.12.2 after failed manual isolation validation.
+        Authentication is performed only by official Antigravity. Concurrent accounts require a prepared per-profile isolation box; the legacy direct path remains serial-only.
         """;
 
     private static void EnsureStopped(StopResult result)

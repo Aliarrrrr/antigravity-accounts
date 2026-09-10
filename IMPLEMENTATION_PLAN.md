@@ -10,7 +10,7 @@ Apply READ → PLAN → IMPLEMENT → BUILD → TEST → VERIFY → DOCUMENT to 
 | 3 | Create/list/rename/remove/workspace metadata | Core managers | N profiles; remove preserves data; workspace validation | Registration backup |
 | 4 | Launch/status/restart/stop/reconcile | Core Windows process adapter | PID reuse/foreign process/duplicate launch; process-only A/B stop; recover after Hub exit | Preserve running vendor processes if ownership unknown |
 | 5 | Usable CLI including doctor and JSON | Cli | temp create→launch→status→stop; useful exit codes; documented commands | Preserve profile data |
-| 6 | Human Google A/B acceptance | MANUAL_TEST_PLAN.md, capability attestation | Sequential restart persistence observed; concurrent Google identity isolation failed on Desktop 2.12.2, so callback routing with two authenticated instances is blocked | Close only affected instance; don't logout other account |
+| 6 | Human Google A/B acceptance | MANUAL_TEST_PLAN.md, keyring/isolation evidence | Per-box keyring claim passed distinct concurrent identity, restart persistence and cross-Profile non-interference on the tested versions | Close only the affected dedicated box; don't automate login |
 | 7 | WPF management GUI | Gui | Build plus visible UI smoke; core reuse and async responsive actions | CLI remains usable |
 | 8 | Desktop shortcuts; tray optional | Core shortcut/Gui | Shortcut opens correct UUID via CLI | Remove only Hub-created link |
 | 9 | Workspace metadata; investigate launch support separately | Core workspace/Gui | Missing path handled; no unsupported argument presented as success | Retain metadata and explicitly report unsupported launch |
@@ -18,13 +18,13 @@ Apply READ → PLAN → IMPLEMENT → BUILD → TEST → VERIFY → DOCUMENT to 
 | 11 | Local portable Windows package | scripts/Publish.ps1, README, FINAL_REPORT | clean build/tests, CLI help smoke and GUI startup | Replace binaries without touching LocalAppData profiles |
 | 12 optional | Worktree/Agent Safe mode | deferred | Dedicated future design and destructive safeguards | Do not delete existing worktrees |
 
-Release gate: automated tests/build pass, runnable CLI/GUI delivered, limitations explicit. Full product acceptance additionally requires Phase 6 to pass. On Desktop 2.12.2, Phase 6 failed concurrent Google-account isolation; keep the product experimental and do not claim separate-account support. Workspace CLI forwarding is a separate unverified capability, not a reason to misreport Phase 6 success.
+Release gate: automated tests/build pass, runnable CLI/GUI delivered, limitations explicit, and Phase 6 manual identity acceptance passed for the exact tested versions. Workspace host write-through and logout non-interference remain separate manual gates; workspace launch forwarding remains unsupported.
 
-September 8 update: Phase 8 desktop shortcuts are implemented and verified through COM assertions and actual packaged .lnk lifecycle tests. GUI executable settings and operation/status feedback are implemented. Phase 6 completed as a failed manual acceptance: sequential A/B restart persistence passed, but concurrent profiles resolved to the account signed in later. Desktop 2.12.2 therefore does not support simultaneous different Google accounts under one Windows user; the probe does not evaluate authentication. Phase 9 workspace association is implemented as metadata, while vendor forwarding is unsupported. Phase 12 and tray remain deferred.
+September 9 update: the September 8 directory-only failure was traced to the fixed Windows credential target `gemini:antigravity`. A fresh per-Profile Sandboxie box with a local same-name claim passed Phase 6. The backend is now routed through normal Core/CLI/GUI/shortcut operations, while the old direct route remains serial. Phase 9 metadata is complete and direct-write configuration is detectable; the actual workspace write test remains pending. Phase 12 and tray remain deferred.
 
 ## Astra completion plan — September 8
 
-The completion target for this repository is a safe, honest serial profile manager for Desktop 2.12.2. Concurrent Google-account support remains blocked by the vendor authentication boundary and is not part of the release claim.
+This historical September 8 plan produced the safe serial fallback and its launch barrier. It is retained because those invariants still protect unprepared/direct Profiles; ADR-012 and the September 9 update supersede its conclusion that concurrent support is permanently blocked.
 
 | Step | Change | Acceptance evidence |
 |---|---|---|
@@ -32,6 +32,6 @@ The completion target for this repository is a safe, honest serial profile manag
 | 2 | Reconcile a retained barrier using exact PID, creation time, executable and managed user-data identity. Distinguish a confirmed pre-create failure from an indeterminate post-create failure. | Confirmed create failure clears the reservation; post-create verification failure, cancellation and runtime-write failure cannot reopen the launch window. |
 | 3 | Keep every entry point consistent with the single-root rule. Refresh GUI state after failed mutations and disable `Launch all` when more than one profile is registered. | CLI, shortcuts, single launch, restart and GUI batch launch all use the same Core gate; no partial batch start occurs. |
 | 4 | Add deterministic Core race tests and real independent CLI-process integration. Limit external-root claims to roots detected for the configured executable. | Core suite, CLI concurrency suite, real-process integration and package smoke all pass; exactly one concurrent CLI launch succeeds. |
-| 5 | Reconcile user-facing capability reports and publish a fresh package. Preserve the user A/B directories and the pre-existing `Inspect-InstalledApp.py` work. | Doctor/UI/docs state `googleAccountIsolation: Incompatible`; build has zero warnings/errors; package manifest, checksums and final report point to the newly verified artifact. |
+| 5 | Historical serial-release documentation step; later superseded by ADR-012. | At that time Doctor stated direct-path incompatibility; the current Doctor separately reports verified box isolation and serial direct fallback. |
 
-Stop conditions: do not inspect authentication contents, automate Google login, patch vendor binaries, create Windows accounts or claim concurrent account isolation. Reopening the multi-account gate requires an official profile-scoped authentication contract or a separately approved Windows identity design followed by a clean A/B manual test.
+Current stop conditions: do not inspect authentication contents, automate Google login, patch vendor binaries, claim an already-used box as fresh, or treat a missing write-through rule as harmless. Any dependency version change requires a clean A/B manual revalidation before retaining the concurrent-account claim.
