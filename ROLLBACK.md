@@ -1,4 +1,4 @@
-# 回退指南 — 2026-09-10 重构
+# 回退指南 — 2026-09-10 重构与 0.3.0 发布
 
 ## 版本标识
 
@@ -11,6 +11,12 @@
 | CP4 | `cp4-cli-verbs` | `d474615` | 新动词 + 名字寻址（+1 测试） |
 | CP5 | `cp5-gui-rework` | `af76c96` | GUI 设计系统与交互 |
 | CP6 | `cp6-docs-sync` | `557b2ff` | README / CHANGELOG 同步 |
+| 发布 | `v0.3.0` | `bca93b6` | 当前 `master`：把上述全部改动压成单个提交，parent 为远端 `40fea45` |
+
+> [!IMPORTANT]
+> `cp1`…`cp6` 这些标签指向**重构期间逐个验证的原始提交**，它们不在当前 `master` 的祖先链上（发布时为了接回远端历史，改动被压成 `bca93b6` 一个提交）。这些对象仍然完整保留，随时可以 `git show <tag>` 查看或 `git checkout <tag>` 检出，作为细粒度回退点使用；只是它们与 `master` 的历史不连续。
+>
+> 发布前已核对：重建基线与远端 `40fea45` 的树**完全一致**（仅多一个新写的 `REFACTOR_PLAN.md`），因此内容层面无任何损失。
 
 ## 回退到任一状态
 
@@ -23,18 +29,38 @@ git reset --hard baseline-20260910-1245
 # 回到某个检查点（保留其之前的全部工作）
 git reset --hard cp3-isolation-setup
 
-# 只撤销某一个检查点，保留其余（生成反向提交，历史不改写）
+# 回到已发布的 0.3.0（当前 master）
+git reset --hard v0.3.0
+
+# 只撤销某一个提交，保留其余（生成反向提交，历史不改写，适合已推送的历史）
 git revert <commit-sha>
 
 # 查看差异再决定
-git log --oneline baseline-20260910-1245..HEAD
-git diff baseline-20260910-1245..HEAD
+git diff baseline-20260910-1245 v0.3.0
 ```
+
+> [!WARNING]
+> 本机上 `git rebase`（含 `--onto`）与大规模 `git checkout` 出现过删除工作树文件的情况。做这类操作前先复制一份目录，或改用 `git commit-tree` + `update-ref` 的纯元数据方式。若工作树被破坏，`git reset --hard <已知提交>` 可以完整恢复（对象仍在）。
 
 回退后重新验证：
 
 ```powershell
 pwsh -NoProfile -File .\scripts\Build.ps1 -Test
+```
+
+## 已发布版本
+
+| 版本 | 标签 | 提交 | GitHub Release |
+|---|---|---|---|
+| 0.3.0 | `v0.3.0` | `bca93b6` | [v0.3.0](https://github.com/Aliarrrrr/antigravity-profile-hub/releases/tag/v0.3.0)（Pre-release，含安装器 / 便携包 / SHA-256） |
+| 0.2.3 | `v0.2.3` | `fd9063b` | [v0.2.3](https://github.com/Aliarrrrr/antigravity-profile-hub/releases/tag/v0.2.3) |
+
+撤销一次发布：
+
+```powershell
+gh release delete v0.3.0 --repo Aliarrrrr/antigravity-profile-hub --yes   # 删除 Release
+git push origin :refs/tags/v0.3.0                                        # 删除远端标签
+git tag -d v0.3.0                                                        # 删除本地标签
 ```
 
 ## 数据库 / 配置 / 依赖回滚
