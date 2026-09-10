@@ -36,6 +36,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("executable changes clear prior authentication attestation", TestExecutableChangeAsync),
     ("reused PID never receives close or focus", TestReusedPidAsync),
     ("shortcut binds UUID and quoted data root without overwriting", TestShortcutAsync),
+    ("sandboxie ini round-trips bare and indexed keys", TestSandboxieIniAsync),
 };
 
 var failures = new List<string>();
@@ -73,6 +74,61 @@ static async Task TestKeyringPrimitivesAsync()
     True(status.Note.Length > 0, "status explains that the value is never read");
     if (!SandboxieBackend.IsCurrentProcessSandboxed())
         Throws<HubException>(() => AntigravityKeyring.EnsureIsolation(forceFresh: true));
+    await Task.CompletedTask;
+}
+
+static async Task TestSandboxieIniAsync()
+{
+    var root = Path.Combine(Path.GetTempPath(), "agph-ini-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(root);
+    try
+    {
+        var utf16 = Path.Combine(root, "utf16.ini");
+        var body = System.Text.Encoding.Unicode.GetBytes(
+            "[GlobalSettings]\r\nFileRootPath=\\??\\%SystemDrive%\\Sandbox\r\n" +
+            "[AGPH_Test]\r\nEnabled=y\r\nOpenFilePath=C:\\One\r\nOpenFilePath.1=C:\\Two\r\nConfigLevel=10\r\n");
+        File.WriteAllBytes(utf16, new byte[] { 0xFF, 0xFE }.Concat(body).ToArray());
+
+        var file = SandboxieIniFile.Load(utf16);
+        var values = file.GetValues("AGPH_Test", "OpenFilePath");
+        Equal(2, values.Count);
+        True(values.Contains("C:\\One") && values.Contains("C:\\Two"), "legacy indexed keys are still read");
+        True(file.SectionExists("AGPH_Test"), "the box section is found");
+        True(!file.SectionExists("AGPH_Other"), "unrelated sections are not confused");
+
+        file.ReplaceValues("AGPH_Test", "OpenFilePath", new[] { "C:\\Three", "C:\\Four" });
+        file.Save();
+
+        var reloaded = SandboxieIniFile.Load(utf16);
+        var after = reloaded.GetValues("AGPH_Test", "OpenFilePath");
+        Equal(2, after.Count);
+        True(after.Contains("C:\\Three") && after.Contains("C:\\Four"), "saved values are read back");
+        var text = File.ReadAllText(utf16);
+        True(text.Contains("OpenFilePath=C:\\Three"), "writes use the bare key the driver honours");
+        True(!text.Contains("OpenFilePath.1"), "indexed keys are never written back");
+        True(text.Contains("ConfigLevel=10"), "unrelated settings survive");
+        True(text.Contains("[GlobalSettings]"), "other sections survive");
+        True(file.LastBackupPath is not null && File.Exists(file.LastBackupPath), "a backup is kept");
+
+        var utf8 = Path.Combine(root, "utf8.ini");
+        File.WriteAllText(utf8, "[AGPH_U8]\nOpenFilePath=D:/Alpha\nEnabled=y\n");
+        var plain = SandboxieIniFile.Load(utf8);
+        Equal(1, plain.GetValues("AGPH_U8", "OpenFilePath").Count);
+        plain.ReplaceValues("AGPH_U8", "OpenFilePath", new[] { "D:/Beta" });
+        plain.Save();
+        var plainText = File.ReadAllText(utf8);
+        True(plainText.Contains("D:/Beta"), "utf-8 without BOM is written back");
+        True(!plainText.Contains("D:/Alpha"), "replaced values are removed");
+        True(!plainText.Contains("OpenFilePath.1"), "utf-8 writes stay bare");
+
+        Throws<HubException>(() => SandboxieIniFile.Load(utf8).ReplaceValues("AGPH_Missing", "OpenFilePath", new[] { "X" }));
+        Throws<HubException>(() => SandboxieIniFile.Load(Path.Combine(root, "absent.ini")));
+        True(SandboxieIniFile.TryLoad(Path.Combine(root, "absent.ini")) is null, "try-load returns null instead of throwing");
+    }
+    finally
+    {
+        try { Directory.Delete(root, recursive: true); } catch (IOException) { }
+    }
     await Task.CompletedTask;
 }
 

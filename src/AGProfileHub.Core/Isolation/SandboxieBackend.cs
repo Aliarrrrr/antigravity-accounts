@@ -109,48 +109,12 @@ public sealed class SandboxieBackend : IIsolationBackend
     {
         // SbieIni's indexed query form (Setting.N) cannot see bare repeated keys,
         // and the driver only honours bare keys, so parse the configuration file
-        // directly and accept both spellings.
-        var values = new List<string>();
-        var iniPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Sandboxie.ini");
-        if (!File.Exists(iniPath)) iniPath = Path.Combine(Home, "Sandboxie.ini");
-        if (!File.Exists(iniPath)) return values;
-
-        var raw = File.ReadAllBytes(iniPath);
-        System.Text.Encoding encoding;
-        if (raw.Length >= 2 && raw[0] == 0xFF && raw[1] == 0xFE) encoding = new System.Text.UnicodeEncoding(false, true);
-        else if (raw.Length >= 3 && raw[0] == 0xEF && raw[1] == 0xBB && raw[2] == 0xBF) encoding = new System.Text.UTF8Encoding(true);
-        else encoding = new System.Text.UTF8Encoding(false);
-        var text = encoding.GetString(raw);
-
-        var bare = setting + "=";
-        var insideBox = false;
-        foreach (var rawLine in text.Split('\n'))
-        {
-            var line = rawLine.TrimEnd('\r').Trim();
-            if (line.StartsWith('[') && line.EndsWith(']'))
-            {
-                insideBox = line[1..^1].Equals(box, StringComparison.OrdinalIgnoreCase);
-                continue;
-            }
-            if (!insideBox) continue;
-            if (line.StartsWith(bare, StringComparison.OrdinalIgnoreCase))
-            {
-                var value = line[bare.Length..].Trim();
-                if (value.Length > 0) values.Add(value);
-                continue;
-            }
-            var dotIndex = setting.Length;
-            if (line.Length > dotIndex + 1 &&
-                line.StartsWith(setting, StringComparison.OrdinalIgnoreCase) &&
-                line[dotIndex] == '.' &&
-                char.IsDigit(line[dotIndex + 1]) &&
-                line.Contains('=', StringComparison.Ordinal))
-            {
-                var value = line[(line.IndexOf('=') + 1)..].Trim();
-                if (value.Length > 0) values.Add(value);
-            }
-        }
-        return values;
+        // directly and accept both spellings. SandboxieIniFile owns that parsing
+        // so the read path and the write path can never disagree again.
+        var file = SandboxieIniFile.TryOpenSystem(Home);
+        if (file is null) return [];
+        var values = file.GetValues(box, setting);
+        return values.Count <= maximum ? values : [.. values.Take(maximum)];
     }
 
     public void Terminate(string box)
