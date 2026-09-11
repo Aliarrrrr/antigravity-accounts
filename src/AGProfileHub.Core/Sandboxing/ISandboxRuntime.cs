@@ -13,8 +13,8 @@ public interface ISandboxRuntime
 {
     bool IsAvailable { get; }
     string RuntimeDescription { get; }
-    Task EnsureBoxAsync(string boxId, IReadOnlyList<string> openFilePaths, CancellationToken cancellationToken = default);
-    Task RunInBoxAsync(string boxId, string executablePath, IReadOnlyList<string> arguments,
+    Task<bool> EnsureBoxAsync(string boxId, IReadOnlyList<string> openFilePaths, CancellationToken cancellationToken = default);
+    Task<int> RunInBoxAsync(string boxId, string executablePath, IReadOnlyList<string> arguments,
         IReadOnlyDictionary<string, string> environment, TimeSpan timeout, CancellationToken cancellationToken = default);
     Task StartInBoxAsync(string boxId, string executablePath, IReadOnlyList<string> arguments,
         IReadOnlyDictionary<string, string> environment, CancellationToken cancellationToken = default);
@@ -27,9 +27,9 @@ public sealed class UnsupportedSandboxRuntime : ISandboxRuntime
 {
     public bool IsAvailable => false;
     public string RuntimeDescription => "No isolation runtime is configured.";
-    public Task EnsureBoxAsync(string boxId, IReadOnlyList<string> openFilePaths, CancellationToken cancellationToken = default) =>
+    public Task<bool> EnsureBoxAsync(string boxId, IReadOnlyList<string> openFilePaths, CancellationToken cancellationToken = default) =>
         throw new UnsupportedCapabilityException("This profile requires Sandboxie, which is not available. Install Sandboxie-Plus or use the Direct backend.");
-    public Task RunInBoxAsync(string boxId, string executablePath, IReadOnlyList<string> arguments,
+    public Task<int> RunInBoxAsync(string boxId, string executablePath, IReadOnlyList<string> arguments,
         IReadOnlyDictionary<string, string> environment, TimeSpan timeout, CancellationToken cancellationToken = default) =>
         throw new UnsupportedCapabilityException("This profile requires Sandboxie, which is not available.");
     public Task StartInBoxAsync(string boxId, string executablePath, IReadOnlyList<string> arguments,

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0 experimental — 2026-09-11
+- 集中产品版本、默认 .NET 10 目标框架和编译选项；GUI 保留 Windows/WPF 目标，Core 保留 WMI 所需的 System.Management 10.0.0。
+- 增加兼容 PowerShell 5.1/7 的统一入口、稳定版 SDK 发现、项目内缓存与环境恢复，以及锁定还原和控制台测试入口；系统测试须显式启用。
+- 增加先构建/测试、版本化独立目录、schema 2 发布清单及 SHA256 校验；正式发布检查干净工作区、HEAD 版本标签和变更记录，不自动创建标签。
+- 增加 Windows CI、版本管理与配置升级/回滚说明；数据、配置和 Token 不进入发布包。
+- 本条目不代表测试已通过。Sandboxie 双账号能力仍属实验性质，未在本条目中宣称完成人工验证。
+
 ## 0.1.2 experimental — 2026-09-08
 - Moved launch coordination to a fixed per-Windows-user state root shared by every `--data-root`.
 - Added an atomic pre-create launch barrier that remains on delayed discovery, post-create cancellation, indeterminate process identity and runtime-state write failure; invalid or future barrier data fails closed.

@@ -18,6 +18,7 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
         var installation = await driver.DiscoverAsync(cancellationToken).ConfigureAwait(false);
         var snapshots = await catalog.SnapshotAsync(installation.ExecutablePath, cancellationToken).ConfigureAwait(false);
         var status = await ownership.ResolveAsync(profile, installation, snapshots, cancellationToken).ConfigureAwait(false);
+        status = await VerifySandboxMembershipAsync(profile, status, cancellationToken).ConfigureAwait(false);
         return await ApplyLocalBarrierAsync(profile, status, cancellationToken).ConfigureAwait(false);
     }
 
@@ -31,6 +32,7 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
         foreach (var profile in registrations)
         {
             var status = await ownership.ResolveAsync(profile, installation, snapshots, cancellationToken).ConfigureAwait(false);
+        status = await VerifySandboxMembershipAsync(profile, status, cancellationToken).ConfigureAwait(false);
             result.Add(await ApplyLocalBarrierAsync(profile, status, cancellationToken).ConfigureAwait(false));
         }
         return result;
@@ -51,6 +53,7 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
         await ReconcileLaunchBarrierAsync(installation, cancellationToken).ConfigureAwait(false);
         var snapshots = await catalog.SnapshotAsync(installation.ExecutablePath, cancellationToken).ConfigureAwait(false);
         var status = await ownership.ResolveAsync(profile, installation, snapshots, cancellationToken).ConfigureAwait(false);
+        status = await VerifySandboxMembershipAsync(profile, status, cancellationToken).ConfigureAwait(false);
         if (status.State == RuntimeState.Running)
         {
             var existing = status.Root is null ? null : snapshots.FirstOrDefault(snapshot => ownership.SnapshotMatches(snapshot, status.Root));
@@ -85,6 +88,10 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
             throw new UnsupportedCapabilityException($"Unsupported profile backend: {profile.Backend}.");
         }
 
+        // Finish optional runtime/configuration/shim preparation before reserving
+        // a vendor launch. A missing tool must not leave a permanent launch barrier.
+        if (profile.Backend == ProfileBackend.Sandboxie)
+            await PrepareSandboxieAsync(id, profile, plan, cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
         var barrier = new LaunchBarrierRecord
         {
@@ -158,27 +165,12 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
         AntigravityInstallation installation, LaunchPlan plan, CancellationToken cancellationToken)
     {
         var boxId = profile.BoxId!;
-        if (!_sandbox.IsAvailable)
-            throw new UnsupportedCapabilityException(_sandbox.RuntimeDescription);
-
-        paths.EnsureProfileLayout(id);
-        var openPaths = new List<string>
-        {
-            paths.Home(id), paths.Roaming(id), paths.Local(id), paths.Temp(id), paths.UserData(id),
-            Path.GetDirectoryName(installation.ExecutablePath) ?? installation.ExecutablePath
-        };
-        await _sandbox.EnsureBoxAsync(boxId, openPaths, cancellationToken).ConfigureAwait(false);
-
-        // Claim an in-box gemini:antigravity entry on first launch only.
-        // forceFresh is safe only before any successful sign-in in this box.
-        var marker = await repository.ReadKeyringMarkerAsync(id, CancellationToken.None).ConfigureAwait(false);
-        if (marker is null)
-            await ClaimKeyringInBoxAsync(id, boxId, plan, cancellationToken).ConfigureAwait(false);
-
-        await _sandbox.StartInBoxAsync(boxId, installation.ExecutablePath, plan.Arguments, plan.Environment, cancellationToken).ConfigureAwait(false);
+        // After reservation, finish verification even when the UI cancels. A
+        // cancelled request cannot reopen the gate while a child may be starting.
+        await _sandbox.StartInBoxAsync(boxId, installation.ExecutablePath, plan.Arguments, plan.Environment, CancellationToken.None).ConfigureAwait(false);
 
         var expectedUserData = Path.GetFullPath(paths.UserData(id));
-        var identity = await DiscoverSandboxieRootAsync(installation.ExecutablePath, expectedUserData, cancellationToken).ConfigureAwait(false)
+        var identity = await DiscoverSandboxieRootAsync(boxId, installation.ExecutablePath, expectedUserData, CancellationToken.None).ConfigureAwait(false)
             ?? throw new LaunchStateUncertainException("Sandboxie accepted the start request but no Antigravity root process became visible. The launch barrier was retained.");
 
         var barrier = new LaunchBarrierRecord
@@ -202,42 +194,42 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
             $"Started in sandbox '{boxId}' and verified the vendor root process.", profile.WorkspacePath), true);
     }
 
-    private async Task ClaimKeyringInBoxAsync(Guid id, string boxId, LaunchPlan plan, CancellationToken cancellationToken)
+    private async Task PrepareSandboxieAsync(Guid id, ProfileRegistration profile, LaunchPlan plan, CancellationToken cancellationToken)
     {
-        var cli = _hubCliExecutable ?? Environment.ProcessPath
-            ?? throw new HubException("The Hub CLI path is unknown; cannot run credential-shim inside the sandbox.", "cli_path_unknown");
-        if (!File.Exists(cli))
-            throw new HubException("The Hub CLI path does not exist; cannot run credential-shim inside the sandbox.", "cli_path_unknown");
-
-        // Run the Hub's own credential-shim inside the box so the write lands in
-        // the sandbox credential store, not on the host.
-        var environment = new Dictionary<string, string>(plan.Environment, StringComparer.OrdinalIgnoreCase);
-        // Exit 11 = newly claimed, 0 = already owned. Other codes are failures.
-        try
+        if (!_sandbox.IsAvailable) throw new UnsupportedCapabilityException(_sandbox.RuntimeDescription);
+        if (string.IsNullOrWhiteSpace(_hubCliExecutable) || !File.Exists(_hubCliExecutable))
+            throw new HubException("Hub CLI is missing. Keep the package's hub and cli folders together, or build the complete solution.", "cli_path_unknown");
+        var marker = await repository.ReadKeyringMarkerAsync(id, cancellationToken).ConfigureAwait(false);
+        if (marker?.BoxId is not null && !string.Equals(marker.BoxId, profile.BoxId, StringComparison.OrdinalIgnoreCase))
+            throw new ConfigurationException("The isolation marker belongs to a different box.", "runtime_invalid");
+        var fresh = await _sandbox.EnsureBoxAsync(profile.BoxId!,
+            [paths.Home(id), paths.Roaming(id), paths.Local(id), paths.Temp(id), paths.UserData(id)], cancellationToken).ConfigureAwait(false);
+        if (marker is null)
         {
-            await _sandbox.RunInBoxAsync(boxId, cli, ["credential-shim", "--force", "--fresh"], environment, ShimTimeout, cancellationToken)
-                .ConfigureAwait(false);
+            if (!fresh)
+                throw new HubException("The sandbox already exists but its one-time isolation marker is missing. Refusing to overwrite a possible login. Preserve this profile and create a new Sandboxie profile.", "keyring_marker_missing");
+            await ClaimKeyringInBoxAsync(id, profile.BoxId!, plan, cancellationToken).ConfigureAwait(false);
         }
-        catch (HubException ex) when (ex.Code == "sandbox_command_failed")
-        {
-            // Re-run is not possible without capturing the exit code. Treat as failure.
-            throw new HubException("credential-shim failed inside the sandbox. The profile was not launched.", "keyring_shim_failed", ex);
-        }
-
-        // Placeholder size is deliberately not a valid token; record only size.
-        var after = AntigravityKeyring.DescribeLocalEntry();
-        var marker = new KeyringShimMarker
-        {
-            ProfileId = id,
-            Target = AntigravityKeyring.Target,
-            ClaimedUtc = DateTimeOffset.UtcNow,
-            ExitCode = 11,
-            BlobSizeAfter = after.BlobSize
-        };
-        await repository.WriteKeyringMarkerAsync(marker, CancellationToken.None).ConfigureAwait(false);
+        else if (fresh)
+            throw new HubException("The saved marker refers to a sandbox that was removed externally. Preserve the profile data and create a new profile; the old marker must not be reused.", "sandbox_state_mismatch");
     }
 
-    private async Task<ProcessIdentity?> DiscoverSandboxieRootAsync(string executablePath, string userDataPath, CancellationToken cancellationToken)
+    private async Task ClaimKeyringInBoxAsync(Guid id, string boxId, LaunchPlan plan, CancellationToken cancellationToken)
+    {
+        var exitCode = await _sandbox.RunInBoxAsync(boxId, _hubCliExecutable!,
+            ["credential-shim", "--box-id", boxId, "--force", "--fresh"], plan.Environment, ShimTimeout, cancellationToken).ConfigureAwait(false);
+        if (exitCode is not (0 or 11))
+            throw new HubException($"In-box credential-shim failed (exit code {exitCode}). No vendor process was launched.", "keyring_shim_failed");
+        // Do not query the HOST credential entry to describe an in-box result.
+        await repository.WriteKeyringMarkerAsync(new KeyringShimMarker
+        {
+            ProfileId = id, BoxId = boxId, Target = AntigravityKeyring.Target,
+            ClaimedUtc = DateTimeOffset.UtcNow, ExitCode = exitCode,
+            BlobSizeAfter = exitCode == 11 ? AntigravityKeyring.PlaceholderPayload().Length : 0
+        }, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    private async Task<ProcessIdentity?> DiscoverSandboxieRootAsync(string boxId, string executablePath, string userDataPath, CancellationToken cancellationToken)
     {
         var attempts = Math.Max(1, launchVerificationAttempts);
         var delay = launchVerificationDelay ?? TimeSpan.FromMilliseconds(250);
@@ -249,7 +241,9 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
                 ownership.PathEquals(snapshot.ExecutablePath, executablePath) &&
                 ownership.PathEquals(CommandLineIdentity.TryGetUserDataPath(snapshot.CommandLine), userDataPath) &&
                 ownership.IsRootCandidate(snapshot, executablePath, userDataPath, snapshots)).ToList();
-            if (roots.Count == 1) return ownership.ToIdentity(roots[0], userDataPath);
+            var boxPids = await _sandbox.ListProcessesAsync(boxId, cancellationToken).ConfigureAwait(false);
+            if (roots.Count == 1 && boxPids.Any(process => process.ProcessId == roots[0].ProcessId))
+                return ownership.ToIdentity(roots[0], userDataPath);
             if (roots.Count > 1)
                 throw new ProcessOwnershipException("Multiple Antigravity root processes claim this sandboxed profile.");
             if (attempt + 1 < attempts) await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
@@ -270,6 +264,7 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
         var installation = await driver.DiscoverAsync(cancellationToken).ConfigureAwait(false);
         var snapshots = await catalog.SnapshotAsync(installation.ExecutablePath, cancellationToken).ConfigureAwait(false);
         var status = await ownership.ResolveAsync(profile, installation, snapshots, cancellationToken).ConfigureAwait(false);
+        status = await VerifySandboxMembershipAsync(profile, status, cancellationToken).ConfigureAwait(false);
         if (status.State == RuntimeState.Stopped) return new StopResult(status, false, true);
         if (status.State == RuntimeState.Unknown || status.Root is null)
             throw new ProcessOwnershipException(status.Detail ?? "Process ownership is unknown.");
@@ -297,6 +292,7 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
 
         snapshots = await catalog.SnapshotAsync(installation.ExecutablePath, cancellationToken).ConfigureAwait(false);
         var verified = await ownership.ResolveAsync(profile, installation, snapshots, cancellationToken).ConfigureAwait(false);
+        verified = await VerifySandboxMembershipAsync(profile, verified, cancellationToken).ConfigureAwait(false);
         if (verified.State != RuntimeState.Running || verified.Root is null || !ownership.SameIdentity(verified.Root, status.Root))
             throw new ProcessOwnershipException("Process identity changed before force stop; no process was terminated.");
 
@@ -354,7 +350,23 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
     {
         var profile = await profiles.GetAsync(id, cancellationToken).ConfigureAwait(false);
         var snapshots = await catalog.SnapshotAsync(installation.ExecutablePath, cancellationToken).ConfigureAwait(false);
-        return await ownership.ResolveAsync(profile, installation, snapshots, cancellationToken).ConfigureAwait(false);
+        var status = await ownership.ResolveAsync(profile, installation, snapshots, cancellationToken).ConfigureAwait(false);
+        return await VerifySandboxMembershipAsync(profile, status, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<ProfileStatus> VerifySandboxMembershipAsync(ProfileRegistration profile, ProfileStatus status, CancellationToken cancellationToken)
+    {
+        if (profile.Backend != ProfileBackend.Sandboxie || status.State != RuntimeState.Running || status.Root is null) return status;
+        try
+        {
+            var members = await _sandbox.ListProcessesAsync(profile.BoxId!, cancellationToken).ConfigureAwait(false);
+            if (members.Any(member => member.ProcessId == status.Root.ProcessId)) return status;
+            return status with { State = RuntimeState.Unknown, Detail = "The process does not belong to this profile's sandbox. No focus, close or termination is allowed." };
+        }
+        catch (HubException ex)
+        {
+            return status with { State = RuntimeState.Unknown, Detail = $"Sandbox ownership could not be verified: [{ex.Code}] {ex.Message}" };
+        }
     }
 
     private async Task ReconcileLaunchBarrierAsync(AntigravityInstallation installation, CancellationToken cancellationToken)
@@ -377,6 +389,14 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
 
         if (visible.Count == 1)
         {
+            if (barrier.Backend == ProfileBackend.Sandboxie)
+            {
+                if (string.IsNullOrWhiteSpace(barrier.BoxId))
+                    throw new ConfigurationException("Sandbox launch barrier has no box id.", "launch_barrier_invalid");
+                var members = await _sandbox.ListProcessesAsync(barrier.BoxId, cancellationToken).ConfigureAwait(false);
+                if (!members.Any(member => member.ProcessId == visible[0].ProcessId))
+                    throw new ProcessOwnershipException("A pending process is not a member of the recorded sandbox. The launch barrier was retained.");
+            }
             if (ownership.PathEquals(barrier.OriginDataRoot, paths.DataRoot) && ownership.PathEquals(barrier.ExecutablePath, installation.ExecutablePath))
             {
                 await profiles.GetAsync(barrier.ProfileId, cancellationToken).ConfigureAwait(false);
