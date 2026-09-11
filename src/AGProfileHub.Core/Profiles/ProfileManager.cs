@@ -8,11 +8,28 @@ public sealed class ProfileManager(ConfigRepository repository, HubPaths paths)
     public async Task<ProfileRegistration> GetAsync(Guid id, CancellationToken cancellationToken = default) =>
         (await repository.ReadProfilesAsync(cancellationToken)).Profiles.SingleOrDefault(p => p.Id == id) ?? throw new ProfileNotFoundException(id);
 
+    public async Task<Guid> ResolveIdAsync(string reference, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(reference))
+            throw new ConfigurationException("Use a profile UUID or a unique profile name.", "invalid_profile_reference");
+        var registrations = await ListAsync(cancellationToken).ConfigureAwait(false);
+        if (Guid.TryParse(reference, out var id))
+            return registrations.Any(profile => profile.Id == id) ? id : throw new ProfileNotFoundException(id);
+        var matches = registrations.Where(profile => string.Equals(profile.Name, reference.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
+        return matches.Count switch
+        {
+            1 => matches[0].Id,
+            0 => throw new HubException($"No profile named '{reference}' was found. Run 'agprofile list'.", "profile_not_found"),
+            _ => throw new HubException($"More than one profile is named '{reference}'. Use its UUID from 'agprofile list'.", "profile_ambiguous")
+        };
+    }
+
     public async Task<ProfileRegistration> CreateAsync(string name, string? workspacePath = null,
         ProfileBackend backend = ProfileBackend.Direct, string? boxId = null, CancellationToken cancellationToken = default)
     {
         name = ValidateName(name);
         workspacePath = ValidateWorkspace(workspacePath);
+        if (!Enum.IsDefined(backend)) throw new ConfigurationException("Unknown profile backend.", "invalid_backend");
         var id = Guid.NewGuid();
         if (backend == ProfileBackend.Sandboxie)
         {

@@ -12,7 +12,8 @@ public static class DesktopShortcut
         {
             Path.Combine(baseDirectory, "AGProfileHub.Cli.exe"),
             Path.Combine(baseDirectory, "..", "cli", "AGProfileHub.Cli.exe"),
-            Path.Combine(baseDirectory, "..", "..", "..", "..", "AGProfileHub.Cli", "bin", "Release", "net10.0", "AGProfileHub.Cli.exe")
+            Path.Combine(baseDirectory, "..", "..", "..", "..", "AGProfileHub.Cli", "bin", "Release", "net10.0", "AGProfileHub.Cli.exe"),
+            Path.Combine(baseDirectory, "..", "..", "..", "..", "AGProfileHub.Cli", "bin", "Debug", "net10.0", "AGProfileHub.Cli.exe")
         };
         var found = candidates.FirstOrDefault(File.Exists);
         return found is null

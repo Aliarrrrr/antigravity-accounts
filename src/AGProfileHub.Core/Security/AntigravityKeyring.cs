@@ -44,8 +44,11 @@ public static class AntigravityKeyring
     /// isolation scope that has never signed in, because a visible entry there
     /// can only be the host copy seen through a fall-through read.
     /// </param>
-    public static KeyringShimResult EnsureIsolation(bool forceFresh = false)
+    public static KeyringShimResult EnsureIsolation(bool forceFresh = false, string? expectedBox = null)
     {
+        // This check must precede even the metadata query: a CLI argument alone
+        // is never evidence of OS-level isolation.
+        SandboxProcessContext.RequireBox(expectedBox);
         var before = WindowsCredentialStore.GetInfo(Target);
         var created = false;
         if (forceFresh)

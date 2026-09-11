@@ -29,6 +29,9 @@ public sealed class ConfigRepository
         var current = await ReadProfilesUnlockedAsync(cancellationToken);
         Validate(current);
         var (next, result) = update(current);
+        // A successful mutation is also the migration boundary. Reads stay read-only,
+        // and AtomicJsonStore preserves the previous document as .bak.
+        next = next with { SchemaVersion = SchemaVersions.Current };
         Validate(next);
         await _json.WriteAsync(_paths.ProfilesFile, next, HubJsonContext.Default.ProfilesDocument, cancellationToken);
         return result;
@@ -102,8 +105,9 @@ public sealed class ConfigRepository
         PathSafety.RejectExistingReparsePoints(_paths.DataRoot, path);
         if (!File.Exists(path)) return null;
         var marker = await _json.ReadAsync(path, HubJsonContext.Default.KeyringShimMarker, () => throw new ConfigurationException("Keyring marker is missing."), cancellationToken);
-        if (marker.SchemaVersion > SchemaVersions.Current || marker.ProfileId != profileId)
-            throw new ConfigurationException("Keyring marker has an unsupported schema.", "runtime_invalid");
+        if (marker.SchemaVersion > SchemaVersions.Current || marker.ProfileId != profileId ||
+            marker.Target != AntigravityKeyring.Target || marker.ClaimedUtc == default || marker.ExitCode is not (0 or 11) || marker.BlobSizeAfter < 0)
+            throw new ConfigurationException("Keyring marker has invalid ownership or result fields. It was not overwritten.", "runtime_invalid");
         return marker;
     }
 
@@ -135,6 +139,8 @@ public sealed class ConfigRepository
             throw new ConfigurationException("Profile names must contain 1-80 printable characters.", "invalid_profile_name");
         if (document.Profiles.Any(p => p.WorkspacePath is not null && !Path.IsPathFullyQualified(p.WorkspacePath)))
             throw new ConfigurationException("Workspace paths must be absolute.", "invalid_workspace_path");
+        if (document.Profiles.Any(p => !Enum.IsDefined(p.Backend)))
+            throw new ConfigurationException("Unknown profile backend.", "invalid_backend");
         if (document.Profiles.Any(p => p.Backend == ProfileBackend.Sandboxie && string.IsNullOrWhiteSpace(p.BoxId)))
             throw new ConfigurationException("Sandboxie profiles must have a box id.", "missing_box_id");
         if (document.Profiles.Any(p => p.Backend == ProfileBackend.Direct && !string.IsNullOrWhiteSpace(p.BoxId)))

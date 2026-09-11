@@ -91,6 +91,7 @@ public sealed record KeyringShimMarker
     public Guid ProfileId { get; init; }
     public string Target { get; init; } = string.Empty;
     public DateTimeOffset ClaimedUtc { get; init; }
+    public string? BoxId { get; init; }
     public int ExitCode { get; init; }
     public int BlobSizeAfter { get; init; }
 }
