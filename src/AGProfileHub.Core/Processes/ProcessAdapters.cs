@@ -106,8 +106,12 @@ public sealed class WindowsProcessLauncher : IProcessLauncher
     [SupportedOSPlatform("windows")]
     private static LaunchedProcess LaunchWindows(LaunchPlan plan)
     {
-        var environment = Environment.GetEnvironmentVariables().Cast<System.Collections.DictionaryEntry>()
-            .ToDictionary(entry => (string)entry.Key, entry => entry.Value?.ToString() ?? string.Empty, StringComparer.OrdinalIgnoreCase);
+        // Some environments inherit duplicate variables differing only by case
+        // (for example both "Path" and "PATH"). Indexer assignment keeps the
+        // last value instead of throwing on the duplicate key.
+        var environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables())
+            environment[(string)entry.Key] = entry.Value?.ToString() ?? string.Empty;
         foreach (var variable in DangerousInheritedEnvironment) environment.Remove(variable);
         foreach (var item in plan.Environment) environment[item.Key] = item.Value;
 
