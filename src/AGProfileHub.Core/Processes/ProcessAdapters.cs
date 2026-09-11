@@ -106,22 +106,34 @@ public sealed class WindowsProcessLauncher : IProcessLauncher
     [SupportedOSPlatform("windows")]
     private static LaunchedProcess LaunchWindows(LaunchPlan plan)
     {
-        // Some environments inherit duplicate variables differing only by case
-        // (for example both "Path" and "PATH"). Indexer assignment keeps the
-        // last value instead of throwing on the duplicate key.
-        var environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables())
-            environment[(string)entry.Key] = entry.Value?.ToString() ?? string.Empty;
-        foreach (var variable in DangerousInheritedEnvironment) environment.Remove(variable);
-        foreach (var item in plan.Environment) environment[item.Key] = item.Value;
-
-        var startup = new NativeLaunchMethods.STARTUPINFO
+        IntPtr environmentBlock;
+        StringBuilder commandLine;
+        NativeLaunchMethods.STARTUPINFO startup;
+        try
         {
-            cb = Marshal.SizeOf<NativeLaunchMethods.STARTUPINFO>(),
-            dwFlags = 0,
-        };
-        var commandLine = new StringBuilder(string.Join(' ', new[] { plan.ExecutablePath }.Concat(plan.Arguments).Select(QuoteWindowsArgument)));
-        var environmentBlock = BuildEnvironmentBlock(environment);
+            // Some environments inherit duplicate variables differing only by case
+            // (for example both "Path" and "PATH"). Indexer assignment keeps the
+            // last value instead of throwing on the duplicate key.
+            var environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables())
+                environment[(string)entry.Key] = entry.Value?.ToString() ?? string.Empty;
+            foreach (var variable in DangerousInheritedEnvironment) environment.Remove(variable);
+            foreach (var item in plan.Environment) environment[item.Key] = item.Value;
+
+            startup = new NativeLaunchMethods.STARTUPINFO
+            {
+                cb = Marshal.SizeOf<NativeLaunchMethods.STARTUPINFO>(),
+                dwFlags = 0,
+            };
+            commandLine = new StringBuilder(string.Join(' ', new[] { plan.ExecutablePath }.Concat(plan.Arguments).Select(QuoteWindowsArgument)));
+            environmentBlock = BuildEnvironmentBlock(environment);
+        }
+        catch (Exception ex) when (ex is not HubException and not OperationCanceledException)
+        {
+            // A failure before CreateProcess means no process exists, so the
+            // caller may safely clear its launch reservation.
+            throw new LaunchNotStartedException("Antigravity launch could not be prepared.", ex);
+        }
         bool created;
         NativeLaunchMethods.PROCESS_INFORMATION processInfo;
         try

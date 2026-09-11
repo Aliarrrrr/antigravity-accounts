@@ -25,6 +25,8 @@ var tests = new (string Name, Func<Task> Run)[]
     ("different data roots share the launch gate", TestCrossDataRootLaunchSerializationAsync),
     ("delayed process discovery retains the launch barrier", TestDelayedDiscoveryBarrierAsync),
     ("confirmed pre-create failure clears the launch barrier", TestPreCreateFailureClearsBarrierAsync),
+    ("unexpected pre-create failure auto-clears the retained barrier", TestUnexpectedPreCreateFailureBarrierAutoClearsAsync),
+    ("foreign rootless launch barrier fails closed", TestForeignRootlessBarrierFailsClosedAsync),
     ("post-create cancellation cannot reopen the launch gate", TestPostCreateCancellationAsync),
     ("runtime write failure retains the launch barrier", TestRuntimeWriteFailureBarrierAsync),
     ("future launch barrier fails closed", TestFutureLaunchBarrierAsync),
@@ -526,6 +528,30 @@ static async Task TestPreCreateFailureClearsBarrierAsync()
     True((await fixture.Hub.LaunchAsync(profile.Id)).StartedNewProcess);
 }
 
+static async Task TestUnexpectedPreCreateFailureBarrierAutoClearsAsync()
+{
+    using var fixture = new Fixture();
+    var profile = await fixture.Hub.CreateProfileAsync("A");
+    fixture.World.FailBeforeStartUnexpected = true;
+    await ThrowsAsync<InvalidOperationException>(() => fixture.Hub.LaunchAsync(profile.Id));
+    True(File.Exists(fixture.Paths.LaunchBarrierFile));
+    fixture.World.FailBeforeStartUnexpected = false;
+    True((await fixture.Hub.LaunchAsync(profile.Id)).StartedNewProcess);
+    True(!File.Exists(fixture.Paths.LaunchBarrierFile));
+    Equal(1, fixture.World.RootCount);
+}
+
+static async Task TestForeignRootlessBarrierFailsClosedAsync()
+{
+    using var fixture = new Fixture();
+    var profile = await fixture.Hub.CreateProfileAsync("A");
+    var barrier = $$"""{"schemaVersion":{{SchemaVersions.Current}},"attemptId":"{{Guid.NewGuid()}}","profileId":"{{profile.Id}}","originDataRoot":"C:\\elsewhere\\hub","executablePath":"{{fixture.Executable.Replace("\\", "\\\\")}}","userDataPath":"{{fixture.Paths.UserData(profile.Id).Replace("\\", "\\\\")}}","createdUtc":"{{DateTimeOffset.UtcNow:O}}","root":null}""";
+    File.WriteAllText(fixture.Paths.LaunchBarrierFile, barrier);
+    await ThrowsAsync<LaunchStateUncertainException>(() => fixture.Hub.LaunchAsync(profile.Id));
+    True(File.Exists(fixture.Paths.LaunchBarrierFile));
+    Equal(0, fixture.World.LaunchCount);
+}
+
 static async Task TestPostCreateCancellationAsync()
 {
     using var fixture = new Fixture();
@@ -904,6 +930,7 @@ sealed class FakeProcessWorld(HubPaths paths, string executable) : IProcessCatal
     public int CloseCalls { get; private set; }
     public bool FailChildTermination { get; set; }
     public bool FailBeforeStart { get; set; }
+    public bool FailBeforeStartUnexpected { get; set; }
     public bool HideSnapshots { get; set; }
     public Action? AfterStarted { get; set; }
     public int RootCount { get { lock (_gate) return _items.Count(item => item.ParentProcessId == 0); } }
@@ -914,6 +941,7 @@ sealed class FakeProcessWorld(HubPaths paths, string executable) : IProcessCatal
         lock (_gate)
         {
             if (FailBeforeStart) throw new LaunchNotStartedException("fake pre-create failure");
+            if (FailBeforeStartUnexpected) throw new InvalidOperationException("fake unexpected pre-create failure");
             var rootPid = _nextPid++; var childPid = _nextPid++; var started = DateTimeOffset.UtcNow; var userData = plan.Arguments.Single();
             _items.Add(new ProcessSnapshot(rootPid, 0, started, executable, $"\"{executable}\" \"{userData}\"", 1));
             _items.Add(new ProcessSnapshot(childPid, rootPid, started.AddMilliseconds(50), executable, $"\"{executable}\" \"{userData}\" --type=renderer", 0));

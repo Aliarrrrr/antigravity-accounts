@@ -230,6 +230,17 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
             throw new UnsupportedCapabilityException("Another Hub data root has a running or pending Antigravity instance. Stop it before launching from this data root.");
         }
 
+        if (barrier.Root is null && visible.Count == 0 &&
+            ownership.PathEquals(barrier.OriginDataRoot, paths.DataRoot) &&
+            ownership.PathEquals(barrier.ExecutablePath, installation.ExecutablePath))
+        {
+            // The recorded attempt never produced a process (it failed before or
+            // during creation) and nothing matching it is alive, so the stale
+            // latch can be cleared instead of blocking every future launch.
+            repository.DeleteLaunchBarrier();
+            return;
+        }
+
         if (barrier.Root is not null && controller.ProbeLiveness(barrier.Root) == ProcessLiveness.NotFound)
         {
             repository.DeleteLaunchBarrier();
