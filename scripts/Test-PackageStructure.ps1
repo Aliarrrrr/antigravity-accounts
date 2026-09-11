@@ -16,7 +16,7 @@ function Check([string]$Name, [bool]$Condition) {
 
 try {
     $required = @(
-        'package-manifest.json', 'README.md', 'SECURITY.md', 'MANUAL_TEST_PLAN.md',
+        'package-manifest.json', 'README.md', 'SECURITY.md', 'CHANGELOG.md', 'VERSIONING.md',
         'hub\AGProfileHub.Gui.exe', 'cli\AGProfileHub.Cli.exe',
         'scripts\New-IsolationBox.ps1', 'scripts\Set-IsolationWriteThrough.ps1'
     )

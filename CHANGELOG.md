@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+- Unified development entry point `hub.ps1` (PowerShell 5.1/7) with `build`, `test`, `run`, `cli`, `publish`, `version` and `check` verbs; restore/build/test run through the shared `scripts/Common.ps1` environment.
+- Locked restore and a Release publishing gate: `packages.lock.json` is generated for all four projects and committed; `Build.ps1 -LockedRestore -Test` enforces it, and `publish -Release` requires a clean tree, an exact `v<version>` tag and a matching CHANGELOG entry.
+- Added the `version` CLI verb (`--version`/`-v`), printing the product version and exiting before any Hub bootstrap.
+- Added `NuGet.Config` (nuget.org only) and `.editorconfig`.
+- `global.json` now pins `allowPrerelease: false`.
+
 ## 0.3.0 experimental — 2026-09-10
 
 - Sandboxie.ini parsing consolidated into `Core/Isolation/SandboxieIniFile`; `SandboxieBackend` delegates to it so the read and write paths can no longer disagree.

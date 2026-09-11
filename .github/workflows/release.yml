@@ -46,8 +46,8 @@ jobs:
         with:
           name: AGProfileHub-${{ github.ref_name }}-win-x64
           path: |
-            artifacts/package/*/AGProfileHub-win-x64.zip
-            artifacts/package/*/AGProfileHub-win-x64.zip.sha256.json
+            artifacts/package/*/AGProfileHub-*-win-x64.zip
+            artifacts/package/*/AGProfileHub-*-win-x64.zip.sha256.json
             artifacts/package/*/AGProfileHub-Setup-win-x64-*.exe
             artifacts/package/*/AGProfileHub-Setup-win-x64-*.exe.sha256.json
           if-no-files-found: error

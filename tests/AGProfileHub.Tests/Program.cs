@@ -1,5 +1,9 @@
 using AGProfileHub.Core;
 
+// hub.ps1 may pass --include-system to the test runner. This suite has no
+// system tests, so the flag is parsed and ignored to keep the interface stable.
+_ = Array.Exists(args, a => a == "--include-system");
+
 var tests = new (string Name, Func<Task> Run)[]
 {
     ("agent envelope errors never imply readiness or expose secrets", AgentProbeTests.ClassifierAsync),

@@ -27,6 +27,14 @@ internal static class CliApplication
                 return 0;
             }
 
+            if (parsed.Command[0] is "version" or "--version" or "-v")
+            {
+                RequireNoArguments(parsed.Command.Skip(1).ToList(), "version");
+                if (parsed.Json) WriteJson(new { version = HubVersion.Version, build = HubVersion.InformationalVersion });
+                else Console.WriteLine($"AGProfileHub {HubVersion.InformationalVersion}");
+                return 0;
+            }
+
             // Runs before any Hub bootstrap: this verb is executed inside
             // isolation scopes (for example a sandbox) where the Hub data root
             // must not be created or touched.
@@ -436,6 +444,7 @@ internal static class CliApplication
     private static string HelpText() => """
         Antigravity Profile Hub CLI (experimental)
         Global options: --data-root <absolute-path>  --json
+          version | --version                 Print the product version and exit
 
         Everyday commands (a profile may be given as a name, a unique prefix, or a UUID):
           setup                                 First-run environment check
