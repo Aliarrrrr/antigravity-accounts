@@ -36,3 +36,8 @@ scripts/Test-SandboxAntigravity.ps1
 scripts/Test-SandboxCredentialIsolation.ps1
 scripts/Trace-SandboxAntigravity.ps1
 scripts/Write-ProbeFile.py
+
+# Build/test artifacts produced by hub.ps1 (SDK/runtime/NuGet scratch space)
+*.binlog
+.dotnet-home/
+.nuget/
