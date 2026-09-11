@@ -42,9 +42,10 @@ internal static class CliApplication
             {
                 var tail = parsed.Command.Skip(1).ToList();
                 var forceFresh = TakeFlag(tail, "--force") & TakeFlag(tail, "--fresh");
-                RequireNoArguments(tail, "credential-shim --force --fresh");
+                var boxId = TakeOption(tail, "--box");
+                RequireNoArguments(tail, "credential-shim --force --fresh [--box <name>]");
                 if (!forceFresh) throw new UsageException("credential-shim is an internal command and requires both --force and --fresh.");
-                var shim = AntigravityKeyring.EnsureIsolation(forceFresh);
+                var shim = AntigravityKeyring.EnsureIsolation(forceFresh, boxId);
                 if (parsed.Json) WriteJson(shim);
                 else Console.WriteLine($"credential-shim: target={shim.Target} existedBefore={shim.ExistedBefore} created={shim.Created} blobSize={shim.BlobSize}");
                 // Exit codes let a caller that cannot capture sandboxed stdout
@@ -468,7 +469,8 @@ internal static class CliApplication
           open-data [name-or-id] | open-logs | configure-executable <path> | shortcut <name-or-id> [--directory <path>]
           agent-probe                           Mocked LS/official CLI diagnostic; no real account
           credential-status                     Report the shared token entry (existence/size only)
-          credential-shim --force --fresh       Internal: claim the keyring entry inside a fresh box
+          credential-shim --force --fresh [--box <name>]
+                                      Internal: claim the keyring entry inside the verified box
 
         Authentication is performed only by official Antigravity. Concurrent accounts require a prepared per-profile isolation box; the legacy direct path remains serial-only.
         """;

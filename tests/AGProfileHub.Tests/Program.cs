@@ -31,6 +31,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("elevation helper uses the current host when it is a muxer", TestElevationMuxerUsesHostPath),
     ("elevation helper keeps self-contained launches direct", TestElevationMuxerSkipsSelfContained),
     ("elevation helper finds no muxer without a .NET 10 runtime", TestElevationMuxerNotFound),
+    ("credential shim requires the verified sandbox box", TestSandboxProcessContext),
     ("post-create cancellation cannot reopen the launch gate", TestPostCreateCancellationAsync),
     ("runtime write failure retains the launch barrier", TestRuntimeWriteFailureBarrierAsync),
     ("future launch barrier fails closed", TestFutureLaunchBarrierAsync),
@@ -85,8 +86,10 @@ static async Task TestKeyringPrimitivesAsync()
     var status = AntigravityKeyring.BuildStatus();
     True(status.Target == "gemini:antigravity", "status targets the shared vendor entry");
     True(status.Note.Length > 0, "status explains that the value is never read");
-    if (!SandboxieBackend.IsCurrentProcessSandboxed())
+    if (SandboxProcessContext.CurrentBox() is null)
         Throws<HubException>(() => AntigravityKeyring.EnsureIsolation(forceFresh: true));
+    else
+        Throws<HubException>(() => AntigravityKeyring.EnsureIsolation(forceFresh: true, expectedBox: "AGPH_NotTheRunningBox"));
     await Task.CompletedTask;
 }
 
@@ -613,6 +616,29 @@ static Task TestElevationMuxerNotFound()
     var (root, helper, _, systemRoot) = CreateElevationLayout(selfContained: false, repoTools: false, systemHas10: false);
     try { Equal(null, WindowsElevationBridge.ResolveDotnetMuxer(helper, null, systemRoot, systemRoot, Path.Combine(root, "pf"))); }
     finally { Directory.Delete(root, true); }
+    return Task.CompletedTask;
+}
+
+static Task TestSandboxProcessContext()
+{
+    var box = SandboxProcessContext.CurrentBox();
+    if (box is null)
+    {
+        // On an unsandboxed host nothing is injected, so every request must fail
+        // closed rather than fall through to the host credential store.
+        Throws<HubException>(() => SandboxProcessContext.RequireBox());
+        Throws<HubException>(() => SandboxProcessContext.RequireBox("AGPH_AnyBox"));
+    }
+    else
+    {
+        // Running inside a box (for example a CI job launched through Sandboxie):
+        // the box itself is accepted, and anything else is still rejected.
+        True(box.Length > 0, "a sandboxed process reports its box name");
+        SandboxProcessContext.RequireBox();
+        SandboxProcessContext.RequireBox(box);
+        SandboxProcessContext.RequireBox(box.ToUpperInvariant());
+        Throws<HubException>(() => SandboxProcessContext.RequireBox(box + "-other-box"));
+    }
     return Task.CompletedTask;
 }
 

@@ -148,6 +148,11 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
         arguments.Add("credential-shim");
         arguments.Add("--force");
         arguments.Add("--fresh");
+        // The shim verifies this against the injected Sandboxie module. Passing
+        // it lets the shim refuse to touch the vendor target when it landed in
+        // some other box than the one this profile owns.
+        arguments.Add("--box");
+        arguments.Add(boxName);
         return backend.RunInBox(boxName, command.Executable, arguments, wait: true);
     }
 

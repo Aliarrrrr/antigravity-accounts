@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 
 namespace AGProfileHub.Core;
 
@@ -27,9 +26,6 @@ public interface IIsolationBackend
 /// </remarks>
 public sealed class SandboxieBackend : IIsolationBackend
 {
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
-    private static extern IntPtr GetModuleHandleW(string moduleName);
-
     public SandboxieBackend(string home)
     {
         Home = home;
@@ -59,8 +55,8 @@ public sealed class SandboxieBackend : IIsolationBackend
         return null;
     }
 
-    public static bool IsCurrentProcessSandboxed() =>
-        OperatingSystem.IsWindows() && GetModuleHandleW("SbieDll.dll") != IntPtr.Zero;
+    /// <summary>Delegates so the "am I isolated?" answer has exactly one source.</summary>
+    public static bool IsCurrentProcessSandboxed() => SandboxProcessContext.CurrentBox() is not null;
 
     public bool BoxExists(string box)
     {

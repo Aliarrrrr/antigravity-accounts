@@ -44,10 +44,16 @@ public static class AntigravityKeyring
     /// isolation scope that has never signed in, because a visible entry there
     /// can only be the host copy seen through a fall-through read.
     /// </param>
-    public static KeyringShimResult EnsureIsolation(bool forceFresh = false)
+    /// <param name="expectedBox">
+    /// The box the caller believes this process runs in. Verification uses the
+    /// injected Sandboxie module, so passing a name does not grant isolation.
+    /// </param>
+    public static KeyringShimResult EnsureIsolation(bool forceFresh = false, string? expectedBox = null)
     {
-        if (!SandboxieBackend.IsCurrentProcessSandboxed())
-            throw new HubException("Refusing to write the vendor credential target outside a Sandboxie isolation box.", "shim_outside_isolation");
+        // Must come before even the metadata query: this is the only check that
+        // can tell a real box apart from an unrelated one, and a command line
+        // argument is never evidence of OS-level isolation.
+        SandboxProcessContext.RequireBox(expectedBox);
         var before = WindowsCredentialStore.GetInfo(Target);
         var created = false;
         if (forceFresh)
