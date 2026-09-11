@@ -27,6 +27,10 @@ var tests = new (string Name, Func<Task> Run)[]
     ("confirmed pre-create failure clears the launch barrier", TestPreCreateFailureClearsBarrierAsync),
     ("unexpected pre-create failure auto-clears the retained barrier", TestUnexpectedPreCreateFailureBarrierAutoClearsAsync),
     ("foreign rootless launch barrier fails closed", TestForeignRootlessBarrierFailsClosedAsync),
+    ("elevation helper resolves repo SDK muxer over older runtimes", TestElevationMuxerResolution),
+    ("elevation helper uses the current host when it is a muxer", TestElevationMuxerUsesHostPath),
+    ("elevation helper keeps self-contained launches direct", TestElevationMuxerSkipsSelfContained),
+    ("elevation helper finds no muxer without a .NET 10 runtime", TestElevationMuxerNotFound),
     ("post-create cancellation cannot reopen the launch gate", TestPostCreateCancellationAsync),
     ("runtime write failure retains the launch barrier", TestRuntimeWriteFailureBarrierAsync),
     ("future launch barrier fails closed", TestFutureLaunchBarrierAsync),
@@ -550,6 +554,66 @@ static async Task TestForeignRootlessBarrierFailsClosedAsync()
     await ThrowsAsync<LaunchStateUncertainException>(() => fixture.Hub.LaunchAsync(profile.Id));
     True(File.Exists(fixture.Paths.LaunchBarrierFile));
     Equal(0, fixture.World.LaunchCount);
+}
+
+static (string Root, string Helper, string ToolsMuxer, string SystemRoot) CreateElevationLayout(bool selfContained, bool repoTools, bool systemHas10)
+{
+    var root = Path.Combine(Path.GetTempPath(), "AGProfileHub-Tests", Guid.NewGuid().ToString("N"));
+    var helperDir = Path.Combine(root, "repo", "src", "AGProfileHub.Cli", "bin", "Release", "net10.0");
+    Directory.CreateDirectory(helperDir);
+    var helper = Path.Combine(helperDir, "AGProfileHub.Cli.exe");
+    File.WriteAllBytes(helper, []);
+    File.WriteAllBytes(Path.ChangeExtension(helper, ".dll"), []);
+    if (selfContained) File.WriteAllBytes(Path.Combine(helperDir, "coreclr.dll"), []);
+    var toolsMuxer = Path.Combine(root, "repo", ".tools", "dotnet", "dotnet.exe");
+    if (repoTools) WriteDotnetLayout(toolsMuxer, "10.0.0");
+    var systemRoot = Path.Combine(root, "pf", "dotnet");
+    WriteDotnetLayout(Path.Combine(systemRoot, "dotnet.exe"), systemHas10 ? "10.0.0" : "7.0.20");
+    return (root, helper, toolsMuxer, systemRoot);
+
+    static void WriteDotnetLayout(string muxerPath, string runtimeVersion)
+    {
+        Directory.CreateDirectory(Path.Combine(Path.GetDirectoryName(muxerPath)!, "shared", "Microsoft.NETCore.App", runtimeVersion));
+        File.WriteAllBytes(muxerPath, []);
+    }
+}
+
+static Task TestElevationMuxerResolution()
+{
+    var (root, helper, toolsMuxer, systemRoot) = CreateElevationLayout(selfContained: false, repoTools: true, systemHas10: false);
+    try
+    {
+        // An apphost-style DOTNET_HOST_PATH and a 7-only DOTNET_ROOT are both
+        // unusable, so resolution must walk up to the repo-local .tools SDK.
+        Equal(toolsMuxer, WindowsElevationBridge.ResolveDotnetMuxer(helper,
+            Path.Combine(root, "pf", "dotnet", "AGProfileHub.Cli.exe"), systemRoot, systemRoot, Path.Combine(root, "pf")));
+    }
+    finally { Directory.Delete(root, true); }
+    return Task.CompletedTask;
+}
+
+static Task TestElevationMuxerUsesHostPath()
+{
+    var (root, helper, toolsMuxer, _) = CreateElevationLayout(selfContained: false, repoTools: true, systemHas10: false);
+    try { Equal(toolsMuxer, WindowsElevationBridge.ResolveDotnetMuxer(helper, toolsMuxer, null, null, null)); }
+    finally { Directory.Delete(root, true); }
+    return Task.CompletedTask;
+}
+
+static Task TestElevationMuxerSkipsSelfContained()
+{
+    var (root, helper, toolsMuxer, _) = CreateElevationLayout(selfContained: true, repoTools: true, systemHas10: true);
+    try { Equal(null, WindowsElevationBridge.ResolveDotnetMuxer(helper, toolsMuxer, null, null, null)); }
+    finally { Directory.Delete(root, true); }
+    return Task.CompletedTask;
+}
+
+static Task TestElevationMuxerNotFound()
+{
+    var (root, helper, _, systemRoot) = CreateElevationLayout(selfContained: false, repoTools: false, systemHas10: false);
+    try { Equal(null, WindowsElevationBridge.ResolveDotnetMuxer(helper, null, systemRoot, systemRoot, Path.Combine(root, "pf"))); }
+    finally { Directory.Delete(root, true); }
+    return Task.CompletedTask;
 }
 
 static async Task TestPostCreateCancellationAsync()

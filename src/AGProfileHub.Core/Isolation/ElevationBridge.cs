@@ -77,16 +77,7 @@ public sealed class WindowsElevationBridge : IElevationBridge
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(_timeout);
 
-        var info = new ProcessStartInfo(_helperExecutable)
-        {
-            UseShellExecute = true,
-            Verb = "runas",
-            CreateNoWindow = true,
-            WorkingDirectory = _workDirectory
-        };
-        info.ArgumentList.Add("admin-helper");
-        info.ArgumentList.Add(requestPath);
-        info.ArgumentList.Add(resultPath);
+        var info = BuildHelperStartInfo(requestPath, resultPath);
 
         Process? process;
         try
@@ -135,6 +126,76 @@ public sealed class WindowsElevationBridge : IElevationBridge
             await Task.Delay(100, cancellationToken).ConfigureAwait(false);
         }
         return null;
+    }
+
+    // UAC-elevated children do not inherit this process's environment, so a
+    // framework-dependent helper cannot rely on DOTNET_ROOT reaching it. When
+    // the helper has no bundled runtime, launch it through an explicit muxer
+    // (dotnet.exe <dll>) resolved from this machine instead of the apphost.
+    private ProcessStartInfo BuildHelperStartInfo(string requestPath, string resultPath)
+    {
+        var muxer = ResolveDotnetMuxer(_helperExecutable);
+        var info = new ProcessStartInfo(muxer ?? _helperExecutable)
+        {
+            UseShellExecute = true,
+            Verb = "runas",
+            CreateNoWindow = true,
+            WorkingDirectory = _workDirectory
+        };
+        if (muxer is not null) info.ArgumentList.Add(Path.ChangeExtension(_helperExecutable, ".dll"));
+        info.ArgumentList.Add("admin-helper");
+        info.ArgumentList.Add(requestPath);
+        info.ArgumentList.Add(resultPath);
+        return info;
+    }
+
+    internal static string? ResolveDotnetMuxer(string helperExecutable) =>
+        ResolveDotnetMuxer(helperExecutable,
+            Environment.GetEnvironmentVariable("DOTNET_HOST_PATH"),
+            Environment.GetEnvironmentVariable("DOTNET_ROOT_X64"),
+            Environment.GetEnvironmentVariable("DOTNET_ROOT"),
+            Environment.GetEnvironmentVariable("ProgramFiles"));
+
+    internal static string? ResolveDotnetMuxer(string helperExecutable, string? hostPath, string? dotnetRootX64, string? dotnetRoot, string? programFiles)
+    {
+        // A self-contained helper carries its runtime and keeps the direct path.
+        var helperDirectory = Path.GetDirectoryName(helperExecutable);
+        if (helperDirectory is null || !File.Exists(Path.ChangeExtension(helperExecutable, ".dll"))) return null;
+        if (File.Exists(Path.Combine(helperDirectory, "coreclr.dll"))) return null;
+
+        foreach (var candidate in MuxerCandidates(helperDirectory, hostPath, dotnetRootX64, dotnetRoot, programFiles))
+        {
+            if (string.IsNullOrEmpty(candidate) || !File.Exists(candidate)) continue;
+            if (HasNet10SharedRuntime(Path.GetDirectoryName(candidate)!)) return candidate;
+        }
+        return null;
+    }
+
+    private static IEnumerable<string?> MuxerCandidates(string helperDirectory, string? hostPath, string? dotnetRootX64, string? dotnetRoot, string? programFiles)
+    {
+        // The host that started this process, when it is a real muxer (not an apphost).
+        if (string.Equals(Path.GetFileName(hostPath), "dotnet.exe", StringComparison.OrdinalIgnoreCase)) yield return hostPath;
+        foreach (var root in new[] { dotnetRootX64, dotnetRoot })
+        {
+            if (string.IsNullOrEmpty(root)) continue;
+            yield return Directory.Exists(root) ? Path.Combine(root, "dotnet.exe") : root;
+        }
+        // Repo-local SDK used by development builds.
+        var directory = new DirectoryInfo(helperDirectory);
+        for (var depth = 0; depth < 8 && directory is not null; depth++, directory = directory.Parent)
+            yield return Path.Combine(directory.FullName, ".tools", "dotnet", "dotnet.exe");
+        if (!string.IsNullOrEmpty(programFiles)) yield return Path.Combine(programFiles, "dotnet", "dotnet.exe");
+    }
+
+    private static bool HasNet10SharedRuntime(string dotnetDirectory)
+    {
+        var shared = Path.Combine(dotnetDirectory, "shared", "Microsoft.NETCore.App");
+        try
+        {
+            return Directory.Exists(shared) && Directory.EnumerateDirectories(shared)
+                .Any(path => Path.GetFileName(path).StartsWith("10.", StringComparison.Ordinal));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
     }
 }
 
