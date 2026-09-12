@@ -178,6 +178,10 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
         await DeepLinkRouter.WritePendingAsync(_paths, profileId, _paths.UserData(profileId), cancellationToken).ConfigureAwait(false);
         try
         {
+            // The registration record is validated before anything starts: a
+            // corrupt record used to abort the launch after the instance was
+            // already running, skipping the verification and termination gate.
+            DeepLinkRouter.EnsureRegistered(_paths);
             var installation = await _driver.DiscoverAsync(cancellationToken).ConfigureAwait(false);
             var plan = _driver.BuildLaunchPlan(installation, profileId, kind);
             backend.LaunchDetached(record.BoxName, plan.ExecutablePath, plan.Arguments, plan.Environment);
@@ -196,9 +200,12 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
                 if (pids is null || pids.Count == 0) continue;
                 // The vendor desktop rewrites the scheme back to itself during
                 // startup, which would silently undo the router registration
-                // between sign-ins. Wait for that to settle, then re-assert.
+                // between sign-ins. Wait for that to settle, then re-assert. A
+                // failure here must not leave the instance running past the
+                // verification gate below, so the scope is stopped first.
                 await Task.Delay(2000, cancellationToken).ConfigureAwait(false);
-                DeepLinkRouter.EnsureRegistered(_paths);
+                try { DeepLinkRouter.EnsureRegistered(_paths); }
+                catch { backend.Terminate(record.BoxName); throw; }
                 await RequireFileTokenStoreAsync(profileId, backend, record.BoxName, storeLogFloor, cancellationToken).ConfigureAwait(false);
                 return new IsolationLaunchResult(profileId, record.BoxName, pids, true);
             }

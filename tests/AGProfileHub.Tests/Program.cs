@@ -58,6 +58,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("an expired pending callback is dropped", TestPendingExpiryAsync),
     ("a failed launch clears the waiting grant", TestFailedLaunchClearsPendingAsync),
     ("stopping one profile keeps another profile's pending", TestStopKeepsForeignPendingAsync),
+    ("a corrupt registration record blocks the launch before anything starts", TestCorruptRegistrationBlocksLaunchAsync),
 };
 
 var failures = new List<string>();
@@ -983,6 +984,35 @@ static async Task TestStopKeepsForeignPendingAsync()
     // Stopping the waiting profile itself does clear its own grant.
     await launcher.StopAsync(waiting);
     Equal(null, await DeepLinkRouter.ReadPendingAsync(fixture.Paths));
+}
+
+static async Task TestCorruptRegistrationBlocksLaunchAsync()
+{
+    using var fixture = new Fixture();
+    var backend = new FakeIsolationBackend();
+    var launcher = new IsolatedProfileLauncher(fixture.Paths, new FakeDriver(fixture.Paths, fixture.Executable),
+        fixture.Repository, _ => backend);
+    var id = Guid.NewGuid();
+    await fixture.Repository.UpdateProfilesAsync(document =>
+    {
+        document.Profiles.Add(new ProfileRegistration(id, "Scoped", null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+        {
+            Backend = IsolationBackendKind.ProcessLocal
+        });
+        return (document, document.Profiles[0]);
+    });
+    await launcher.PrepareAsync(id);
+
+    // A corrupt deep-link registration record used to abort the launch after
+    // the instance had already started, skipping the token-store gate. It must
+    // fail before the wrapper runs, and it must not leave a waiting grant.
+    var registrationPath = Path.Combine(fixture.Paths.DataRoot, "runtime", "deeplink-registration.json");
+    Directory.CreateDirectory(Path.GetDirectoryName(registrationPath)!);
+    File.WriteAllText(registrationPath, "{ not json");
+
+    await ThrowsAsync<HubException>(() => launcher.LaunchAsync(id));
+    True(backend.LaunchCalls == 0, "a corrupt registration record must fail before the desktop starts");
+    True(!File.Exists(DeepLinkRouter.PendingPath(fixture.Paths)), "the failed launch must not leave a waiting grant");
 }
 
 static void True(bool condition, string? message = null) { if (!condition) throw new InvalidOperationException(message ?? "Expected true."); }
