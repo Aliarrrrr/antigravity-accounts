@@ -116,6 +116,7 @@ public sealed class LaunchStateUncertainException(string message, Exception? inn
 [JsonSerializable(typeof(DoctorReport))]
 [JsonSerializable(typeof(List<ProfileStatus>))]
 [JsonSerializable(typeof(IsolationStateDocument))]
+[JsonSerializable(typeof(IsolationScopeMarker))]
 [JsonSerializable(typeof(PendingCallback))]
 [JsonSerializable(typeof(DeepLinkRegistration))]
 [JsonSerializable(typeof(ElevationRequest))]

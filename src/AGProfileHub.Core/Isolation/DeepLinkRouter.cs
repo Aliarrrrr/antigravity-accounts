@@ -44,7 +44,7 @@ public static class DeepLinkRouter
         $"\"{cliExecutable}\" --data-root \"{dataRoot}\" callback \"%1\"";
 
     public static string PendingPath(HubPaths paths) =>
-        Path.Combine(paths.GlobalLaunchStateRoot, "deeplink-pending.json");
+        Path.Combine(paths.DataRoot, "runtime", "deeplink-pending.json");
 
     public static async Task<PendingCallback?> ReadPendingAsync(HubPaths paths, CancellationToken cancellationToken = default)
     {
@@ -88,6 +88,9 @@ public static class DeepLinkRouter
         var info = new System.Diagnostics.ProcessStartInfo(executable) { UseShellExecute = false };
         foreach (var argument in arguments.Skip(1)) info.ArgumentList.Add(argument);
         // Skip(1) drops the executable because ProcessStartInfo.FileName already carries it.
+        // The handoff process must be the desktop itself, not a Node runtime: the
+        // host that started the Hub may have set ELECTRON_RUN_AS_NODE=1.
+        info.Environment.Remove("ELECTRON_RUN_AS_NODE");
         return System.Diagnostics.Process.Start(info)?.Id ?? 0;
     }
 
@@ -152,7 +155,7 @@ public static class DeepLinkRouter
     }
 
     private static string RegistrationPath(HubPaths paths) =>
-        Path.Combine(paths.GlobalLaunchStateRoot, "deeplink-registration.json");
+        Path.Combine(paths.DataRoot, "runtime", "deeplink-registration.json");
 
     private static DeepLinkRegistration? TryReadRegistration(HubPaths paths)
     {

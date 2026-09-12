@@ -3,6 +3,14 @@ using System.Management;
 
 namespace AGProfileHub.Core;
 
+/// <summary>Marker that a Profile's process-local scope has been prepared.</summary>
+public sealed record IsolationScopeMarker
+{
+    public int SchemaVersion { get; init; } = SchemaVersions.Current;
+    public string ScopeName { get; init; } = string.Empty;
+    public DateTimeOffset CreatedUtc { get; init; }
+}
+
 /// <summary>
 /// Isolation that gives each Profile its own identity without virtualising the
 /// operating system, so no sandbox product is required.
@@ -28,6 +36,15 @@ public sealed class ProcessLocalBackend(HubPaths paths) : IIsolationBackend
     /// <summary>Scope name for a Profile, in the same shape the sandbox backend uses.</summary>
     public static string ScopeNameFor(Guid profileId) => "AGPH_" + profileId.ToString("N");
 
+    /// <summary>
+    /// The marker that says "this Profile's scope has been prepared". It cannot
+    /// be the home directory: the profile layout already exists the moment the
+    /// Profile is created, so a directory-based check would make every fresh
+    /// scope look like a pre-existing, unowned one.
+    /// </summary>
+    public static string ScopeMarkerPath(HubPaths paths, Guid profileId) =>
+        Path.Combine(paths.ProfileRoot(profileId), "scope.json");
+
     private static Guid ProfileIdFromScope(string scope)
     {
         var name = scope.StartsWith("AGPH_", StringComparison.OrdinalIgnoreCase) ? scope[5..] : scope;
@@ -36,15 +53,17 @@ public sealed class ProcessLocalBackend(HubPaths paths) : IIsolationBackend
             : throw new ConfigurationException($"Scope '{scope}' is not a process-local scope name.", "isolation_scope_invalid");
     }
 
-    /// <summary>
-    /// A scope exists once its managed layout exists. Nothing is created here:
-    /// the layout is owned by <see cref="HubPaths.EnsureProfileLayout"/>.
-    /// </summary>
-    public bool BoxExists(string scope) => Directory.Exists(Paths.Home(ProfileIdFromScope(scope)));
+    /// <summary>A scope exists once <see cref="CreateBox"/> has written its marker.</summary>
+    public bool BoxExists(string scope) => File.Exists(ScopeMarkerPath(Paths, ProfileIdFromScope(scope)));
 
     public void CreateBox(string scope)
     {
-        Paths.EnsureProfileLayout(ProfileIdFromScope(scope));
+        var profileId = ProfileIdFromScope(scope);
+        Paths.EnsureProfileLayout(profileId);
+        new AtomicJsonStore(Paths.DataRoot).WriteAsync(ScopeMarkerPath(Paths, profileId),
+            new IsolationScopeMarker { ScopeName = scope, CreatedUtc = DateTimeOffset.UtcNow },
+            HubJsonContext.Default.IsolationScopeMarker, CancellationToken.None)
+            .ConfigureAwait(false).GetAwaiter().GetResult();
         if (!BoxExists(scope)) throw new HubException("The scoped profile layout could not be created.", "isolation_scope_create_failed");
     }
 
@@ -137,6 +156,11 @@ public sealed class ProcessLocalBackend(HubPaths paths) : IIsolationBackend
         foreach (var argument in arguments) info.ArgumentList.Add(argument);
         if (environment is not null)
             foreach (var pair in environment) info.Environment[pair.Key] = pair.Value;
+        // The Hub and CLI are frequently started from an Electron host, which sets
+        // ELECTRON_RUN_AS_NODE=1 for its own child processes. Inheriting it turns
+        // the vendor desktop into a plain Node runtime, which then rejects its own
+        // arguments with "bad option", so the instance must never inherit it.
+        info.Environment.Remove("ELECTRON_RUN_AS_NODE");
         return Process.Start(info) ?? throw new HubException("Failed to start the scoped process.", "isolation_start_failed");
     }
 
