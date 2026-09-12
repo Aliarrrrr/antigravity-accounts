@@ -24,9 +24,14 @@ public sealed class HubService
     public Task<IReadOnlyList<ProfileRegistration>> ListProfilesAsync(CancellationToken cancellationToken = default) => _profiles.ListAsync(cancellationToken);
     public Task<ProfileRegistration> GetProfileAsync(Guid id, CancellationToken cancellationToken = default) => _profiles.GetAsync(id, cancellationToken);
     public Task<ProfileRegistration> ResolveProfileAsync(string nameOrId, CancellationToken cancellationToken = default) => _profiles.ResolveAsync(nameOrId, cancellationToken);
-    public Task<ProfileRegistration> CreateProfileAsync(string name, string? workspacePath = null,
-        IsolationBackendKind backend = IsolationBackendKind.Sandboxie, CancellationToken cancellationToken = default) =>
-        _profiles.CreateAsync(name, workspacePath, backend, cancellationToken);
+    public async Task<ProfileRegistration> CreateProfileAsync(string name, string? workspacePath = null,
+        IsolationBackendKind? backend = null, CancellationToken cancellationToken = default)
+    {
+        // A Profile that does not name a backend inherits the configured default,
+        // so switching backends is one setting rather than a per-profile chore.
+        var kind = backend ?? (await _repository.ReadSettingsAsync(cancellationToken).ConfigureAwait(false)).DefaultBackend;
+        return await _profiles.CreateAsync(name, workspacePath, kind, cancellationToken).ConfigureAwait(false);
+    }
     public Task<ProfileRegistration> RenameProfileAsync(Guid id, string name, CancellationToken cancellationToken = default) => _profiles.RenameAsync(id, name, cancellationToken);
     public Task<ProfileRegistration> SetWorkspaceAsync(Guid id, string? workspacePath, CancellationToken cancellationToken = default) => _profiles.SetWorkspaceAsync(id, workspacePath, cancellationToken);
     public async Task<ProfileStatus> GetStatusAsync(Guid id, CancellationToken cancellationToken = default)
@@ -155,6 +160,15 @@ public sealed class HubService
         var status = await GetStatusAsync(id, cancellationToken);
         if (status.State != RuntimeState.Stopped) throw new HubException("Stop the profile and resolve any ownership warning before unregistering it.", "profile_not_stopped");
         return await _profiles.RemoveAsync(id, cancellationToken);
+    }
+
+    /// <summary>Sets the backend newly created Profiles use. Existing Profiles keep their own.</summary>
+    public async Task<HubSettings> ConfigureDefaultBackendAsync(IsolationBackendKind backend, CancellationToken cancellationToken = default)
+    {
+        if (!Enum.IsDefined(backend)) throw new ConfigurationException("Unknown isolation backend.", "invalid_isolation_backend");
+        var current = await _repository.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+        await _repository.WriteSettingsAsync(current with { DefaultBackend = backend }, cancellationToken).ConfigureAwait(false);
+        return await _repository.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<HubSettings> ConfigureExecutableAsync(string executablePath, CancellationToken cancellationToken = default)

@@ -171,8 +171,10 @@ internal static class CliApplication
                 var newWorkspace = TakeOption(tail, "--workspace");
                 var newFresh = TakeFlag(tail, "--fresh");
                 var newDirect = TakeFlag(tail, "--direct");
-                RequireCount(tail, 1, "new <name> [--workspace <path>] [--direct] [--fresh]");
-                var newProfile = await hub.CreateProfileAsync(tail[0], newWorkspace).ConfigureAwait(false);
+                var newBackendText = TakeOption(tail, "--backend");
+                RequireCount(tail, 1, "new <name> [--workspace <path>] [--backend <sandboxie|process-local>] [--direct] [--fresh]");
+                var newProfile = await hub.CreateProfileAsync(tail[0], newWorkspace,
+                    newBackendText is null ? null : ParseBackend(newBackendText)).ConfigureAwait(false);
                 if (newDirect)
                 {
                     if (!json) Console.WriteLine($"Created {newProfile.Name} ({newProfile.Id:D}) backend=direct");
@@ -315,6 +317,11 @@ internal static class CliApplication
                 var settings = await hub.ConfigureExecutableAsync(tail[0]).ConfigureAwait(false);
                 if (!json) Console.WriteLine($"Configured {settings.AntigravityExecutablePath}");
                 return settings;
+            case "configure-isolation":
+                RequireCount(tail, 1, "configure-isolation <sandboxie|process-local>");
+                var configuredBackend = await hub.ConfigureDefaultBackendAsync(ParseBackend(tail[0])).ConfigureAwait(false);
+                if (!json) Console.WriteLine($"Default isolation backend for new profiles: {configuredBackend.DefaultBackend}");
+                return configuredBackend;
             case "shortcut":
                 var shortcutDirectory = TakeOption(tail, "--directory");
                 RequireCount(tail, 1, "shortcut <id> [--directory <path>]");
@@ -375,6 +382,13 @@ internal static class CliApplication
 
     private static Guid ParseId(string value) => Guid.TryParse(value, out var id) && id != Guid.Empty
         ? id : throw new UsageException($"Invalid profile ID '{value}'. Expected a UUID.");
+
+    private static IsolationBackendKind ParseBackend(string value) => value.Trim().ToLowerInvariant() switch
+    {
+        "sandboxie" or "sandbox" => IsolationBackendKind.Sandboxie,
+        "process-local" or "processlocal" or "local" => IsolationBackendKind.ProcessLocal,
+        _ => throw new UsageException("Unknown isolation backend. Use sandboxie or process-local.")
+    };
 
     private static async Task<Guid> ResolveIdAsync(HubService hub, string nameOrId)
     {
@@ -449,7 +463,7 @@ internal static class CliApplication
 
         Everyday commands (a profile may be given as a name, a unique prefix, or a UUID):
           setup                                 First-run environment check
-          new <name> [--workspace <path>] [--direct] [--fresh]
+          new <name> [--workspace <path>] [--backend <sandboxie|process-local>] [--direct] [--fresh]
                                                 Create a profile and prepare its isolation in one step
           ls                                    List profiles
           open <name-or-id> [--direct]          Prepare what is missing, then launch
@@ -467,6 +481,8 @@ internal static class CliApplication
           iso-status | iso-writethrough <name-or-id>
                                                 Inspect box and direct-write readiness
           open-data [name-or-id] | open-logs | configure-executable <path> | shortcut <name-or-id> [--directory <path>]
+          configure-isolation <sandboxie|process-local>
+                                      Backend newly created profiles use (existing ones keep theirs)
           agent-probe                           Mocked LS/official CLI diagnostic; no real account
           credential-status                     Report the shared token entry (existence/size only)
           credential-shim --force --fresh [--box <name>]

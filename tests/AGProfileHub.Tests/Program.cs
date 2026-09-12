@@ -458,6 +458,11 @@ static async Task TestIsolationBackendDefaultsAsync()
     var settings = await fixture.Repository.ReadSettingsAsync();
     await fixture.Repository.WriteSettingsAsync(settings with { DefaultBackend = IsolationBackendKind.ProcessLocal });
     Equal(IsolationBackendKind.ProcessLocal, (await fixture.Repository.ReadSettingsAsync()).DefaultBackend);
+
+    // A Profile that does not name a backend inherits the configured default;
+    // one that does name it overrides the default.
+    Equal(IsolationBackendKind.ProcessLocal, (await fixture.Hub.CreateProfileAsync("InheritsDefault")).Backend);
+    Equal(IsolationBackendKind.Sandboxie, (await fixture.Hub.CreateProfileAsync("Named", null, IsolationBackendKind.Sandboxie)).Backend);
 }
 
 static async Task TestUnknownIsolationBackendAsync()
