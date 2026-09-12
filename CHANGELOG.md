@@ -1,6 +1,32 @@
 # Changelog
 
+## [0.4.2] - 2026-09-13
+
+Audit-remediation release: every finding from the full 0.4.1 audit was fixed in its own revertible commit. 54 automated checks pass.
+
+### Fixed
+
+- **A WMI enumeration failure read as "no processes"**: stop reported a scope as already stopped while the instance was alive, status showed Stopped, and the already-running launch gate disappeared. Enumeration failures now throw `process_enumeration_unavailable`: status reports liveness as unknown, stop refuses to claim success, and a launch that cannot see the scope starts nothing. The launch polling loop tolerates transient failures because the token-store gate is log-based.
+- **Scope attribution used substring matching**: `--user-data-dir` is now parsed with real argv rules and compared as a full path, so a look-alike path embedding the expected one is no longer attributed to the scope; scope children join only when created no earlier than their in-scope parent, closing the reused parent-PID hole in the closure walk.
+- **Pending callbacks never expired and survived failed launches**: a webpage-triggerable `antigravity://` callback could be handed to a profile that never came up. Grants now expire after 30 minutes, are cleared by every failure after the pending write, are cleared only by their own profile's stop, and a corrupt or overlong callback URI is rejected (`deeplink_callback_invalid`).
+- **A corrupt deep-link registration record aborted the launch after the instance had already started**, skipping the verification/termination gate. The record is validated before anything starts; a failed post-start re-assertion terminates the scope; a failed registration write deletes its ownership record instead of leaving one that could be self-healed later.
+- **`configure-executable` performed no verification of the binary**: the configured executable is now pinned by SHA-256 at configure time and verified before every discovery and deep-link handoff (`executable_attestation_changed`). Legacy unpinned configurations keep working; doctor warns until they reconfigure.
+- The installer dependency check only recognised the default LocalAppData Antigravity path and warned "not detected" for Program Files or custom installs; it now mirrors the driver's discovery paths. The installer no longer advertises architectures (ARM64) that were never built or tested.
+- CLI: `doctor`/`setup` exit 1 when the executable check fails so scripts can gate on them; `close` honours `graceful_close_pending` exactly like `stop`; `create` is an alias of `new` instead of a path that skipped isolation; the removed `sandboxie` backend name is rejected instead of silently mapping to process-local; unexpected errors carry the exception message and point at `open-logs`; the empty list suggests `new`; `version_unverified` names the verified version; help documents the exit codes.
+
+### Added
+
+- GUI: window title carries the product version; busy operations give visible feedback instead of silently dropping clicks; error dialogs keep the code and message; the InfoBar stays dismissed while the situation it described is unchanged and reappears when it changes again; a one-time hint offers callback registration once two or more profiles exist; `⋯` menu has an accessibility name; wrapped detail rows no longer clip at the fixed row height; hard-coded off-token colors removed; the app and windows now use a generated application icon.
+- MIT `LICENSE`, `dependabot.yml` (NuGet + GitHub Actions), and a `scripts/legacy/` quarantine with warnings for the one-off scripts that mutate real data or reference dead paths.
+
+### Changed
+
+- CI builds with `-LockedRestore`, and the tag workflow publishes with `-Release`, enforcing locked restore, a strict clean tree, the exact `v<version>` tag and a matching CHANGELOG entry; the workflow refuses a manifest marked non-release or dirty. The manifest now records the real process-local file-token-store isolation and config schema 1 (it claimed the removed Sandboxie mechanism and schema 2), and `Test-PackageStructure.ps1` asserts those fields.
+- Stale-era documents moved to `docs/history/`; VERSIONING.md, SECURITY.md, README and PROJECT_STATE.md now describe the current pipeline, capability status (concurrent sign-in acceptance after the 0.4.1 routing repair is explicitly pending) and safety boundaries.
+
 ## [0.4.1] - 2026-09-12
+
+> 更正（0.4.2 审计时发现）：本条目"Changed"中声称清理了 Publish.ps1 的 Sandboxie 表述，实际未完成（manifest 仍写入沙盒机制与 schema 2），已在 0.4.2 修正并加入发布结构断言。
 
 ### Fixed
 
