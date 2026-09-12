@@ -45,7 +45,8 @@ public sealed class AntigravityDriver(HubPaths paths, ConfigRepository repositor
         var compatible = normalized == "2.12.2";
         return new AntigravityInstallation(executable, normalized, compatible,
             compatible ? "Desktop 2.12.2 matches the locally observed experimental launch strategy." :
-            $"Version {normalized} has not been probed. Refusing to guess the isolation contract.");
+            $"Version {normalized} has not been probed; only Desktop 2.12.2 is verified. " +
+            "Refusing to guess the isolation contract. Run 'doctor' for details, and re-run the acceptance flow after any Antigravity update.");
     }
 
     /// <summary>The configured path first, then the standard install locations, in probe order.</summary>

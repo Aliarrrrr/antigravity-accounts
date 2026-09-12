@@ -55,6 +55,7 @@ internal static class CliApplication
             if (parsed.Json && result is not null)
                 WriteJson(result);
             if (result is AgentProbeResult probe && probe.Outcome != "success") return 1;
+            if (result is DoctorReport doctor && (!doctor.ExecutableFound || !doctor.CompatibleForExperimentalLaunch)) return 1;
             return 0;
         }
         catch (UsageException ex) { return WriteError(ex.Message, "usage_error", 2, jsonRequested); }
@@ -63,7 +64,12 @@ internal static class CliApplication
         catch (ProcessOwnershipException ex) { return WriteError(ex.Message, ex.Code, 5, jsonRequested); }
         catch (HubException ex) { return WriteError(ex.Message, ex.Code, 1, jsonRequested); }
         catch (OperationCanceledException) { return WriteError("Operation cancelled.", "cancelled", 130, jsonRequested); }
-        catch (Exception ex) { return WriteError($"Unexpected failure: {ex.GetType().Name}", "unexpected_error", 1, jsonRequested); }
+        catch (Exception ex)
+        {
+            return WriteError($"Unexpected failure: {ex.GetType().Name}: {ex.Message}. " +
+                "Run 'agprofile open-logs' and keep the log when reporting this.",
+                "unexpected_error", 1, jsonRequested);
+        }
     }
 
     private static async Task<object?> ExecuteAsync(HubService hub, IReadOnlyList<string> command, bool json)
@@ -136,11 +142,14 @@ internal static class CliApplication
                 if (!json) PrintDoctor(setupDoctor);
                 return setupDoctor;
             case "new":
+            case "create":
+                // 'create' is kept as an alias: it used to skip isolation
+                // preparation, which left profiles on the legacy serial path.
                 var newWorkspace = TakeOption(tail, "--workspace");
                 var newFresh = TakeFlag(tail, "--fresh");
                 var newDirect = TakeFlag(tail, "--direct");
                 var newBackendText = TakeOption(tail, "--backend");
-                RequireCount(tail, 1, "new <name> [--workspace <path>] [--backend <sandboxie|process-local>] [--direct] [--fresh]");
+                RequireCount(tail, 1, $"{verb} <name> [--workspace <path>] [--backend <process-local>] [--direct] [--fresh]");
                 var newProfile = await hub.CreateProfileAsync(tail[0], newWorkspace,
                     newBackendText is null ? null : ParseBackend(newBackendText)).ConfigureAwait(false);
                 if (newDirect)
@@ -177,6 +186,9 @@ internal static class CliApplication
                 var closeId = await ResolveIdAsync(hub, tail[0]).ConfigureAwait(false);
                 var closed = await hub.StopAsync(closeId, closeForce).ConfigureAwait(false);
                 if (!json) PrintStatus(closed.Status);
+                // Same contract as 'stop': a graceful close that did not finish
+                // is an error the caller must see, not a silent exit 0.
+                EnsureStopped(closed);
                 return closed;
             case "fix":
                 RequireCount(tail, 1, "fix <name-or-id>");
@@ -189,12 +201,6 @@ internal static class CliApplication
                     Console.WriteLine($"Isolation: {repaired.Stage}");
                 }
                 return repaired;
-            case "create":
-                var createWorkspace = TakeOption(tail, "--workspace");
-                RequireCount(tail, 1, "create <name> [--workspace <path>]");
-                var created = await hub.CreateProfileAsync(tail[0], createWorkspace).ConfigureAwait(false);
-                if (!json) Console.WriteLine($"Created {created.Name} ({created.Id:D})");
-                return created;
             case "rename":
                 RequireCount(tail, 2, "rename <id> <new-name>");
                 var renamed = await hub.RenameProfileAsync(await ResolveIdAsync(hub, tail[0]), tail[1]).ConfigureAwait(false);
@@ -286,7 +292,7 @@ internal static class CliApplication
                 if (!json) Console.WriteLine($"Configured {settings.AntigravityExecutablePath}");
                 return settings;
             case "configure-isolation":
-                RequireCount(tail, 1, "configure-isolation <sandboxie|process-local>");
+                RequireCount(tail, 1, "configure-isolation <process-local>");
                 var configuredBackend = await hub.ConfigureDefaultBackendAsync(ParseBackend(tail[0])).ConfigureAwait(false);
                 if (!json) Console.WriteLine($"Default isolation backend for new profiles: {configuredBackend.DefaultBackend}");
                 return configuredBackend;
@@ -368,9 +374,12 @@ internal static class CliApplication
 
     private static IsolationBackendKind ParseBackend(string value) => value.Trim().ToLowerInvariant() switch
     {
-        "sandboxie" or "sandbox" => IsolationBackendKind.Sandboxie,
+        // The enum value still exists so old records load, but a removed
+        // backend must not be selectable for new profiles or new defaults.
+        "sandboxie" or "sandbox" => throw new UsageException(
+            "The sandboxie backend was removed in 0.4.0. Use process-local; existing sandboxie-era profiles already resolve to it."),
         "process-local" or "processlocal" or "local" => IsolationBackendKind.ProcessLocal,
-        _ => throw new UsageException("Unknown isolation backend. Use sandboxie or process-local.")
+        _ => throw new UsageException("Unknown isolation backend. Use process-local.")
     };
 
     private static async Task<Guid> ResolveIdAsync(HubService hub, string nameOrId)
@@ -397,7 +406,11 @@ internal static class CliApplication
 
     private static void PrintProfiles(IReadOnlyList<ProfileRegistration> profiles)
     {
-        if (profiles.Count == 0) { Console.WriteLine("No profiles."); return; }
+        if (profiles.Count == 0)
+        {
+            Console.WriteLine("No profiles. Create one with: agprofile new \"<name>\"");
+            return;
+        }
         foreach (var profile in profiles)
             Console.WriteLine($"{profile.Id:D}  {profile.Name}  {profile.WorkspacePath ?? "(no workspace metadata)"}");
     }
@@ -433,28 +446,29 @@ internal static class CliApplication
         Antigravity Profile Hub CLI (experimental)
         Global options: --data-root <absolute-path>  --json
           version | --version                 Print the product version and exit
+        Exit codes: 0 ok · 1 operation failed · 2 usage · 3 not found · 4 unsupported · 5 ownership · 130 cancelled
 
         Everyday commands (a profile may be given as a name, a unique prefix, or a UUID):
-          setup                                 First-run environment check
-          new <name> [--workspace <path>] [--backend <sandboxie|process-local>] [--direct] [--fresh]
+          setup                                 First-run environment check (exit 1 when checks fail)
+          new <name> [--workspace <path>] [--backend <process-local>] [--direct] [--fresh]
                                                 Create a profile and prepare its isolation in one step
           ls                                    List profiles
           open <name-or-id> [--direct]          Prepare what is missing, then launch
-          close <name-or-id> [--force]          Stop a profile
+          close <name-or-id> [--force]          Stop a profile (exit 1 while a graceful close is pending)
           status [name-or-id] | show <name-or-id> | doctor
           fix <name-or-id>                      Diagnose and repair isolation readiness
 
         Advanced commands (kept for scripting and recovery):
           launch <name-or-id> | stop <name-or-id> [--force] | restart <name-or-id> [--force] | launch-all | stop-all [--force]
-          create <name> [--workspace <path>] | rename <name-or-id> <new-name> | remove <name-or-id> | workspace <name-or-id> <path|none>
+          create <name> [--workspace <path>]    Alias of new (always prepared isolation since 0.4.2)
+          rename <name-or-id> <new-name> | remove <name-or-id> | workspace <name-or-id> <path|none>
           iso-prepare <name-or-id> [--box <name>] [--fresh]
                                                 Prepare a dedicated scope; --fresh acknowledges a takeover
           iso-launch <name-or-id>               Launch the unmodified desktop inside the profile's scope
           iso-stop <name-or-id>                 Terminate everything inside the profile's scope
           iso-status                            Inspect scope readiness
           open-data [name-or-id] | open-logs | configure-executable <path> | shortcut <name-or-id> [--directory <path>]
-          configure-isolation <sandboxie|process-local>
-                                      Backend newly created profiles use (existing ones keep theirs)
+          configure-isolation <process-local>   Backend newly created profiles use (existing ones keep theirs)
           configure-deeplink <register|restore>
                                       Route the antigravity:// callback to the profile that is waiting
           callback <uri>              Internal: hand a deep-link callback to the waiting profile
