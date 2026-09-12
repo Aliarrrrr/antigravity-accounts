@@ -16,12 +16,7 @@ public sealed class AntigravityDriver(HubPaths paths, ConfigRepository repositor
     public async Task<AntigravityInstallation> DiscoverAsync(CancellationToken cancellationToken = default)
     {
         var settings = await repository.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
-        var candidates = new List<string>();
-        if (!string.IsNullOrWhiteSpace(settings.AntigravityExecutablePath)) candidates.Add(settings.AntigravityExecutablePath);
-        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        candidates.Add(Path.Combine(local, "Programs", "antigravity", "Antigravity.exe"));
-        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
-        if (!string.IsNullOrWhiteSpace(programFiles)) candidates.Add(Path.Combine(programFiles, "Antigravity", "Antigravity.exe"));
+        var candidates = DiscoveryCandidates(settings.AntigravityExecutablePath).ToList();
 
         string? executable = null;
         foreach (var candidate in candidates)
@@ -47,6 +42,16 @@ public sealed class AntigravityDriver(HubPaths paths, ConfigRepository repositor
         return new AntigravityInstallation(executable, normalized, compatible,
             compatible ? "Desktop 2.12.2 matches the locally observed experimental launch strategy." :
             $"Version {normalized} has not been probed. Refusing to guess the isolation contract.");
+    }
+
+    /// <summary>The configured path first, then the standard install locations, in probe order.</summary>
+    public static IEnumerable<string> DiscoveryCandidates(string? configuredPath)
+    {
+        if (!string.IsNullOrWhiteSpace(configuredPath)) yield return configuredPath;
+        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        yield return Path.Combine(local, "Programs", "antigravity", "Antigravity.exe");
+        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        if (!string.IsNullOrWhiteSpace(programFiles)) yield return Path.Combine(programFiles, "Antigravity", "Antigravity.exe");
     }
 
     /// <param name="backend">

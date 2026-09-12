@@ -370,8 +370,19 @@ static async Task TestDeepLinkRouterAsync()
     True(pending is not null && pending.ProfileId == id && pending.UserDataPath == userData,
         "the waiting profile must survive a round-trip");
 
+    // The handoff must relaunch the vendor desktop, never the Hub CLI: the CLI
+    // cannot receive OAuth URIs and would drop the callback with a usage error.
+    await fixture.Repository.WriteSettingsAsync(new HubSettings { AntigravityExecutablePath = fixture.Executable });
+    var handoff = DeepLinkRouter.BuildHandoff(fixture.Paths, "antigravity://oauth/callback?code=x");
+    True(handoff is not null, "a waiting profile produces a handoff");
+    Equal(Path.GetFullPath(fixture.Executable), handoff!.FileName);
+    Equal(2, handoff.ArgumentList.Count);
+    Equal($"--user-data-dir={userData}", handoff.ArgumentList[0]);
+    Equal("antigravity://oauth/callback?code=x", handoff.ArgumentList[1]);
+
     DeepLinkRouter.ClearPending(fixture.Paths);
     Equal(null, await DeepLinkRouter.ReadPendingAsync(fixture.Paths));
+    Equal(null, DeepLinkRouter.BuildHandoff(fixture.Paths, "antigravity://oauth/callback?code=x"));
 }
 
 static Task TestLaunchPlanAsync()

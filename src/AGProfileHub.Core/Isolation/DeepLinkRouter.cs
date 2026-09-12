@@ -80,18 +80,54 @@ public static class DeepLinkRouter
     /// <returns>The pid of the short-lived handoff process, or 0 when nothing is waiting.</returns>
     public static int Route(HubPaths paths, string uri)
     {
+        var start = BuildHandoff(paths, uri);
+        if (start is null) return 0;
+        return System.Diagnostics.Process.Start(start)?.Id ?? 0;
+    }
+
+    /// <summary>
+    /// The handoff the router performs: relaunch the <em>vendor desktop</em> with the waiting
+    /// Profile's user-data directory and the URI. Verified vendor behaviour does the rest: the
+    /// new process hands the URI to the instance that already owns that directory and exits.
+    /// Starting anything else (for example this CLI) drops the callback. Returns null when no
+    /// Profile is waiting.
+    /// </summary>
+    public static System.Diagnostics.ProcessStartInfo? BuildHandoff(HubPaths paths, string uri)
+    {
         var pending = ReadPendingAsync(paths).ConfigureAwait(false).GetAwaiter().GetResult();
-        if (pending is null) return 0;
-        var executable = Environment.ProcessPath
-            ?? throw new HubException("Cannot locate the CLI executable required by the deep-link router.", "deeplink_router_path_unknown");
-        var arguments = BuildRelaunchArguments(executable, pending.UserDataPath, uri);
+        if (pending is null) return null;
+        var executable = ResolveHandoffExecutable(paths);
         var info = new System.Diagnostics.ProcessStartInfo(executable) { UseShellExecute = false };
-        foreach (var argument in arguments.Skip(1)) info.ArgumentList.Add(argument);
-        // Skip(1) drops the executable because ProcessStartInfo.FileName already carries it.
-        // The handoff process must be the desktop itself, not a Node runtime: the
+        info.ArgumentList.Add($"--user-data-dir={pending.UserDataPath}");
+        info.ArgumentList.Add(uri);
+        // The handoff process is the desktop itself, not a Node runtime: the
         // host that started the Hub may have set ELECTRON_RUN_AS_NODE=1.
         info.Environment.Remove("ELECTRON_RUN_AS_NODE");
-        return System.Diagnostics.Process.Start(info)?.Id ?? 0;
+        return info;
+    }
+
+    /// <summary>
+    /// Locates the vendor executable exactly like the driver does: the configured path first,
+    /// then the standard install locations. Read-only; the callback path must never create or
+    /// mutate Hub state.
+    /// </summary>
+    private static string ResolveHandoffExecutable(HubPaths paths)
+    {
+        string? configured = null;
+        if (File.Exists(paths.SettingsFile))
+        {
+            var settings = new AtomicJsonStore(paths.DataRoot).ReadAsync(paths.SettingsFile,
+                HubJsonContext.Default.HubSettings, () => new HubSettings(), CancellationToken.None)
+                .ConfigureAwait(false).GetAwaiter().GetResult();
+            configured = settings.AntigravityExecutablePath;
+        }
+        foreach (var candidate in AntigravityDriver.DiscoveryCandidates(configured))
+        {
+            try { return PathSafety.CanonicalizeExistingFile(candidate); }
+            catch (ConfigurationException) { }
+        }
+        throw new HubException("Cannot locate the Antigravity executable required by the deep-link router.",
+            "deeplink_router_target_unknown");
     }
 
     /// <summary>The command the scheme currently points at, or null when it is not registered.</summary>
