@@ -1,10 +1,14 @@
-# Project state — 2026-09-12
+# Project state — 2026-09-13
 
-## Current phase
+## Current phase (0.4.2)
+
+A full external audit of 0.4.1 was remediated commit by commit. Security: scope attribution now parses argv strictly with a child start-time guard; an unreadable process list fails closed everywhere instead of reading as "idle"; pending callback grants expire (30 minutes) and are cleared on every failed launch and by their own profile's stop only; the deep-link registration is validated before a launch starts anything; callback URIs are validated (scheme, length, control characters); `configure-executable` pins the executable by SHA-256 and both discovery and the handoff refuse a swapped binary. Release integrity: the tag workflow runs the real `-Release` gate, CI restores locked, the package manifest records the actual mechanism and config schema, and Test-PackageStructure asserts those fields. Maintenance: CLI verb semantics aligned (`create` aliases `new`, `close` honours `graceful_close_pending`, `doctor`/`setup` gate on the executable check), GUI communicates busy/error/deeplink-hint states, installer dependency check matches driver discovery, dependabot added, MIT LICENSE added, stale-era documents moved to `docs/history/`, one-off scripts quarantined under `scripts/legacy/` with warnings.
+
+Outstanding: one real end-to-end concurrent sign-in acceptance run after the 0.4.1 routing repair (see README capability table); the v0.4.2 tag, publish and that acceptance are the remaining release steps.
 
 The Sandboxie dependency is no longer required. A process-local backend ships as the default for new Profiles: each Profile points the instance's home at its managed data root and asks the language server to keep its OAuth token in a file there, so instances stop sharing the Windows user's `gemini:antigravity` credential entry. A launch fails closed unless the language server proves in its own log that it switched to the file store, and the vendor's `antigravity://` callback is routed to the Profile that is waiting for it, so concurrent sign-ins land in the right window.
 
-The D2 gate passed against the real desktop (two Profiles, two Google accounts, one file token per Profile, the host credential entry untouched, restart persistence). The evidence tools live in `scripts/` (`Probe-KeyringBypass.py`, `Probe-DesktopEnvPropagation.py`, `Probe-DualAccountLogin.py`, `Probe-ProcessEnvironment.py`, `Agph-D2-ProfileControl.ps1`) and are part of the regression set.
+The D2 gate passed against the real desktop (two Profiles, two Google accounts, one file token per Profile, the host credential entry untouched, restart persistence). The evidence tools live in `scripts/` (`Probe-KeyringBypass.py`, `Probe-DesktopEnvPropagation.py`, `Probe-DualAccountLogin.py`); earlier one-off scripts that touch real data or dead paths are quarantined in `scripts/legacy/` and are not part of the regression set.
 
 Correction (0.4.1 audit): the earlier claim of a passed "deep-link handoff probe" was wrong — only the registration write was probed, and the handoff launched the Hub CLI instead of the vendor desktop, dropping every callback. Fixed; concurrent sign-in still needs one real end-to-end acceptance run.
 
