@@ -112,6 +112,8 @@ public sealed class LaunchStateUncertainException(string message, Exception? inn
 [JsonSerializable(typeof(DoctorReport))]
 [JsonSerializable(typeof(List<ProfileStatus>))]
 [JsonSerializable(typeof(IsolationStateDocument))]
+[JsonSerializable(typeof(PendingCallback))]
+[JsonSerializable(typeof(DeepLinkRegistration))]
 [JsonSerializable(typeof(ElevationRequest))]
 [JsonSerializable(typeof(ElevationResult))]
 public partial class HubJsonContext : JsonSerializerContext;

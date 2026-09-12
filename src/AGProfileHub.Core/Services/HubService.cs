@@ -19,6 +19,7 @@ public sealed class HubService
     }
 
     public string DataRoot => _paths.DataRoot;
+    public HubPaths Paths => _paths;
     public string LogsRoot => _paths.LogsRoot;
     public string GetProfileDataRoot(Guid id) => _paths.ProfileRoot(id);
     public Task<IReadOnlyList<ProfileRegistration>> ListProfilesAsync(CancellationToken cancellationToken = default) => _profiles.ListAsync(cancellationToken);

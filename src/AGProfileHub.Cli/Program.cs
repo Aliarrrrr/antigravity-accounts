@@ -64,6 +64,21 @@ internal static class CliApplication
                 return AdminOperations.RunHelper(tail[0], tail[1]);
             }
 
+            // Runs before any Hub bootstrap: this verb is what the vendor's deep
+            // link is pointed at. It hands the URI to the Profile that is waiting
+            // for it, and must never create a Hub data root.
+            if (parsed.Command[0].Equals("callback", StringComparison.OrdinalIgnoreCase))
+            {
+                var tail = parsed.Command.Skip(1).ToList();
+                RequireCount(tail, 1, "callback <uri>");
+                var routed = DeepLinkRouter.Route(new HubPaths(parsed.DataRoot), tail[0]);
+                if (parsed.Json) WriteJson(new { routed });
+                else Console.WriteLine(routed == 0
+                    ? "callback: no profile is waiting for a deep-link callback."
+                    : $"callback: handed the URI to the waiting profile (handoff pid {routed}).");
+                return 0;
+            }
+
             var hub = HubBootstrap.CreateDefault(parsed.DataRoot);
             var result = await ExecuteAsync(hub, parsed.Command, parsed.Json).ConfigureAwait(false);
             if (parsed.Json && result is not null)
@@ -322,6 +337,24 @@ internal static class CliApplication
                 var configuredBackend = await hub.ConfigureDefaultBackendAsync(ParseBackend(tail[0])).ConfigureAwait(false);
                 if (!json) Console.WriteLine($"Default isolation backend for new profiles: {configuredBackend.DefaultBackend}");
                 return configuredBackend;
+            case "configure-deeplink":
+                RequireCount(tail, 1, "configure-deeplink <register|restore>");
+                var deeplinkAction = tail[0].ToLowerInvariant();
+                if (deeplinkAction is not ("register" or "restore"))
+                    throw new UsageException("configure-deeplink expects register or restore.");
+                if (deeplinkAction == "register")
+                {
+                    DeepLinkRouter.Register(hub.Paths, DesktopShortcut.FindCliExecutable(AppContext.BaseDirectory));
+                    if (!json) Console.WriteLine("The antigravity:// scheme now hands its callback to the Hub.");
+                }
+                else
+                {
+                    var restored = DeepLinkRouter.Restore(hub.Paths);
+                    if (!json) Console.WriteLine(restored
+                        ? "The antigravity:// scheme was restored."
+                        : "The Hub does not own the antigravity:// registration, so nothing was changed.");
+                }
+                return new { action = deeplinkAction, registered = DeepLinkRouter.IsRegisteredFor(hub.Paths) };
             case "shortcut":
                 var shortcutDirectory = TakeOption(tail, "--directory");
                 RequireCount(tail, 1, "shortcut <id> [--directory <path>]");
@@ -483,6 +516,9 @@ internal static class CliApplication
           open-data [name-or-id] | open-logs | configure-executable <path> | shortcut <name-or-id> [--directory <path>]
           configure-isolation <sandboxie|process-local>
                                       Backend newly created profiles use (existing ones keep theirs)
+          configure-deeplink <register|restore>
+                                      Route the antigravity:// callback to the profile that is waiting
+          callback <uri>              Internal: hand a deep-link callback to the waiting profile
           agent-probe                           Mocked LS/official CLI diagnostic; no real account
           credential-status                     Report the shared token entry (existence/size only)
           credential-shim --force --fresh [--box <name>]

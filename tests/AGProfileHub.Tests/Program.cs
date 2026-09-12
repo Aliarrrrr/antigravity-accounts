@@ -19,6 +19,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("unknown isolation backend is rejected", TestUnknownIsolationBackendAsync),
     ("process-local launches ask for the file token store", TestProcessLocalLaunchPlanAsync),
     ("process-local scopes need no external product", TestProcessLocalScopeAsync),
+    ("deep-link callback reaches the profile that is waiting", TestDeepLinkRouterAsync),
     ("an unverified process-local scope fails closed", TestScopeVerificationFailsClosedAsync),
     ("managed path traversal is rejected", TestPathContainmentAsync),
     ("launch plan isolates home and user-data", TestLaunchPlanAsync),
@@ -526,6 +527,31 @@ static Task TestProcessLocalScopeAsync()
     Throws<ConfigurationException>(() => IsolationBackends.TryCreate(fixture.Paths, (IsolationBackendKind)9));
     Throws<ConfigurationException>(() => { _ = new ProcessLocalBackend(fixture.Paths).BoxExists("not-a-scope"); });
     return Task.CompletedTask;
+}
+
+static async Task TestDeepLinkRouterAsync()
+{
+    using var fixture = new Fixture();
+    var id = Guid.NewGuid();
+    var userData = fixture.Paths.UserData(id);
+
+    // Nothing is waiting before a launch, and the arguments are exactly what the
+    // desktop needs to hand the URI to the instance that already owns that
+    // user-data directory.
+    Equal(null, await DeepLinkRouter.ReadPendingAsync(fixture.Paths));
+    var arguments = DeepLinkRouter.BuildRelaunchArguments("cli.exe", userData, "antigravity://oauth/callback?code=x");
+    Equal(3, arguments.Count);
+    Equal("cli.exe", arguments[0]);
+    Equal($"--user-data-dir={userData}", arguments[1]);
+    Equal("antigravity://oauth/callback?code=x", arguments[2]);
+
+    await DeepLinkRouter.WritePendingAsync(fixture.Paths, id, userData);
+    var pending = await DeepLinkRouter.ReadPendingAsync(fixture.Paths);
+    True(pending is not null && pending.ProfileId == id && pending.UserDataPath == userData,
+        "the waiting profile must survive a round-trip");
+
+    DeepLinkRouter.ClearPending(fixture.Paths);
+    Equal(null, await DeepLinkRouter.ReadPendingAsync(fixture.Paths));
 }
 
 static Task TestLaunchPlanAsync()

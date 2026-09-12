@@ -251,6 +251,15 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
         // prove nothing about this one.
         var storeLogFloor = kind == IsolationBackendKind.ProcessLocal ? LogLength(StoreLogPath(profileId)) : 0;
 
+        if (kind == IsolationBackendKind.ProcessLocal)
+        {
+            // A callback that arrives while this instance runs must reach it, not
+            // a freshly started desktop. Writing the waiting Profile here is what
+            // the callback verb acts on; the scheme only routes to it after
+            // configure-deeplink register.
+            await DeepLinkRouter.WritePendingAsync(_paths, profileId, _paths.UserData(profileId), cancellationToken).ConfigureAwait(false);
+        }
+
         var installation = await _driver.DiscoverAsync(cancellationToken).ConfigureAwait(false);
         var plan = _driver.BuildLaunchPlan(installation, profileId, kind);
         backend.LaunchDetached(record.BoxName, plan.ExecutablePath, plan.Arguments, plan.Environment);
@@ -364,6 +373,8 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
             throw new HubException($"Isolation box '{record.BoxName}' is missing; refusing to act on another scope.", "isolation_box_missing");
         if (backend.ListPids(record.BoxName).Count == 0) return false;
         backend.Terminate(record.BoxName);
+        // A stopped Profile cannot receive a callback, so stop advertising it.
+        DeepLinkRouter.ClearPending(_paths);
         for (var attempt = 0; attempt < 20; attempt++)
         {
             if (backend.ListPids(record.BoxName).Count == 0) return true;
