@@ -15,6 +15,8 @@ var tests = new (string Name, Func<Task> Run)[]
     ("profile CRUD preserves stable ID and data", TestProfileCrudAsync),
     ("concurrent creates retain every profile", TestConcurrentCreatesAsync),
     ("corrupt and future config are rejected without overwrite", TestInvalidConfigAsync),
+    ("isolation backend defaults to Sandboxie and round-trips", TestIsolationBackendDefaultsAsync),
+    ("unknown isolation backend is rejected", TestUnknownIsolationBackendAsync),
     ("managed path traversal is rejected", TestPathContainmentAsync),
     ("launch plan isolates home and user-data", TestLaunchPlanAsync),
     ("quoted user-data command line is parsed", TestCommandLineAsync),
@@ -398,6 +400,47 @@ static Task TestPathContainmentAsync()
     using var fixture = new Fixture();
     Throws<ConfigurationException>(() => PathSafety.EnsureContained(fixture.Paths.DataRoot, Path.Combine(fixture.Paths.DataRoot, "..", "outside")));
     return Task.CompletedTask;
+}
+
+static async Task TestIsolationBackendDefaultsAsync()
+{
+    using var fixture = new Fixture();
+    var created = await fixture.Hub.CreateProfileAsync("A");
+    Equal(IsolationBackendKind.Sandboxie, created.Backend);
+
+    // The backend field is additive, so a document written before it existed must
+    // still load and must be read as Sandboxie rather than as "unknown".
+    var legacy = "{\"schemaVersion\":1,\"profiles\":[{\"id\":\"" + created.Id +
+        "\",\"name\":\"A\",\"workspacePath\":null,\"createdUtc\":\"2026-01-01T00:00:00+00:00\"," +
+        "\"updatedUtc\":\"2026-01-01T00:00:00+00:00\"}]}";
+    File.WriteAllText(fixture.Paths.ProfilesFile, legacy);
+    var profiles = await fixture.Hub.ListProfilesAsync();
+    Equal(1, profiles.Count);
+    Equal(IsolationBackendKind.Sandboxie, profiles[0].Backend);
+
+    // Selecting a backend round-trips, and the default stays Sandboxie otherwise.
+    Equal(IsolationBackendKind.Sandboxie, (await fixture.Repository.ReadSettingsAsync()).DefaultBackend);
+    var settings = await fixture.Repository.ReadSettingsAsync();
+    await fixture.Repository.WriteSettingsAsync(settings with { DefaultBackend = IsolationBackendKind.ProcessLocal });
+    Equal(IsolationBackendKind.ProcessLocal, (await fixture.Repository.ReadSettingsAsync()).DefaultBackend);
+}
+
+static async Task TestUnknownIsolationBackendAsync()
+{
+    using var fixture = new Fixture();
+    await fixture.Hub.CreateProfileAsync("A");
+
+    // Numeric values that are not defined members must fail closed, and the file
+    // must be left exactly as it was found.
+    var unknown = "{\"schemaVersion\":1,\"profiles\":[{\"id\":\"" + Guid.NewGuid() +
+        "\",\"name\":\"A\",\"createdUtc\":\"2026-01-01T00:00:00+00:00\"," +
+        "\"updatedUtc\":\"2026-01-01T00:00:00+00:00\",\"backend\":7}]}";
+    File.WriteAllText(fixture.Paths.ProfilesFile, unknown);
+    await ThrowsAsync<ConfigurationException>(() => fixture.Hub.ListProfilesAsync());
+    Equal(unknown, File.ReadAllText(fixture.Paths.ProfilesFile));
+
+    File.WriteAllText(fixture.Paths.SettingsFile, "{\"schemaVersion\":1,\"defaultBackend\":7}");
+    await ThrowsAsync<ConfigurationException>(() => fixture.Repository.ReadSettingsAsync());
 }
 
 static Task TestLaunchPlanAsync()

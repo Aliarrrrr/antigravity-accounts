@@ -7,7 +7,25 @@ public static class SchemaVersions
     public const int Current = 1;
 }
 
-public sealed record ProfileRegistration(Guid Id, string Name, string? WorkspacePath, DateTimeOffset CreatedUtc, DateTimeOffset UpdatedUtc);
+/// <summary>
+/// Which mechanism isolates a Profile's instance.
+/// </summary>
+/// <remarks>
+/// The backend is an additive, optional field rather than a schema-version bump:
+/// a document written by an older build simply deserialises to
+/// <see cref="Sandboxie"/>, so no migration is needed and unknown future schemas
+/// are still rejected. The one hazard is a downgrade: an older build reading
+/// <see cref="ProcessLocal"/> would treat the Profile as Sandboxie, so the field
+/// is only written when it differs from the default.
+/// </remarks>
+[JsonConverter(typeof(JsonStringEnumConverter<IsolationBackendKind>))]
+public enum IsolationBackendKind { Sandboxie = 0, ProcessLocal = 1 }
+
+public sealed record ProfileRegistration(Guid Id, string Name, string? WorkspacePath, DateTimeOffset CreatedUtc, DateTimeOffset UpdatedUtc)
+{
+    /// <summary>Isolation backend for this Profile. Absent in older documents means Sandboxie.</summary>
+    public IsolationBackendKind Backend { get; init; } = IsolationBackendKind.Sandboxie;
+}
 
 public sealed record ProfilesDocument
 {
@@ -24,6 +42,9 @@ public sealed record HubSettings
     public int ProbeStrategyRevision { get; init; } = 1;
     public DateTimeOffset? AuthIsolationAttestedUtc { get; init; }
     public string? AuthIsolationAttestedVersion { get; init; }
+
+    /// <summary>Backend applied to newly created Profiles. Absent in older documents means Sandboxie.</summary>
+    public IsolationBackendKind DefaultBackend { get; init; } = IsolationBackendKind.Sandboxie;
 }
 
 public enum RuntimeState { Stopped, Running, Unknown }

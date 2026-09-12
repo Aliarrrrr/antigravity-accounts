@@ -39,6 +39,8 @@ public sealed class ConfigRepository
         await using var held = await FileLock.AcquireAsync(_paths.GlobalConfigLock, LockTimeout, cancellationToken);
         var settings = await _json.ReadAsync(_paths.SettingsFile, HubJsonContext.Default.HubSettings, () => new HubSettings(), cancellationToken);
         if (settings.SchemaVersion != SchemaVersions.Current) throw new ConfigurationException("Settings schema is invalid.");
+        if (!Enum.IsDefined(settings.DefaultBackend))
+            throw new ConfigurationException("Settings use an unknown isolation backend.", "invalid_isolation_backend");
         return settings;
     }
 
@@ -109,6 +111,8 @@ public sealed class ConfigRepository
         if (document.SchemaVersion != SchemaVersions.Current) throw new ConfigurationException("Profiles schema is invalid.");
         if (document.Profiles is null) throw new ConfigurationException("Profiles collection is missing.", "configuration_invalid");
         if (document.Profiles.Any(p => p is null || p.Id == Guid.Empty)) throw new ConfigurationException("A profile has an invalid ID.");
+        if (document.Profiles.Any(p => p is not null && !Enum.IsDefined(p.Backend)))
+            throw new ConfigurationException("A profile uses an unknown isolation backend.", "invalid_isolation_backend");
         if (document.Profiles.GroupBy(p => p.Id).Any(g => g.Count() != 1)) throw new ConfigurationException("Duplicate profile IDs are not allowed.");
         if (document.Profiles.Any(p => string.IsNullOrWhiteSpace(p.Name) || p.Name.Trim().Length is < 1 or > 80 || p.Name.Any(char.IsControl)))
             throw new ConfigurationException("Profile names must contain 1-80 printable characters.", "invalid_profile_name");
