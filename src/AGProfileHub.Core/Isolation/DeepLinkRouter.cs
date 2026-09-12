@@ -39,6 +39,15 @@ public static class DeepLinkRouter
 
     private const string CommandKeyPath = @"Software\Classes\" + Scheme + @"\shell\open\command";
 
+    /// <summary>
+    /// How long a pending callback stays routable. A launch writes the pending
+    /// that lets the next <c>antigravity://</c> callback reach the profile that
+    /// is signing in; sign-ins happen right after a launch, so a pending that
+    /// is older than this has either completed or was abandoned — and an
+    /// abandoned "waiting" grant must not keep handing URIs to that profile.
+    /// </summary>
+    public static readonly TimeSpan MaxPendingAge = TimeSpan.FromMinutes(30);
+
     /// <summary>The registered command that routes a callback to the waiting Profile.</summary>
     public static string RouterCommand(string cliExecutable, string dataRoot) =>
         $"\"{cliExecutable}\" --data-root \"{dataRoot}\" callback \"%1\"";
@@ -47,6 +56,27 @@ public static class DeepLinkRouter
         Path.Combine(paths.DataRoot, "runtime", "deeplink-pending.json");
 
     public static async Task<PendingCallback?> ReadPendingAsync(HubPaths paths, CancellationToken cancellationToken = default)
+    {
+        var pending = await ReadPendingCoreAsync(paths, cancellationToken).ConfigureAwait(false);
+        if (pending is null) return null;
+        // A pending that predates this window is stale: route nothing to it.
+        if (pending.CreatedUtc == default || DateTimeOffset.UtcNow - pending.CreatedUtc > MaxPendingAge)
+        {
+            ClearPending(paths);
+            return null;
+        }
+        return pending;
+    }
+
+    /// <summary>
+    /// The raw pending record regardless of age, for ownership decisions such
+    /// as "may stopping this profile delete it". Routing must use
+    /// <see cref="ReadPendingAsync"/>, which enforces the expiry.
+    /// </summary>
+    public static Task<PendingCallback?> ReadPendingWithoutExpiryAsync(HubPaths paths, CancellationToken cancellationToken = default) =>
+        ReadPendingCoreAsync(paths, cancellationToken);
+
+    private static async Task<PendingCallback?> ReadPendingCoreAsync(HubPaths paths, CancellationToken cancellationToken)
     {
         var path = PendingPath(paths);
         if (!File.Exists(path)) return null;

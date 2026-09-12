@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AGProfileHub.Core;
 
 // hub.ps1 may pass --include-system to the test runner. This suite has no
@@ -54,6 +55,9 @@ var tests = new (string Name, Func<Task> Run)[]
     ("scope children require a plausible creation order", TestScopeChildStartGuardAsync),
     ("an unreadable process list fails closed everywhere", TestEnumerationFailureFailsClosedAsync),
     ("an unknown process count never reconciles profile state", TestUnknownProcessCountDoesNotReconcileStateAsync),
+    ("an expired pending callback is dropped", TestPendingExpiryAsync),
+    ("a failed launch clears the waiting grant", TestFailedLaunchClearsPendingAsync),
+    ("stopping one profile keeps another profile's pending", TestStopKeepsForeignPendingAsync),
 };
 
 var failures = new List<string>();
@@ -893,6 +897,94 @@ static async Task TestUnknownProcessCountDoesNotReconcileStateAsync()
         "the status detail must say liveness is unknown");
 }
 
+static async Task TestPendingExpiryAsync()
+{
+    using var fixture = new Fixture();
+    var id = Guid.NewGuid();
+    var userData = fixture.Paths.UserData(id);
+    await fixture.Repository.WriteSettingsAsync(new HubSettings { AntigravityExecutablePath = fixture.Executable });
+
+    await DeepLinkRouter.WritePendingAsync(fixture.Paths, id, userData);
+    True(DeepLinkRouter.BuildHandoff(fixture.Paths, "antigravity://oauth/callback?code=x") is not null,
+        "a fresh pending is routable");
+
+    // A pending from a year ago must not keep handing URIs to this profile:
+    // the sign-in it waited for either completed or was abandoned.
+    var path = DeepLinkRouter.PendingPath(fixture.Paths);
+    var aged = new PendingCallback { ProfileId = id, UserDataPath = userData, CreatedUtc = DateTimeOffset.UtcNow.AddYears(-1) };
+    File.WriteAllText(path, JsonSerializer.Serialize(aged, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+    Equal(null, await DeepLinkRouter.ReadPendingAsync(fixture.Paths));
+    True(!File.Exists(path), "an expired pending is deleted, not left behind");
+    Equal(null, DeepLinkRouter.BuildHandoff(fixture.Paths, "antigravity://oauth/callback?code=x"));
+
+    // A record with no creation time is treated as stale as well.
+    var timeless = new PendingCallback { ProfileId = id, UserDataPath = userData };
+    File.WriteAllText(path, JsonSerializer.Serialize(timeless, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+    Equal(null, await DeepLinkRouter.ReadPendingAsync(fixture.Paths));
+}
+
+static async Task TestFailedLaunchClearsPendingAsync()
+{
+    // Discovery failure: nothing was started, so nothing may stay waiting.
+    var backend = new FakeIsolationBackend();
+    using var fixture = new Fixture();
+    var driver = new FakeDriver(fixture.Paths, fixture.Executable) { FailDiscovery = true };
+    var launcher = new IsolatedProfileLauncher(fixture.Paths, driver, fixture.Repository, _ => backend);
+    var id = Guid.NewGuid();
+    await fixture.Repository.UpdateProfilesAsync(document =>
+    {
+        document.Profiles.Add(new ProfileRegistration(id, "Scoped", null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+        {
+            Backend = IsolationBackendKind.ProcessLocal
+        });
+        return (document, document.Profiles[0]);
+    });
+    await launcher.PrepareAsync(id);
+
+    await ThrowsAsync<HubException>(() => launcher.LaunchAsync(id));
+    Equal(null, await DeepLinkRouter.ReadPendingAsync(fixture.Paths));
+    True(!File.Exists(DeepLinkRouter.PendingPath(fixture.Paths)), "a failed discovery must not leave a waiting grant");
+
+    // Verification failure: the instance is terminated, and the grant goes with it.
+    var strictBackend = new FakeIsolationBackend();
+    var strictLauncher = new IsolatedProfileLauncher(fixture.Paths, new FakeDriver(fixture.Paths, fixture.Executable),
+        fixture.Repository, _ => strictBackend, scopeVerificationTimeout: TimeSpan.FromMilliseconds(300));
+    await ThrowsAsync<HubException>(() => strictLauncher.LaunchAsync(id));
+    Equal(null, await DeepLinkRouter.ReadPendingAsync(fixture.Paths));
+}
+
+static async Task TestStopKeepsForeignPendingAsync()
+{
+    using var fixture = new Fixture();
+    var backend = new FakeIsolationBackend();
+    var launcher = new IsolatedProfileLauncher(fixture.Paths, new FakeDriver(fixture.Paths, fixture.Executable),
+        fixture.Repository, _ => backend);
+    var stopping = Guid.NewGuid();
+    var waiting = Guid.NewGuid();
+    foreach (var id in new[] { stopping, waiting })
+        await fixture.Repository.UpdateProfilesAsync(document =>
+        {
+            document.Profiles.Add(new ProfileRegistration(id, $"Profile {id:D}", null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+            {
+                Backend = IsolationBackendKind.ProcessLocal
+            });
+            return (document, document.Profiles[0]);
+        });
+    await launcher.PrepareAsync(stopping);
+    await launcher.PrepareAsync(waiting);
+
+    // The waiting profile has a live grant; stopping the other profile must
+    // not destroy it.
+    await DeepLinkRouter.WritePendingAsync(fixture.Paths, waiting, fixture.Paths.UserData(waiting));
+    await launcher.StopAsync(stopping);
+    var surviving = await DeepLinkRouter.ReadPendingAsync(fixture.Paths);
+    True(surviving is not null && surviving.ProfileId == waiting, "stopping another profile must keep the waiting grant");
+
+    // Stopping the waiting profile itself does clear its own grant.
+    await launcher.StopAsync(waiting);
+    Equal(null, await DeepLinkRouter.ReadPendingAsync(fixture.Paths));
+}
+
 static void True(bool condition, string? message = null) { if (!condition) throw new InvalidOperationException(message ?? "Expected true."); }
 static void Equal<T>(T expected, T actual) { if (!EqualityComparer<T>.Default.Equals(expected, actual)) throw new InvalidOperationException($"Expected '{expected}', got '{actual}'."); }
 static void Throws<T>(Action action) where T : Exception { try { action(); } catch (T) { return; } throw new InvalidOperationException($"Expected {typeof(T).Name}."); }
@@ -936,7 +1028,13 @@ sealed class Fixture : IDisposable
 
 sealed class FakeDriver(HubPaths paths, string executable) : IAntigravityDriver
 {
-    public Task<AntigravityInstallation> DiscoverAsync(CancellationToken cancellationToken = default) => Task.FromResult(new AntigravityInstallation(executable, "2.12.2", true, "test"));
+    /// <summary>Makes DiscoverAsync fail the way a missing vendor executable does.</summary>
+    public bool FailDiscovery { get; set; }
+
+    public Task<AntigravityInstallation> DiscoverAsync(CancellationToken cancellationToken = default) =>
+        FailDiscovery
+            ? throw new HubException("Antigravity Desktop was not found (test).", "executable_not_found")
+            : Task.FromResult(new AntigravityInstallation(executable, "2.12.2", true, "test"));
     public LaunchPlan BuildLaunchPlan(AntigravityInstallation installation, Guid profileId,
         IsolationBackendKind backend)
     {

@@ -176,32 +176,42 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
         // the callback verb acts on; the scheme only routes to it after
         // configure-deeplink register.
         await DeepLinkRouter.WritePendingAsync(_paths, profileId, _paths.UserData(profileId), cancellationToken).ConfigureAwait(false);
-
-        var installation = await _driver.DiscoverAsync(cancellationToken).ConfigureAwait(false);
-        var plan = _driver.BuildLaunchPlan(installation, profileId, kind);
-        backend.LaunchDetached(record.BoxName, plan.ExecutablePath, plan.Arguments, plan.Environment);
-
-        // Process enumeration (and a cold profile's first start) can take well
-        // past the old ten-second window, so the wait is deadline-based. A launch
-        // that never produces a process is still reported as uncertain, but slow
-        // starts are no longer mistaken for one. A transient enumeration failure
-        // only means "not visible yet"; the log-based token-store gate below does
-        // not depend on the process list.
-        var launchDeadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(60);
-        while (DateTimeOffset.UtcNow < launchDeadline)
+        try
         {
-            await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
-            var pids = TryListPids(backend, record.BoxName);
-            if (pids is null || pids.Count == 0) continue;
-            // The vendor desktop rewrites the scheme back to itself during
-            // startup, which would silently undo the router registration
-            // between sign-ins. Wait for that to settle, then re-assert.
-            await Task.Delay(2000, cancellationToken).ConfigureAwait(false);
-            DeepLinkRouter.EnsureRegistered(_paths);
-            await RequireFileTokenStoreAsync(profileId, backend, record.BoxName, storeLogFloor, cancellationToken).ConfigureAwait(false);
-            return new IsolationLaunchResult(profileId, record.BoxName, pids, true);
+            var installation = await _driver.DiscoverAsync(cancellationToken).ConfigureAwait(false);
+            var plan = _driver.BuildLaunchPlan(installation, profileId, kind);
+            backend.LaunchDetached(record.BoxName, plan.ExecutablePath, plan.Arguments, plan.Environment);
+
+            // Process enumeration (and a cold profile's first start) can take well
+            // past the old ten-second window, so the wait is deadline-based. A launch
+            // that never produces a process is still reported as uncertain, but slow
+            // starts are no longer mistaken for one. A transient enumeration failure
+            // only means "not visible yet"; the log-based token-store gate below does
+            // not depend on the process list.
+            var launchDeadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(60);
+            while (DateTimeOffset.UtcNow < launchDeadline)
+            {
+                await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
+                var pids = TryListPids(backend, record.BoxName);
+                if (pids is null || pids.Count == 0) continue;
+                // The vendor desktop rewrites the scheme back to itself during
+                // startup, which would silently undo the router registration
+                // between sign-ins. Wait for that to settle, then re-assert.
+                await Task.Delay(2000, cancellationToken).ConfigureAwait(false);
+                DeepLinkRouter.EnsureRegistered(_paths);
+                await RequireFileTokenStoreAsync(profileId, backend, record.BoxName, storeLogFloor, cancellationToken).ConfigureAwait(false);
+                return new IsolationLaunchResult(profileId, record.BoxName, pids, true);
+            }
+            throw new LaunchStateUncertainException("The isolation launcher exited but no process appeared in the expected scope.");
         }
-        throw new LaunchStateUncertainException("The isolation launcher exited but no process appeared in the expected scope.");
+        catch
+        {
+            // A failed launch must not leave a live "waiting" grant behind: the
+            // next antigravity:// callback would otherwise be handed to a
+            // profile that never came up.
+            DeepLinkRouter.ClearPending(_paths);
+            throw;
+        }
     }
 
     /// <summary>Where the desktop writes the language server's own log.</summary>
@@ -309,10 +319,14 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
         if (record is null) return false;
         if (!backend.BoxExists(record.BoxName))
             throw new HubException($"Isolation scope '{record.BoxName}' is missing; refusing to act on another scope.", "isolation_box_missing");
+        // A stopped Profile cannot receive a callback, so it stops advertising
+        // itself — but only itself: another profile may still be waiting for
+        // its own sign-in.
+        var pending = await DeepLinkRouter.ReadPendingWithoutExpiryAsync(_paths, cancellationToken).ConfigureAwait(false);
+        if (pending is not null && pending.ProfileId == profileId)
+            DeepLinkRouter.ClearPending(_paths);
         if (backend.ListPids(record.BoxName).Count == 0) return false;
         backend.Terminate(record.BoxName);
-        // A stopped Profile cannot receive a callback, so stop advertising it.
-        DeepLinkRouter.ClearPending(_paths);
         for (var attempt = 0; attempt < 20; attempt++)
         {
             if (backend.ListPids(record.BoxName).Count == 0) return true;
