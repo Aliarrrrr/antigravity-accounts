@@ -10,6 +10,7 @@ public sealed record IsolationStateDocument
 
 public sealed record IsolationPrepareResult(Guid ProfileId, string BoxName, bool BoxCreated, bool MappingCreated);
 public sealed record IsolationLaunchResult(Guid ProfileId, string BoxName, IReadOnlyList<int> BoxPids, bool StartedNewProcess);
+/// <param name="ProcessCount">Live processes in the scope, or -1 when liveness could not be observed.</param>
 public sealed record IsolationRuntimeStatus(Guid ProfileId, string BoxName, bool BackendAvailable, bool BoxExists,
     int ProcessCount);
 
@@ -183,13 +184,15 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
         // Process enumeration (and a cold profile's first start) can take well
         // past the old ten-second window, so the wait is deadline-based. A launch
         // that never produces a process is still reported as uncertain, but slow
-        // starts are no longer mistaken for one.
+        // starts are no longer mistaken for one. A transient enumeration failure
+        // only means "not visible yet"; the log-based token-store gate below does
+        // not depend on the process list.
         var launchDeadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(60);
         while (DateTimeOffset.UtcNow < launchDeadline)
         {
             await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
-            var pids = backend.ListPids(record.BoxName);
-            if (pids.Count == 0) continue;
+            var pids = TryListPids(backend, record.BoxName);
+            if (pids is null || pids.Count == 0) continue;
             // The vendor desktop rewrites the scheme back to itself during
             // startup, which would silently undo the router registration
             // between sign-ins. Wait for that to settle, then re-assert.
@@ -260,6 +263,17 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
         }
     }
 
+    /// <summary>
+    /// Lists the scope's processes, or null when the process list is unreadable.
+    /// The idle gate at launch start deliberately lets that error propagate:
+    /// a launch that cannot prove the scope is idle must not start anything.
+    /// </summary>
+    private static IReadOnlyList<int>? TryListPids(IIsolationBackend backend, string boxName)
+    {
+        try { return backend.ListPids(boxName); }
+        catch (HubException ex) when (ex.Code == "process_enumeration_unavailable") { return null; }
+    }
+
     /// <summary>True only when a vendor application process is alive in the scope.</summary>
     private static bool HasVendorProcess(IIsolationBackend backend, string boxName)
     {
@@ -326,7 +340,16 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
         var exists = backend.BoxExists(record.BoxName);
         if (!exists)
             return new IsolationRuntimeStatus(profileId, record.BoxName, true, false, 0);
-        return new IsolationRuntimeStatus(profileId, record.BoxName, true, true, backend.ListPids(record.BoxName).Count);
+        int processCount;
+        try { processCount = backend.ListPids(record.BoxName).Count; }
+        catch (HubException ex) when (ex.Code == "process_enumeration_unavailable")
+        {
+            // Status must not mistake an unreadable process list for an idle
+            // scope; -1 means "liveness unknown" and no caller reconciles state
+            // from it.
+            processCount = -1;
+        }
+        return new IsolationRuntimeStatus(profileId, record.BoxName, true, exists, processCount);
     }
 
     public async Task<IReadOnlyList<IsolationRuntimeStatus>> StatusAsync(CancellationToken cancellationToken = default)

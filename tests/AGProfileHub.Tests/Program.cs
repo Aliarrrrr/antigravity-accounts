@@ -52,6 +52,8 @@ var tests = new (string Name, Func<Task> Run)[]
     ("profiles resolve by name or unique prefix", TestProfileResolveAsync),
     ("scope attribution parses argv strictly and rejects look-alike paths", TestScopeAttributionStrictAsync),
     ("scope children require a plausible creation order", TestScopeChildStartGuardAsync),
+    ("an unreadable process list fails closed everywhere", TestEnumerationFailureFailsClosedAsync),
+    ("an unknown process count never reconciles profile state", TestUnknownProcessCountDoesNotReconcileStateAsync),
 };
 
 var failures = new List<string>();
@@ -851,6 +853,46 @@ static async Task TestScopeChildStartGuardAsync()
     Equal(1, ProcessLocalBackend.SelectScopeProcesses(blockedChain, expected).Count);
 }
 
+static async Task TestEnumerationFailureFailsClosedAsync()
+{
+    using var fixture = new Fixture();
+    var backend = new FakeIsolationBackend { FailEnumeration = true };
+    var launcher = new IsolatedProfileLauncher(fixture.Paths, new FakeDriver(fixture.Paths, fixture.Executable),
+        fixture.Repository, _ => backend);
+    var id = Guid.NewGuid();
+    await launcher.PrepareAsync(id);
+
+    // Status reports an unknown count instead of an idle scope.
+    var status = await launcher.GetStatusAsync(id);
+    True(status is not null && status.ProcessCount == -1, "an unreadable process list must be reported as unknown, not empty");
+
+    // Stop refuses to claim success, and launch refuses to start blindly.
+    await ThrowsAsync<HubException>(() => launcher.StopAsync(id));
+    await ThrowsAsync<HubException>(() => launcher.LaunchAsync(id));
+    True(backend.LaunchCalls == 0, "a launch that cannot see the scope must not start anything");
+}
+
+static async Task TestUnknownProcessCountDoesNotReconcileStateAsync()
+{
+    var isolation = new FakeProfileIsolation { ForcedProcessCount = -1 };
+    using var fixture = new Fixture(isolation: isolation);
+    var launched = await fixture.Profiles.CreateAsync("Launched", null, IsolationBackendKind.ProcessLocal);
+    var idle = await fixture.Profiles.CreateAsync("Idle", null, IsolationBackendKind.ProcessLocal);
+
+    // The launched profile is Running in the supervisor's view; the idle one is
+    // Stopped. Both now gain an isolation scope whose process count is unknown.
+    await fixture.Hub.LaunchAsync(launched.Id);
+    await isolation.PrepareAsync(launched.Id);
+    await isolation.PrepareAsync(idle.Id);
+
+    var runningStatus = await fixture.Hub.GetStatusAsync(launched.Id);
+    True(runningStatus.State == RuntimeState.Running, "an unknown process count must not flip Running to Unknown");
+    var idleStatus = await fixture.Hub.GetStatusAsync(idle.Id);
+    True(idleStatus.State == RuntimeState.Stopped, "an unknown process count must not flip Stopped to Running");
+    True((idleStatus.Detail ?? "").Contains("liveness is unknown", StringComparison.Ordinal),
+        "the status detail must say liveness is unknown");
+}
+
 static void True(bool condition, string? message = null) { if (!condition) throw new InvalidOperationException(message ?? "Expected true."); }
 static void Equal<T>(T expected, T actual) { if (!EqualityComparer<T>.Default.Equals(expected, actual)) throw new InvalidOperationException($"Expected '{expected}', got '{actual}'."); }
 static void Throws<T>(Action action) where T : Exception { try { action(); } catch (T) { return; } throw new InvalidOperationException($"Expected {typeof(T).Name}."); }
@@ -911,6 +953,9 @@ sealed class FakeProfileIsolation : IProfileIsolation
     public int StopCalls { get; private set; }
     public int RestartCalls { get; private set; }
 
+    /// <summary>Overrides the reported scope process count; -1 simulates an unreadable process list.</summary>
+    public int? ForcedProcessCount { get; set; }
+
     public Task<IsolationBoxRecord?> FindAsync(Guid profileId, CancellationToken cancellationToken = default) =>
         Task.FromResult(_boxes.GetValueOrDefault(profileId));
 
@@ -950,7 +995,7 @@ sealed class FakeProfileIsolation : IProfileIsolation
     {
         if (!_boxes.TryGetValue(profileId, out var record)) return Task.FromResult<IsolationRuntimeStatus?>(null);
         return Task.FromResult<IsolationRuntimeStatus?>(new IsolationRuntimeStatus(profileId, record.BoxName, true, true,
-            _running.Contains(profileId) ? 1 : 0));
+            ForcedProcessCount ?? (_running.Contains(profileId) ? 1 : 0)));
     }
 
     public async Task<IReadOnlyList<IsolationRuntimeStatus>> StatusAsync(CancellationToken cancellationToken = default)
@@ -972,9 +1017,17 @@ sealed class FakeIsolationBackend : IIsolationBackend
     private int _nextPid = 20000;
     public HashSet<string> Boxes { get; } = new(StringComparer.OrdinalIgnoreCase);
     public int LaunchCalls { get; private set; }
+
+    /// <summary>Makes ListPids fail the way an unreadable WMI enumeration does.</summary>
+    public bool FailEnumeration { get; set; }
+
     public bool BoxExists(string box) => Boxes.Contains(box);
     public void CreateBox(string box) => Boxes.Add(box);
-    public IReadOnlyList<int> ListPids(string box) => _pids.GetValueOrDefault(box, []).ToList();
+    public IReadOnlyList<int> ListPids(string box)
+    {
+        if (FailEnumeration) throw new HubException("The process list could not be read (test).", "process_enumeration_unavailable");
+        return _pids.GetValueOrDefault(box, []).ToList();
+    }
     public void Terminate(string box) => _pids.Remove(box);
     public int LaunchDetached(string box, string executable, IReadOnlyList<string> arguments,
         IReadOnlyDictionary<string, string> environment)

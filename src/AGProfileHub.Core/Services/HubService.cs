@@ -252,8 +252,13 @@ public sealed class HubService
         if (isolation is null) return status;
         var readiness = !isolation.BackendAvailable ? "the isolation backend is unavailable" :
             !isolation.BoxExists ? "scope is missing" : "ready";
-        var reconciledState = status.State == RuntimeState.Stopped && isolation.ProcessCount > 0 ? RuntimeState.Running : status.State;
-        if (status.State == RuntimeState.Running && isolation.ProcessCount == 0) reconciledState = RuntimeState.Unknown;
+        // ProcessCount == -1 means liveness could not be observed; neither
+        // reconcile direction may run on it, or an unreadable process list
+        // would be presented as a state change.
+        var reconciledState = status.State;
+        if (isolation.ProcessCount > 0 && status.State == RuntimeState.Stopped) reconciledState = RuntimeState.Running;
+        else if (isolation.ProcessCount == 0 && status.State == RuntimeState.Running) reconciledState = RuntimeState.Unknown;
+        if (isolation.ProcessCount < 0) readiness += "; process liveness is unknown because the process list could not be read";
         return status with
         {
             State = reconciledState,

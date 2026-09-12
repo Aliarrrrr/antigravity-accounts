@@ -85,7 +85,9 @@ public sealed class ProcessLocalBackend(HubPaths paths) : IIsolationBackend
     {
         var profileId = ProfileIdFromScope(scope);
         var expected = Paths.UserData(profileId);
-        var processes = QueryProcesses();
+        var processes = QueryProcesses() ?? throw new HubException(
+            "The process list could not be read, so processes in this scope can be neither counted nor stopped.",
+            "process_enumeration_unavailable");
         if (processes.Count == 0) return [];
         return SelectScopeProcesses(processes, expected);
     }
@@ -241,7 +243,16 @@ public sealed class ProcessLocalBackend(HubPaths paths) : IIsolationBackend
 
     internal sealed record ProcessRow(int ProcessId, int ParentProcessId, string Name, string? CommandLine, DateTimeOffset StartedUtc);
 
-    private static IReadOnlyList<ProcessRow> QueryProcesses()
+    /// <summary>
+    /// One snapshot of the vendor's processes, or null when enumeration failed.
+    /// </summary>
+    /// <remarks>
+    /// A failed enumeration is reported, not flattened into "no processes":
+    /// callers must never conclude that a scope is idle — or stoppable — from a
+    /// list they could not read. Callers that only display liveness treat null
+    /// as an unknown count instead of zero.
+    /// </remarks>
+    private static IReadOnlyList<ProcessRow>? QueryProcesses()
     {
         // WMI process enumeration is Windows-only, and the analyzer requires the
         // guard to be visible in this method rather than at the call site.
@@ -266,10 +277,7 @@ public sealed class ProcessLocalBackend(HubPaths paths) : IIsolationBackend
         }
         catch (Exception ex) when (ex is ManagementException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException)
         {
-            // Without a usable process list the caller must not conclude
-            // "nothing is running"; an empty list is safe here because every
-            // caller either starts something or reports absence.
-            return [];
+            return null;
         }
         return rows;
     }
