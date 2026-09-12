@@ -7,7 +7,8 @@ public sealed record AntigravityInstallation(string ExecutablePath, string Versi
 public interface IAntigravityDriver
 {
     Task<AntigravityInstallation> DiscoverAsync(CancellationToken cancellationToken = default);
-    LaunchPlan BuildLaunchPlan(AntigravityInstallation installation, Guid profileId);
+    LaunchPlan BuildLaunchPlan(AntigravityInstallation installation, Guid profileId,
+        IsolationBackendKind backend = IsolationBackendKind.Sandboxie);
 }
 
 public sealed class AntigravityDriver(HubPaths paths, ConfigRepository repository) : IAntigravityDriver
@@ -48,7 +49,13 @@ public sealed class AntigravityDriver(HubPaths paths, ConfigRepository repositor
             $"Version {normalized} has not been probed. Refusing to guess the isolation contract.");
     }
 
-    public LaunchPlan BuildLaunchPlan(AntigravityInstallation installation, Guid profileId)
+    /// <param name="backend">
+    /// The Profile's isolation backend. Only the process-local backend needs
+    /// anything extra here: the sandbox backend already owns a private
+    /// credential scope, so its launch plan must stay exactly as it was.
+    /// </param>
+    public LaunchPlan BuildLaunchPlan(AntigravityInstallation installation, Guid profileId,
+        IsolationBackendKind backend = IsolationBackendKind.Sandboxie)
     {
         if (!installation.IsKnownCompatible) throw new HubException(installation.CompatibilityDetail, "version_unverified");
         paths.EnsureProfileLayout(profileId);
@@ -65,6 +72,20 @@ public sealed class AntigravityDriver(HubPaths paths, ConfigRepository repositor
             ["TEMP"] = paths.Temp(profileId),
             ["TMP"] = paths.Temp(profileId)
         };
+        if (backend == IsolationBackendKind.ProcessLocal)
+        {
+            // The language server picks its credential store by probing for a
+            // container, SSH or WSL session. Reporting one keeps the instance on
+            // the token file inside this Profile's own home instead of the
+            // Windows user's single shared credential entry. The value is only a
+            // label: the detector looks at presence, not content.
+            environment["WSL_DISTRO_NAME"] = "AGPH-" + profileId.ToString("N")[..8];
+        }
+        else if (backend != IsolationBackendKind.Sandboxie)
+        {
+            throw new ConfigurationException("Unknown isolation backend.", "invalid_isolation_backend");
+        }
+
         return new LaunchPlan(installation.ExecutablePath, installation.Version,
             [$"--user-data-dir={paths.UserData(profileId)}"], environment,
             "Antigravity.exe --user-data-dir=<managed-profile-user-data>");

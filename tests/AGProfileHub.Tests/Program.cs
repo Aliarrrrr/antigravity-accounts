@@ -17,6 +17,8 @@ var tests = new (string Name, Func<Task> Run)[]
     ("corrupt and future config are rejected without overwrite", TestInvalidConfigAsync),
     ("isolation backend defaults to Sandboxie and round-trips", TestIsolationBackendDefaultsAsync),
     ("unknown isolation backend is rejected", TestUnknownIsolationBackendAsync),
+    ("process-local launches ask for the file token store", TestProcessLocalLaunchPlanAsync),
+    ("process-local scopes need no external product", TestProcessLocalScopeAsync),
     ("managed path traversal is rejected", TestPathContainmentAsync),
     ("launch plan isolates home and user-data", TestLaunchPlanAsync),
     ("quoted user-data command line is parsed", TestCommandLineAsync),
@@ -441,6 +443,51 @@ static async Task TestUnknownIsolationBackendAsync()
 
     File.WriteAllText(fixture.Paths.SettingsFile, "{\"schemaVersion\":1,\"defaultBackend\":7}");
     await ThrowsAsync<ConfigurationException>(() => fixture.Repository.ReadSettingsAsync());
+}
+
+static Task TestProcessLocalLaunchPlanAsync()
+{
+    using var fixture = new Fixture();
+    var driver = new AntigravityDriver(fixture.Paths, fixture.Repository);
+    var installation = new AntigravityInstallation(fixture.Executable, "2.12.2", true, "test");
+    var id = Guid.NewGuid();
+
+    // The sandbox plan must not gain anything: that path already owns a private
+    // credential scope, so its launch stays byte-for-byte what it was.
+    var sandboxed = driver.BuildLaunchPlan(installation, id);
+    True(!sandboxed.Environment.ContainsKey("WSL_DISTRO_NAME"), "sandbox launches must not carry the process-local detector");
+    Equal(1, sandboxed.Arguments.Count);
+
+    var local = driver.BuildLaunchPlan(installation, id, IsolationBackendKind.ProcessLocal);
+    True(local.Environment.ContainsKey("WSL_DISTRO_NAME"), "process-local launches ask the language server for its file store");
+    True(local.Environment["WSL_DISTRO_NAME"].StartsWith("AGPH-", StringComparison.Ordinal));
+    Equal(local.Environment["USERPROFILE"], local.Environment["HOME"]);
+    True(local.Environment["USERPROFILE"].EndsWith("home", StringComparison.OrdinalIgnoreCase));
+    // The process home already decides where the token file lands, so adding
+    // --gemini_dir would be a second mechanism for the same guarantee.
+    Equal(1, local.Arguments.Count);
+    return Task.CompletedTask;
+}
+
+static Task TestProcessLocalScopeAsync()
+{
+    using var fixture = new Fixture();
+    var id = Guid.NewGuid();
+    var scope = IsolationBackends.ScopeNameFor(id);
+    True(scope.StartsWith("AGPH_", StringComparison.Ordinal));
+
+    var backend = IsolationBackends.TryCreate(fixture.Paths, IsolationBackendKind.ProcessLocal);
+    True(backend is ProcessLocalBackend, "the process-local backend resolves without any external product");
+    True(!backend!.BoxExists(scope), "a scope does not exist before it is prepared");
+    Equal(0, backend.ListPids(scope).Count);
+    backend.CreateBox(scope);
+    True(backend.BoxExists(scope), "preparing a scope only needs its managed layout");
+    Equal(1, backend.GetIndexedSettingValues(scope, "OpenFilePath").Count);
+
+    // Unknown or malformed scopes stay configuration errors rather than a silent fallback.
+    Throws<ConfigurationException>(() => IsolationBackends.TryCreate(fixture.Paths, (IsolationBackendKind)9));
+    Throws<ConfigurationException>(() => { _ = new ProcessLocalBackend(fixture.Paths).BoxExists("not-a-scope"); });
+    return Task.CompletedTask;
 }
 
 static Task TestLaunchPlanAsync()
@@ -922,7 +969,8 @@ sealed class Fixture : IDisposable
 sealed class FakeDriver(HubPaths paths, string executable) : IAntigravityDriver
 {
     public Task<AntigravityInstallation> DiscoverAsync(CancellationToken cancellationToken = default) => Task.FromResult(new AntigravityInstallation(executable, "2.12.2", true, "test"));
-    public LaunchPlan BuildLaunchPlan(AntigravityInstallation installation, Guid profileId)
+    public LaunchPlan BuildLaunchPlan(AntigravityInstallation installation, Guid profileId,
+        IsolationBackendKind backend = IsolationBackendKind.Sandboxie)
     {
         paths.EnsureProfileLayout(profileId);
         return new LaunchPlan(executable, "2.12.2", [$"--user-data-dir={paths.UserData(profileId)}"], new Dictionary<string, string>(), "fake --user-data-dir=<managed>");
