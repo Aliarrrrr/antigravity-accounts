@@ -26,6 +26,13 @@ try {
     $manifest = Get-Content -LiteralPath (Join-Path $package 'package-manifest.json') -Raw | ConvertFrom-Json
     Check 'manifest is self-contained win-x64' ($manifest.selfContained -and $manifest.runtime -eq 'win-x64')
     Check 'manifest version is semantic' ($manifest.hubVersion -match '^\d+\.\d+\.\d+$')
+    # 发布清单描述的是真实机制：配置 schema 必须与 Core 的 SchemaVersions.Current 一致，
+    # 隔离机制与外部依赖字段不得再出现已删除的沙盒产品。
+    Check 'manifest config schema matches Core (1)' ($manifest.configSchemaVersion -eq 1)
+    Check 'manifest describes no sandbox dependency' (
+        -not (($manifest.authIsolation + ' ' + $manifest.externalDependency) -match 'sandboxie'))
+    Check 'manifest describes process-local token-store isolation' (
+        [bool]($manifest.authIsolation -match 'file-token-store'))
     $expectedFileVersion = "$($manifest.hubVersion).0"
     $cli = Join-Path $package 'cli\AGProfileHub.Cli.exe'
     $gui = Join-Path $package 'hub\AGProfileHub.Gui.exe'

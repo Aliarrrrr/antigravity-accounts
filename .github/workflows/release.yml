@@ -19,7 +19,9 @@ jobs:
           dotnet-version: 10.0.x
       - name: Publish portable package
         shell: pwsh
-        run: ./scripts/Publish.ps1
+        # -Release enforces the full gate: locked restore, strict clean tree,
+        # the exact v<version> tag on HEAD and a matching CHANGELOG entry.
+        run: ./scripts/Publish.ps1 -Release
       - name: Validate tag and locate package
         shell: pwsh
         run: |
@@ -30,6 +32,8 @@ jobs:
           $release = Split-Path $package -Parent
           $manifest = Get-Content $manifestFile.FullName -Raw | ConvertFrom-Json
           if ($env:GITHUB_REF_NAME -ne "v$($manifest.hubVersion)") { throw "Tag $env:GITHUB_REF_NAME does not match package v$($manifest.hubVersion)." }
+          if ($manifest.release -ne $true) { throw 'Package manifest is not marked as a release build (release != true).' }
+          if ($manifest.dirty -ne $false) { throw 'Package manifest marks the build as dirty; refusing to deliver.' }
           "PACKAGE_ROOT=$package" | Out-File $env:GITHUB_ENV -Append
           "RELEASE_ROOT=$release" | Out-File $env:GITHUB_ENV -Append
       - name: Test package structure

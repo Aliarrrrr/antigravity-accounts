@@ -59,7 +59,8 @@ try {
         if ($Release) { Assert-HubRelease -Root $root -Version $context.Version -State $finalState }
         $manifest = [ordered]@{
             schemaVersion = 2
-            configSchemaVersion = 2
+            # 必须与 src/AGProfileHub.Core/Domain/Models.cs 的 SchemaVersions.Current 一致（当前为 1）。
+            configSchemaVersion = 1
             version = $context.Version
             hubVersion = $context.Version
             commit = $finalState.Commit
@@ -71,8 +72,10 @@ try {
             release = [bool]$Release
             includeSystemTests = [bool]$IncludeSystemTests
             experimental = $true
-            authIsolation = 'verified-with-per-profile-sandboxie-box-on-desktop-2.12.2'
-            externalDependency = 'Sandboxie Plus 1.18.2 / core 5.73.2 tested'
+            # 描述 0.4.0 起的真实隔离机制：每 Profile 独立 home + 语言服务文件令牌存储，
+            # 启动时自证（fail-closed）。不再有任何沙盒产品依赖。
+            authIsolation = 'per-profile-home-and-file-token-store-verified-on-desktop-2.12.2'
+            externalDependency = 'official Antigravity Desktop 2.12.2; no sandbox product, no admin rights'
         }
         $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $packageRoot 'package-manifest.json') -Encoding UTF8
         "@echo off`r`nstart `"`" `"%~dp0hub\AGProfileHub.Gui.exe`" %*`r`nexit /b %errorlevel%`r`n" |

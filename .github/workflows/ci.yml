@@ -16,4 +16,4 @@ jobs:
           dotnet-version: 10.0.x
       - name: Build and test
         shell: pwsh
-        run: ./scripts/Build.ps1 -Test
+        run: ./scripts/Build.ps1 -LockedRestore -Test
