@@ -149,22 +149,39 @@ public sealed class ProcessLocalBackend(HubPaths paths) : IIsolationBackend
     {
         var profileId = ProfileIdFromScope(scope);
         var wrapper = Path.Combine(Paths.ProfileRoot(profileId), "launch.cmd");
-        var lines = new List<string> { "@echo off" };
+        // UTF-8 without BOM plus an early chcp: paths may contain non-ASCII
+        // (for example a Chinese Windows user name), which ASCII encoding
+        // would silently corrupt into '?'.
+        File.WriteAllText(wrapper, BuildLaunchWrapperContent(environment, executable, arguments),
+            new System.Text.UTF8Encoding(false));
+        return wrapper;
+    }
+
+    /// <summary>
+    /// The wrapper script body. Pure so the encoding and escaping contract can
+    /// be tested without launching anything.
+    /// </summary>
+    public static string BuildLaunchWrapperContent(IReadOnlyDictionary<string, string> environment,
+        string executable, IReadOnlyList<string> arguments)
+    {
+        var lines = new List<string> { "@echo off", "@chcp 65001>nul" };
         // The shell does not reliably hand a custom environment block down to the
         // wrapper's child, so the wrapper sets the instance's home itself. This
         // mirrors the exact wrapper that was proven against the real desktop.
         foreach (var pair in environment)
         {
             if (string.Equals(pair.Key, "ELECTRON_RUN_AS_NODE", StringComparison.OrdinalIgnoreCase)) continue;
-            lines.Add($"set \"{pair.Key}={pair.Value}\"");
+            lines.Add($"set \"{pair.Key}={EscapeBatch(pair.Value)}\"");
         }
         lines.Add("set \"ELECTRON_RUN_AS_NODE=\"");
-        var quoted = string.Join(" ", arguments.Select(argument => $"\"{argument}\""));
-        lines.Add($"start \"\" \"{executable}\" {quoted}");
-        // ASCII keeps cmd's parser deterministic on any code page.
-        File.WriteAllText(wrapper, string.Join("\r\n", lines) + "\r\n", new System.Text.ASCIIEncoding());
-        return wrapper;
+        var quoted = string.Join(" ", arguments.Select(argument => $"\"{EscapeBatch(argument)}\""));
+        lines.Add($"start \"\" \"{EscapeBatch(executable)}\" {quoted}");
+        return string.Join("\r\n", lines) + "\r\n";
     }
+
+    // cmd expands %VAR% even inside quoted set statements; %% is the batch-file
+    // escape for a literal percent sign.
+    private static string EscapeBatch(string value) => value.Replace("%", "%%", StringComparison.Ordinal);
 
     private sealed record ProcessRow(int ProcessId, int ParentProcessId, string Name, string? CommandLine);
 

@@ -18,6 +18,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("unknown isolation backend is rejected", TestUnknownIsolationBackendAsync),
     ("process-local launches ask for the file token store", TestProcessLocalLaunchPlanAsync),
     ("process-local scopes need no external product", TestProcessLocalScopeAsync),
+    ("launch wrapper keeps non-ASCII paths and escapes percent", TestLaunchWrapperContentAsync),
     ("deep-link callback reaches the profile that is waiting", TestDeepLinkRouterAsync),
     ("an unverified process-local scope fails closed", TestScopeVerificationFailsClosedAsync),
     ("managed path traversal is rejected", TestPathContainmentAsync),
@@ -346,6 +347,34 @@ static Task TestProcessLocalScopeAsync()
     // configuration errors rather than a silent fallback.
     Equal(null, IsolationBackends.TryCreate(fixture.Paths, (IsolationBackendKind)9));
     Throws<ConfigurationException>(() => { _ = new ProcessLocalBackend(fixture.Paths).BoxExists("not-a-scope"); });
+    return Task.CompletedTask;
+}
+
+static Task TestLaunchWrapperContentAsync()
+{
+    // A Chinese Windows user name makes the managed home non-ASCII; ASCII
+    // encoding would silently corrupt it into '?'.
+    var home = "C:\\Users\\张三\\AppData\\Local\\AntigravityProfileHub\\profiles\\abc\\home";
+    var content = ProcessLocalBackend.BuildLaunchWrapperContent(
+        new Dictionary<string, string>
+        {
+            ["USERPROFILE"] = home,
+            ["ELECTRON_RUN_AS_NODE"] = "1",
+            ["TEMP"] = "C:\\Temp\\100% coverage"
+        },
+        "C:\\Program Files\\Antigravity\\Antigravity.exe",
+        ["--user-data-dir=C:\\Data\\100%\\user-data"]);
+
+    True(content.Contains(home, StringComparison.Ordinal), "non-ASCII paths survive verbatim");
+    True(content.Contains("100%% coverage", StringComparison.Ordinal), "percent signs are doubled for cmd");
+    True(content.Contains("--user-data-dir=C:\\Data\\100%%\\user-data", StringComparison.Ordinal), "argument percent signs are doubled");
+    True(!content.Contains("ELECTRON_RUN_AS_NODE=1", StringComparison.Ordinal), "the node-hijack variable is never set");
+    True(content.Contains("set \"ELECTRON_RUN_AS_NODE=\"", StringComparison.Ordinal), "the node-hijack variable is cleared");
+    var lines = content.Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
+    Equal("@echo off", lines[0]);
+    True(lines[1].StartsWith("@chcp 65001", StringComparison.Ordinal), "cmd switches to UTF-8 before any non-ASCII line");
+    True(lines[^1].StartsWith("start ", StringComparison.Ordinal), "the wrapper ends by starting the desktop");
+    True(!content.StartsWith('\ufeff'), "no BOM; cmd misreads it");
     return Task.CompletedTask;
 }
 
