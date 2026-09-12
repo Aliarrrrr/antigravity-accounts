@@ -186,6 +186,11 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
             await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
             var pids = backend.ListPids(record.BoxName);
             if (pids.Count == 0) continue;
+            // The vendor desktop rewrites the scheme back to itself during
+            // startup, which would silently undo the router registration
+            // between sign-ins. Wait for that to settle, then re-assert.
+            await Task.Delay(2000, cancellationToken).ConfigureAwait(false);
+            DeepLinkRouter.EnsureRegistered(_paths);
             await RequireFileTokenStoreAsync(profileId, backend, record.BoxName, storeLogFloor, cancellationToken).ConfigureAwait(false);
             return new IsolationLaunchResult(profileId, record.BoxName, pids, true);
         }

@@ -123,6 +123,24 @@ public static class DeepLinkRouter
         WriteRegisteredCommand(record.RouterCommand);
     }
 
+    /// <summary>
+    /// Re-asserts the router registration after a vendor desktop has run: the
+    /// desktop rewrites the scheme back to itself on every start, which would
+    /// otherwise silently undo the router between sign-ins. Never touches the
+    /// scheme when this data root never registered.
+    /// </summary>
+    public static void EnsureRegistered(HubPaths paths)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var path = RegistrationPath(paths);
+        if (!File.Exists(path)) return;
+        var record = new AtomicJsonStore(paths.DataRoot).ReadAsync(path, HubJsonContext.Default.DeepLinkRegistration,
+            () => throw new ConfigurationException("The deep-link registration record is invalid.", "deeplink_registration_invalid"),
+            CancellationToken.None).ConfigureAwait(false).GetAwaiter().GetResult();
+        if (ReadRegisteredCommand() != record.RouterCommand)
+            WriteRegisteredCommand(record.RouterCommand);
+    }
+
     /// <summary>Puts the scheme back the way it was found, if the router owns it.</summary>
     public static bool Restore(HubPaths paths)
     {
