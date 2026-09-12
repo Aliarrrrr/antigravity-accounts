@@ -78,7 +78,10 @@ public sealed class ProcessLocalBackend(HubPaths paths) : IIsolationBackend
     /// attributed this way; the callback router makes sure such launches do not
     /// happen, and the absence is reported rather than guessed.
     /// </remarks>
-    public IReadOnlyList<int> ListPids(string scope)
+    public IReadOnlyList<int> ListPids(string scope) =>
+        [.. ListProcesses(scope).Select(row => row.ProcessId).Order()];
+
+    private IReadOnlyList<ProcessRow> ListProcesses(string scope)
     {
         var profileId = ProfileIdFromScope(scope);
         var expected = Paths.UserData(profileId);
@@ -108,22 +111,40 @@ public sealed class ProcessLocalBackend(HubPaths paths) : IIsolationBackend
         }
         while (grew);
 
-        return [.. inScope.Order()];
+        return [.. processes.Where(p => inScope.Contains(p.ProcessId))];
     }
 
     public void Terminate(string scope)
     {
-        foreach (var pid in ListPids(scope))
+        foreach (var row in ListProcesses(scope))
         {
             try
             {
-                using var process = Process.GetProcessById(pid);
+                using var process = Process.GetProcessById(row.ProcessId);
+                // A reused PID belongs to someone else's process tree; kill only
+                // what still matches the snapshot's creation time. Unverifiable
+                // processes are left running and the caller's polling loop
+                // reports the scope as not stopped instead of killing blindly.
+                if (!StartedSameProcess(process, row)) continue;
                 process.Kill(entireProcessTree: true);
             }
             catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception)
             {
                 // Already gone, or not ours to kill; the caller's polling loop decides the outcome.
             }
+        }
+    }
+
+    private static bool StartedSameProcess(Process process, ProcessRow row)
+    {
+        if (row.StartedUtc == DateTimeOffset.MinValue) return false;
+        try
+        {
+            return Math.Abs((new DateTimeOffset(process.StartTime.ToUniversalTime()) - row.StartedUtc).TotalSeconds) < 1;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception)
+        {
+            return false;
         }
     }
 
@@ -183,7 +204,7 @@ public sealed class ProcessLocalBackend(HubPaths paths) : IIsolationBackend
     // escape for a literal percent sign.
     private static string EscapeBatch(string value) => value.Replace("%", "%%", StringComparison.Ordinal);
 
-    private sealed record ProcessRow(int ProcessId, int ParentProcessId, string Name, string? CommandLine);
+    private sealed record ProcessRow(int ProcessId, int ParentProcessId, string Name, string? CommandLine, DateTimeOffset StartedUtc);
 
     private static IReadOnlyList<ProcessRow> QueryProcesses()
     {
@@ -195,7 +216,7 @@ public sealed class ProcessLocalBackend(HubPaths paths) : IIsolationBackend
         try
         {
             using var searcher = new ManagementObjectSearcher(
-                "SELECT ProcessId, ParentProcessId, Name, CommandLine FROM Win32_Process WHERE Name = 'Antigravity.exe' OR Name = 'language_server.exe'");
+                "SELECT ProcessId, ParentProcessId, Name, CommandLine, CreationDate FROM Win32_Process WHERE Name = 'Antigravity.exe' OR Name = 'language_server.exe'");
             using var results = searcher.Get();
             foreach (var item in results)
             {
@@ -204,7 +225,8 @@ public sealed class ProcessLocalBackend(HubPaths paths) : IIsolationBackend
                     Convert.ToInt32(row["ProcessId"], System.Globalization.CultureInfo.InvariantCulture),
                     Convert.ToInt32(row["ParentProcessId"], System.Globalization.CultureInfo.InvariantCulture),
                     row["Name"] as string ?? string.Empty,
-                    row["CommandLine"] as string));
+                    row["CommandLine"] as string,
+                    ParseCreationDate(row["CreationDate"] as string)));
             }
         }
         catch (Exception ex) when (ex is ManagementException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException)
@@ -215,5 +237,12 @@ public sealed class ProcessLocalBackend(HubPaths paths) : IIsolationBackend
             return [];
         }
         return rows;
+    }
+
+    private static DateTimeOffset ParseCreationDate(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return DateTimeOffset.MinValue;
+        try { return ManagementDateTimeConverter.ToDateTime(value).ToUniversalTime(); }
+        catch (Exception ex) when (ex is ArgumentException or ArgumentOutOfRangeException) { return DateTimeOffset.MinValue; }
     }
 }
