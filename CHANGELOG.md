@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.4.1] - 2026-09-12
+
+### Fixed
+
+- **Deep-link routing dropped every OAuth callback**: `Route` relaunched the Hub CLI instead of the vendor desktop, so while the router owned `antigravity://` no sign-in callback could arrive. The handoff now relaunches `Antigravity.exe` with the waiting Profile's user-data directory, and executable discovery is shared with the driver. Note: concurrent sign-in still requires one real end-to-end acceptance run before it should be relied on.
+- The launch wrapper (`launch.cmd`) was written with ASCII encoding, silently corrupting non-ASCII paths (for example a Chinese Windows user name) into `?`; it is now UTF-8 without BOM with an early `chcp 65001`, and `%` is escaped as `%%` so cmd cannot expand it. Verified against a real `cmd.exe` run.
+- A second `open`/`launch-all` during a cold first launch failed with a misleading `lock_timeout` after ten seconds; launch/stop/restart now wait up to four minutes, past the worst-case verification window.
+- Stopping an isolated Profile killed PIDs from a process snapshot without revalidation; a reused PID would have terminated an unrelated process tree. Termination now kills only processes whose live start time still matches the snapshot.
+- Uninstalling no longer leaves `antigravity://` pointing at the removed CLI; the installer restores the previous handler (only when this data root owns the registration).
+
+### Added
+
+- GUI `Callbacks` toolbar button to register or restore deep-link routing without the CLI; creating a profile no longer hides an isolation-preparation failure.
+
+### Changed
+
+- `BuildLaunchPlan`/`CreateAsync` now require an explicit isolation backend instead of defaulting to the legacy value.
+- Purged Sandboxie-era wording left in SECURITY.md, ARCHITECTURE.md, PROJECT_STATE.md, CAPABILITY_REPORT.md, KEYRING_ISOLATION_REPORT.md, GUI/CLI copy and Publish.ps1; corrected the false deep-link probe claim and the 0.4.0 test count (43/43, not 51/51).
+
 ## [0.4.0] - 2026-09-12
 
 ### Removed

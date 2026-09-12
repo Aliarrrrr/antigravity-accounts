@@ -1,4 +1,4 @@
-# Antigravity Profile Hub 0.4.0 — 实验版
+# Antigravity Profile Hub 0.4.1 — 实验版
 
 Antigravity Profile Hub 是一个 Windows 原生的 Antigravity Desktop 多 Profile 管理器：让多个**官方** Antigravity Desktop 窗口在同一个 Windows 用户下各自保持**不同的 Google 账号**登录。
 
@@ -44,17 +44,17 @@ Antigravity Profile Hub 是一个 Windows 原生的 Antigravity Desktop 多 Prof
 
 ### 安装
 
-从 [v0.4.0 Release](https://github.com/Aliarrrrr/antigravity-profile-hub/releases/tag/v0.4.0) 下载：
+从 [v0.4.1 Release](https://github.com/Aliarrrrr/antigravity-profile-hub/releases/tag/v0.4.1) 下载：
 
 | 文件 | 适合 |
 |---|---|
-| `AGProfileHub-Setup-win-x64-0.4.0.exe` | 推荐日常使用（按当前用户安装） |
-| `AGProfileHub-0.4.0-win-x64.zip` | 免安装 / 便携 |
+| `AGProfileHub-Setup-win-x64-0.4.1.exe` | 推荐日常使用（按当前用户安装） |
+| `AGProfileHub-0.4.1-win-x64.zip` | 免安装 / 便携 |
 
 校验（在下载目录）：
 
 ```powershell
-$File = ".\AGProfileHub-Setup-win-x64-0.4.0.exe"
+$File = ".\AGProfileHub-Setup-win-x64-0.4.1.exe"
 $Expected = (Get-Content "$File.sha256.json" -Raw | ConvertFrom-Json).hash
 if ((Get-FileHash $File -Algorithm SHA256).Hash -ne $Expected) { throw "SHA-256 不匹配" }
 "校验通过"
