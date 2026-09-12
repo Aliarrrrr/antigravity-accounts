@@ -39,12 +39,15 @@ public sealed class ProfileManager(ConfigRepository repository, HubPaths paths)
         throw new HubException($"'{term}' matches multiple profiles: {listed}. Use more characters or the UUID.", "profile_name_ambiguous");
     }
 
-    public async Task<ProfileRegistration> CreateAsync(string name, string? workspacePath = null, CancellationToken cancellationToken = default)
+    public async Task<ProfileRegistration> CreateAsync(string name, string? workspacePath = null,
+        IsolationBackendKind backend = IsolationBackendKind.Sandboxie, CancellationToken cancellationToken = default)
     {
         name = ValidateName(name);
         workspacePath = ValidateWorkspace(workspacePath);
+        if (!Enum.IsDefined(backend))
+            throw new ConfigurationException("Unknown isolation backend.", "invalid_isolation_backend");
         var now = DateTimeOffset.UtcNow;
-        var profile = new ProfileRegistration(Guid.NewGuid(), name, workspacePath, now, now);
+        var profile = new ProfileRegistration(Guid.NewGuid(), name, workspacePath, now, now) { Backend = backend };
         paths.EnsureProfileLayout(profile.Id);
         return await repository.UpdateProfilesAsync(document =>
         {

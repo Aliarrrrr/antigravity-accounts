@@ -24,7 +24,9 @@ public sealed class HubService
     public Task<IReadOnlyList<ProfileRegistration>> ListProfilesAsync(CancellationToken cancellationToken = default) => _profiles.ListAsync(cancellationToken);
     public Task<ProfileRegistration> GetProfileAsync(Guid id, CancellationToken cancellationToken = default) => _profiles.GetAsync(id, cancellationToken);
     public Task<ProfileRegistration> ResolveProfileAsync(string nameOrId, CancellationToken cancellationToken = default) => _profiles.ResolveAsync(nameOrId, cancellationToken);
-    public Task<ProfileRegistration> CreateProfileAsync(string name, string? workspacePath = null, CancellationToken cancellationToken = default) => _profiles.CreateAsync(name, workspacePath, cancellationToken);
+    public Task<ProfileRegistration> CreateProfileAsync(string name, string? workspacePath = null,
+        IsolationBackendKind backend = IsolationBackendKind.Sandboxie, CancellationToken cancellationToken = default) =>
+        _profiles.CreateAsync(name, workspacePath, backend, cancellationToken);
     public Task<ProfileRegistration> RenameProfileAsync(Guid id, string name, CancellationToken cancellationToken = default) => _profiles.RenameAsync(id, name, cancellationToken);
     public Task<ProfileRegistration> SetWorkspaceAsync(Guid id, string? workspacePath, CancellationToken cancellationToken = default) => _profiles.SetWorkspaceAsync(id, workspacePath, cancellationToken);
     public async Task<ProfileStatus> GetStatusAsync(Guid id, CancellationToken cancellationToken = default)
@@ -124,14 +126,14 @@ public sealed class HubService
     {
         var profile = await _profiles.GetAsync(id, cancellationToken).ConfigureAwait(false);
         if (_setup is null) throw new UnsupportedCapabilityException("Isolation setup is not available in this environment.");
-        return await _setup.EnsureReadyAsync(id, allowFreshBox, profile.WorkspacePath, cancellationToken).ConfigureAwait(false);
+        return await _setup.EnsureReadyAsync(id, profile.Backend, allowFreshBox, profile.WorkspacePath, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<IsolationStage> DetectIsolationStageAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var profile = await _profiles.GetAsync(id, cancellationToken).ConfigureAwait(false);
         return _setup is null ? IsolationStage.BackendUnavailable
-            : await _setup.DetectAsync(id, profile.WorkspacePath, cancellationToken).ConfigureAwait(false);
+            : await _setup.DetectAsync(id, profile.Backend, profile.WorkspacePath, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<(string BoxName, IReadOnlyList<string> Paths, IReadOnlyList<string> MissingPaths)> GetWriteThroughAsync(
@@ -274,7 +276,7 @@ public static class HubBootstrap
         {
             elevation = new UnavailableElevationBridge("The CLI executable could not be located, so elevation is unavailable.");
         }
-        var setup = new IsolationSetup(isolation, elevation, () => SandboxieBackend.TryDiscover());
+        var setup = new IsolationSetup(isolation, elevation, kind => IsolationBackends.TryCreate(paths, kind));
         return new HubService(paths, repository, profiles, supervisor, driver, isolation, setup);
     }
 

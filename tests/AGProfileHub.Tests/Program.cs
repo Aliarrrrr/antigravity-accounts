@@ -19,6 +19,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("unknown isolation backend is rejected", TestUnknownIsolationBackendAsync),
     ("process-local launches ask for the file token store", TestProcessLocalLaunchPlanAsync),
     ("process-local scopes need no external product", TestProcessLocalScopeAsync),
+    ("an unverified process-local scope fails closed", TestScopeVerificationFailsClosedAsync),
     ("managed path traversal is rejected", TestPathContainmentAsync),
     ("launch plan isolates home and user-data", TestLaunchPlanAsync),
     ("quoted user-data command line is parsed", TestCommandLineAsync),
@@ -222,12 +223,12 @@ static async Task TestIsolationSetupAsync()
     var backend = new FakeIsolationBackend();
     var elevation = new FakeElevationBridge(backend);
     var launcher = new IsolatedProfileLauncher(fixture.Paths, new FakeDriver(fixture.Paths, fixture.Executable),
-        fixture.Repository, () => backend, () => (fixture.Executable, Array.Empty<string>()));
-    var setup = new IsolationSetup(launcher, elevation, () => backend);
+        fixture.Repository, _ => backend, () => (fixture.Executable, Array.Empty<string>()));
+    var setup = new IsolationSetup(launcher, elevation, _ => backend);
 
     // Fresh profile: the whole chain is applied in one call.
     var id = Guid.NewGuid();
-    var report = await setup.EnsureReadyAsync(id, allowFreshBox: false);
+    var report = await setup.EnsureReadyAsync(id, IsolationBackendKind.Sandboxie, allowFreshBox: false);
     True(report.Ready, "a fresh profile becomes ready in one call");
     Equal(IsolationStage.Ready, report.Stage);
     Equal(1, elevation.Calls.Count(c => c.Operation == AdminOperation.CreateBox));
@@ -237,7 +238,7 @@ static async Task TestIsolationSetupAsync()
     // The same call a second time must apply nothing.
     elevation.Calls.Clear();
     var shimBefore = backend.ShimCalls;
-    var again = await setup.EnsureReadyAsync(id, allowFreshBox: false);
+    var again = await setup.EnsureReadyAsync(id, IsolationBackendKind.Sandboxie, allowFreshBox: false);
     True(again.Ready);
     Equal(0, elevation.Calls.Count);
     Equal(shimBefore, backend.ShimCalls);
@@ -246,8 +247,8 @@ static async Task TestIsolationSetupAsync()
     // A pre-existing unowned box still requires an explicit acknowledgement.
     var other = Guid.NewGuid();
     backend.Boxes.Add(IsolatedProfileLauncher.BoxNameFor(other));
-    await ThrowsAsync<HubException>(() => setup.EnsureReadyAsync(other, allowFreshBox: false));
-    var claimed = await setup.EnsureReadyAsync(other, allowFreshBox: true);
+    await ThrowsAsync<HubException>(() => setup.EnsureReadyAsync(other, IsolationBackendKind.Sandboxie, allowFreshBox: false));
+    var claimed = await setup.EnsureReadyAsync(other, IsolationBackendKind.Sandboxie, allowFreshBox: true);
     True(claimed.Ready, "an acknowledged fresh box can be taken over");
 
     // The legacy five-rule direct-write form is honoured as complete, so
@@ -259,12 +260,12 @@ static async Task TestIsolationSetupAsync()
     backend.SetConfig(legacyBox,
         fixture.Paths.Home(legacy), fixture.Paths.Roaming(legacy), fixture.Paths.Local(legacy),
         fixture.Paths.Temp(legacy), fixture.Paths.UserData(legacy));
-    Equal(IsolationStage.Ready, await setup.DetectAsync(legacy));
+    Equal(IsolationStage.Ready, await setup.DetectAsync(legacy, IsolationBackendKind.Sandboxie));
 
     // Elevation failure is surfaced, never swallowed.
     elevation.FailNext = true;
     var blocked = Guid.NewGuid();
-    await ThrowsAsync<HubException>(() => setup.EnsureReadyAsync(blocked, allowFreshBox: false));
+    await ThrowsAsync<HubException>(() => setup.EnsureReadyAsync(blocked, IsolationBackendKind.Sandboxie, allowFreshBox: false));
     True((await launcher.FindAsync(blocked)) is null, "a failed elevation leaves no half-prepared mapping");
 }
 
@@ -288,7 +289,7 @@ static async Task TestIsolationPreparationAsync()
     using var fixture = new Fixture();
     var backend = new FakeIsolationBackend();
     var launcher = new IsolatedProfileLauncher(fixture.Paths, new FakeDriver(fixture.Paths, fixture.Executable),
-        fixture.Repository, () => backend, () => (fixture.Executable, Array.Empty<string>()));
+        fixture.Repository, _ => backend, () => (fixture.Executable, Array.Empty<string>()));
     var a = Guid.NewGuid();
     var b = Guid.NewGuid();
 
@@ -307,6 +308,38 @@ static async Task TestIsolationPreparationAsync()
     Equal(0, backend.LaunchCalls);
 }
 
+static async Task TestScopeVerificationFailsClosedAsync()
+{
+    using var fixture = new Fixture();
+    var backend = new FakeIsolationBackend();
+    // The fake never writes a language-server log, so a process-local launch has
+    // no way to prove that it moved off the shared credential entry.
+    var launcher = new IsolatedProfileLauncher(fixture.Paths, new FakeDriver(fixture.Paths, fixture.Executable),
+        fixture.Repository, _ => backend, () => (fixture.Executable, Array.Empty<string>()),
+        scopeVerificationTimeout: TimeSpan.FromMilliseconds(300));
+    var id = Guid.NewGuid();
+    await fixture.Repository.UpdateProfilesAsync(document =>
+    {
+        var registration = new ProfileRegistration(id, "Scoped", null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+        {
+            Backend = IsolationBackendKind.ProcessLocal
+        };
+        document.Profiles.Add(registration);
+        return (document, registration);
+    });
+
+    // A process-local scope claims no credential entry, so the shim stays idle.
+    var prepared = await launcher.PrepareAsync(id, null, claimExistingFreshBox: true);
+    True(prepared.KeyringClaimed, "a prepared scope is allowed to launch");
+    Equal(0, backend.ShimCalls);
+
+    // Without the log evidence the instance is stopped instead of trusted.
+    await ThrowsAsync<HubException>(() => launcher.LaunchAsync(id));
+    Equal(1, backend.LaunchCalls);
+    True(backend.ListPids(IsolatedProfileLauncher.BoxNameFor(id)).Count == 0,
+        "an unverified instance must be terminated, not left running");
+}
+
 static async Task TestIsolationStateValidationAsync()
 {
     using var fixture = new Fixture();
@@ -321,7 +354,7 @@ static async Task TestIsolationStateValidationAsync()
         """;
     File.WriteAllText(fixture.Paths.IsolationStateFile, corrupt);
     var launcher = new IsolatedProfileLauncher(fixture.Paths, new FakeDriver(fixture.Paths, fixture.Executable),
-        fixture.Repository, () => new FakeIsolationBackend());
+        fixture.Repository, _ => new FakeIsolationBackend());
     await ThrowsAsync<ConfigurationException>(() => launcher.FindAsync(idA));
     Equal(corrupt, File.ReadAllText(fixture.Paths.IsolationStateFile));
 }

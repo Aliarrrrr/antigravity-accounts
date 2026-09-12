@@ -24,18 +24,20 @@ public sealed class IsolationSetup
 {
     private readonly IProfileIsolation _isolation;
     private readonly IElevationBridge _elevation;
-    private readonly Func<IIsolationBackend?> _backendFactory;
+    private readonly Func<IsolationBackendKind, IIsolationBackend?> _backendFactory;
 
-    public IsolationSetup(IProfileIsolation isolation, IElevationBridge elevation, Func<IIsolationBackend?> backendFactory)
+    public IsolationSetup(IProfileIsolation isolation, IElevationBridge elevation,
+        Func<IsolationBackendKind, IIsolationBackend?> backendFactory)
     {
         _isolation = isolation;
         _elevation = elevation;
         _backendFactory = backendFactory;
     }
 
-    public async Task<IsolationStage> DetectAsync(Guid profileId, string? workspacePath = null, CancellationToken cancellationToken = default)
+    public async Task<IsolationStage> DetectAsync(Guid profileId, IsolationBackendKind kind,
+        string? workspacePath = null, CancellationToken cancellationToken = default)
     {
-        var backend = _backendFactory();
+        var backend = _backendFactory(kind);
         if (backend is null) return IsolationStage.BackendUnavailable;
         var record = await _isolation.FindAsync(profileId, cancellationToken).ConfigureAwait(false);
         if (record is null) return IsolationStage.BoxMissing;
@@ -47,12 +49,14 @@ public sealed class IsolationSetup
         return IsolationStage.Ready;
     }
 
-    public async Task<IsolationSetupReport> EnsureReadyAsync(Guid profileId, bool allowFreshBox,
+    public async Task<IsolationSetupReport> EnsureReadyAsync(Guid profileId, IsolationBackendKind kind, bool allowFreshBox,
         string? workspacePath = null, CancellationToken cancellationToken = default)
     {
         var steps = new List<SetupStep>();
-        var backend = _backendFactory()
-            ?? throw new UnsupportedCapabilityException("Sandboxie Plus was not found. Isolation setup requires it.");
+        var backend = _backendFactory(kind)
+            ?? throw new UnsupportedCapabilityException(kind == IsolationBackendKind.Sandboxie
+                ? "Sandboxie Plus was not found. Isolation setup requires it."
+                : "The process-local isolation backend could not be created.");
 
         var record = await _isolation.FindAsync(profileId, cancellationToken).ConfigureAwait(false);
         var boxName = record?.BoxName ?? IsolatedProfileLauncher.BoxNameFor(profileId);
@@ -60,25 +64,36 @@ public sealed class IsolationSetup
 
         if (!boxPreExisted)
         {
-            var created = await _elevation.RunAsync(new ElevationRequest(AdminOperation.CreateBox, boxName, []), cancellationToken).ConfigureAwait(false);
-            if (!created.Succeeded)
-                throw new HubException($"Isolation box '{boxName}' could not be created: {created.Detail}", "sandbox_create_failed");
-            if (!backend.BoxExists(boxName))
-                throw new HubException($"Isolation box '{boxName}' is still missing after the elevated step.", "sandbox_create_failed");
-            steps.Add(new SetupStep(IsolationStage.BoxMissing, true, $"Created isolation box {boxName}."));
+            if (kind == IsolationBackendKind.Sandboxie)
+            {
+                var created = await _elevation.RunAsync(new ElevationRequest(AdminOperation.CreateBox, boxName, []), cancellationToken).ConfigureAwait(false);
+                if (!created.Succeeded)
+                    throw new HubException($"Isolation box '{boxName}' could not be created: {created.Detail}", "sandbox_create_failed");
+                if (!backend.BoxExists(boxName))
+                    throw new HubException($"Isolation box '{boxName}' is still missing after the elevated step.", "sandbox_create_failed");
+            }
+            else
+            {
+                // The process-local scope is a directory tree the Hub owns, so it
+                // needs no elevation and no system-wide configuration at all.
+                backend.CreateBox(boxName);
+                if (!backend.BoxExists(boxName))
+                    throw new HubException($"Isolation scope '{boxName}' could not be created.", "isolation_scope_create_failed");
+            }
+            steps.Add(new SetupStep(IsolationStage.BoxMissing, true, $"Created isolation scope {boxName}."));
         }
         else
         {
             steps.Add(new SetupStep(IsolationStage.BoxMissing, false, null));
         }
 
-        // A box we just created is necessarily fresh; taking over one that
+        // A scope we just created is necessarily fresh; taking over one that
         // pre-existed still needs an explicit acknowledgement from the user.
         var claimFresh = record is null && (allowFreshBox || !boxPreExisted);
         if (record is null || !record.KeyringClaimed)
         {
             var prepared = await _isolation.PrepareAsync(profileId, record?.BoxName, claimExistingFreshBox: claimFresh, cancellationToken).ConfigureAwait(false);
-            steps.Add(new SetupStep(IsolationStage.KeyringPending, true, $"Registered box {prepared.BoxName} and claimed the keyring entry."));
+            steps.Add(new SetupStep(IsolationStage.KeyringPending, true, $"Registered {prepared.BoxName} and prepared its isolation."));
         }
         else
         {
@@ -99,7 +114,7 @@ public sealed class IsolationSetup
             steps.Add(new SetupStep(IsolationStage.WriteThroughMissing, false, null));
         }
 
-        var stage = await DetectAsync(profileId, workspacePath, cancellationToken).ConfigureAwait(false);
+        var stage = await DetectAsync(profileId, kind, workspacePath, cancellationToken).ConfigureAwait(false);
         return new IsolationSetupReport(profileId, stage, steps, stage == IsolationStage.Ready);
     }
 }

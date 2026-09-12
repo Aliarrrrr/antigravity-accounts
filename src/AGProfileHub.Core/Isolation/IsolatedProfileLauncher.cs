@@ -36,22 +36,35 @@ public interface IProfileIsolation
 public sealed class IsolatedProfileLauncher : IProfileIsolation
 {
     private static readonly TimeSpan LockTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan DefaultScopeVerificationTimeout = TimeSpan.FromSeconds(15);
+
+    /// <summary>
+    /// The language server announces its credential-store choice with this
+    /// phrase. It is the only first-hand evidence that an instance moved off the
+    /// Windows user's shared credential entry, so a process-local launch that
+    /// never prints it is treated as unisolated.
+    /// </summary>
+    private const string FileTokenStoreMarker = "Using file-based token storage";
+
     private readonly HubPaths _paths;
     private readonly IAntigravityDriver _driver;
     private readonly ConfigRepository _repository;
-    private readonly Func<IIsolationBackend?> _backendFactory;
+    private readonly Func<IsolationBackendKind, IIsolationBackend?> _backendFactory;
     private readonly Func<(string Executable, IReadOnlyList<string> Arguments)> _shimCommandFactory;
+    private readonly TimeSpan _scopeVerificationTimeout;
     private readonly AtomicJsonStore _json;
 
     public IsolatedProfileLauncher(HubPaths paths, IAntigravityDriver driver, ConfigRepository repository,
-        Func<IIsolationBackend?>? backendFactory = null,
-        Func<(string Executable, IReadOnlyList<string> Arguments)>? shimCommandFactory = null)
+        Func<IsolationBackendKind, IIsolationBackend?>? backendFactory = null,
+        Func<(string Executable, IReadOnlyList<string> Arguments)>? shimCommandFactory = null,
+        TimeSpan? scopeVerificationTimeout = null)
     {
         _paths = paths;
         _driver = driver;
         _repository = repository;
-        _backendFactory = backendFactory ?? (() => SandboxieBackend.TryDiscover());
+        _backendFactory = backendFactory ?? (kind => IsolationBackends.TryCreate(paths, kind));
         _shimCommandFactory = shimCommandFactory ?? FindShimCommand;
+        _scopeVerificationTimeout = scopeVerificationTimeout ?? DefaultScopeVerificationTimeout;
         _json = new AtomicJsonStore(paths.DataRoot);
     }
 
@@ -59,9 +72,28 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
     // boxes can still be attached explicitly after a fresh-box acknowledgement.
     public static string BoxNameFor(Guid profileId) => "AGPH_" + profileId.ToString("N");
 
-    private IIsolationBackend RequireBackend() =>
-        _backendFactory()
-        ?? throw new HubException("Sandboxie Plus was not found. Isolation-scoped launch requires it.", "sandbox_not_found");
+    /// <summary>The backend this Profile runs under, recorded when it was created.</summary>
+    /// <remarks>
+    /// An unregistered Profile falls back to the historical default rather than
+    /// failing: profiles created before the backend existed have no field, and
+    /// isolation state may legitimately outlive a Profile record. A live Profile
+    /// always reaches this method already resolved by the service layer.
+    /// </remarks>
+    private async Task<IsolationBackendKind> KindAsync(Guid profileId, CancellationToken cancellationToken)
+    {
+        var document = await _repository.ReadProfilesAsync(cancellationToken).ConfigureAwait(false);
+        var registered = document.Profiles.FirstOrDefault(p => p.Id == profileId);
+        return registered is null || !Enum.IsDefined(registered.Backend)
+            ? IsolationBackendKind.Sandboxie
+            : registered.Backend;
+    }
+
+    private IIsolationBackend RequireBackend(IsolationBackendKind kind) =>
+        _backendFactory(kind) ?? throw new HubException(
+            kind == IsolationBackendKind.Sandboxie
+                ? "Sandboxie Plus was not found. Isolation-scoped launch requires it."
+                : "The process-local isolation backend could not be created.",
+            kind == IsolationBackendKind.Sandboxie ? "sandbox_not_found" : "isolation_backend_unavailable");
 
     public async Task<IsolationBoxRecord?> FindAsync(Guid profileId, CancellationToken cancellationToken = default)
     {
@@ -78,7 +110,8 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
         bool claimExistingFreshBox = false, CancellationToken cancellationToken = default)
     {
         if (profileId == Guid.Empty) throw new ConfigurationException("Profile ID cannot be empty.");
-        var backend = RequireBackend();
+        var kind = await KindAsync(profileId, cancellationToken).ConfigureAwait(false);
+        var backend = RequireBackend(kind);
         var requestedName = string.IsNullOrWhiteSpace(explicitBoxName) ? BoxNameFor(profileId) : explicitBoxName.Trim();
         ValidateBoxName(requestedName);
 
@@ -100,7 +133,7 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
                 backend.CreateBox(boxName);
                 boxCreated = true;
             }
-            catch (HubException ex)
+            catch (HubException ex) when (kind == IsolationBackendKind.Sandboxie)
             {
                 throw new HubException(
                     $"{ex.Message} Sandboxie stores configuration system-wide, so box setup needs elevation once. " +
@@ -127,9 +160,16 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
         var shimExit = 0;
         if (!record.KeyringClaimed)
         {
-            shimExit = RunKeyringShim(backend, boxName);
-            if (shimExit != 11)
-                throw new HubException($"The isolation keyring shim exited with {shimExit}; the box was not marked safe.", "keyring_shim_failed");
+            // The sandbox backend isolates credentials by making its box own a
+            // same-named entry, which the shim claims. The process-local backend
+            // claims nothing: the instance keeps its token in its own home, and
+            // the launch verifies that before the scope is trusted.
+            if (kind == IsolationBackendKind.Sandboxie)
+            {
+                shimExit = RunKeyringShim(backend, boxName);
+                if (shimExit != 11)
+                    throw new HubException($"The isolation keyring shim exited with {shimExit}; the box was not marked safe.", "keyring_shim_failed");
+            }
             record = record with { KeyringClaimed = true };
             document = document with
             {
@@ -195,10 +235,11 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
 
     private async Task<IsolationLaunchResult> LaunchCoreAsync(Guid profileId, CancellationToken cancellationToken)
     {
-        var backend = RequireBackend();
+        var kind = await KindAsync(profileId, cancellationToken).ConfigureAwait(false);
+        var backend = RequireBackend(kind);
         var record = await FindAsync(profileId, cancellationToken).ConfigureAwait(false)
-            ?? throw new HubException("This profile has no isolation box yet. Run iso-prepare first.", "isolation_not_prepared");
-        EnsureLaunchReady(backend, record);
+            ?? throw new HubException("This profile has no isolation scope yet. Run iso-prepare first.", "isolation_not_prepared");
+        EnsureLaunchReady(kind, backend, record);
 
         if (HasVendorProcess(backend, record.BoxName))
         {
@@ -206,17 +247,80 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
             return new IsolationLaunchResult(profileId, record.BoxName, running, false);
         }
 
+        // Only the part of the log this launch appends to counts; earlier runs
+        // prove nothing about this one.
+        var storeLogFloor = kind == IsolationBackendKind.ProcessLocal ? LogLength(StoreLogPath(profileId)) : 0;
+
         var installation = await _driver.DiscoverAsync(cancellationToken).ConfigureAwait(false);
-        var plan = _driver.BuildLaunchPlan(installation, profileId);
+        var plan = _driver.BuildLaunchPlan(installation, profileId, kind);
         backend.LaunchDetached(record.BoxName, plan.ExecutablePath, plan.Arguments, plan.Environment);
 
         for (var attempt = 0; attempt < 10; attempt++)
         {
             await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
             var pids = backend.ListPids(record.BoxName);
-            if (pids.Count > 0) return new IsolationLaunchResult(profileId, record.BoxName, pids, true);
+            if (pids.Count == 0) continue;
+            if (kind == IsolationBackendKind.ProcessLocal)
+                await RequireFileTokenStoreAsync(profileId, backend, record.BoxName, storeLogFloor, cancellationToken).ConfigureAwait(false);
+            return new IsolationLaunchResult(profileId, record.BoxName, pids, true);
         }
-        throw new LaunchStateUncertainException("The isolation launcher exited but no process appeared in the expected box.");
+        throw new LaunchStateUncertainException("The isolation launcher exited but no process appeared in the expected scope.");
+    }
+
+    /// <summary>Where the desktop writes the language server's own log.</summary>
+    private string StoreLogPath(Guid profileId) =>
+        Path.Combine(_paths.UserData(profileId), "logs", "language_server.log");
+
+    private static long LogLength(string path)
+    {
+        try { return File.Exists(path) ? new FileInfo(path).Length : 0; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return 0; }
+    }
+
+    /// <summary>
+    /// Fails closed unless the instance proves it moved to its own token file.
+    /// </summary>
+    /// <remarks>
+    /// Without a sandbox nothing else stops an instance from reading the Windows
+    /// user's shared credential entry, and a shared entry means the most recent
+    /// sign-in wins for every Profile. An unverified instance is stopped rather
+    /// than left running next to the others.
+    /// </remarks>
+    private async Task RequireFileTokenStoreAsync(Guid profileId, IIsolationBackend backend, string scopeName,
+        long logFloor, CancellationToken cancellationToken)
+    {
+        var logPath = StoreLogPath(profileId);
+        var deadline = DateTimeOffset.UtcNow + _scopeVerificationTimeout;
+        while (true)
+        {
+            if (await LogContainsAsync(logPath, logFloor, FileTokenStoreMarker, cancellationToken).ConfigureAwait(false)) return;
+            if (DateTimeOffset.UtcNow >= deadline) break;
+            await Task.Delay(250, cancellationToken).ConfigureAwait(false);
+        }
+
+        backend.Terminate(scopeName);
+        throw new HubException(
+            $"Profile {profileId:D} did not switch to its own token file, so it could have used the Windows user's shared credential entry. " +
+            $"The instance was stopped. Expected '{FileTokenStoreMarker}' in {logPath}.",
+            "isolation_scope_unverified");
+    }
+
+    private static async Task<bool> LogContainsAsync(string path, long floor, string marker, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!File.Exists(path)) return false;
+            await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            if (stream.Length <= floor) return false;
+            stream.Seek(floor, SeekOrigin.Begin);
+            using var reader = new StreamReader(stream);
+            var text = await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+            return text.Contains(marker, StringComparison.Ordinal);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -253,7 +357,7 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
 
     private async Task<bool> StopCoreAsync(Guid profileId, CancellationToken cancellationToken)
     {
-        var backend = RequireBackend();
+        var backend = RequireBackend(await KindAsync(profileId, cancellationToken).ConfigureAwait(false));
         var record = await FindAsync(profileId, cancellationToken).ConfigureAwait(false);
         if (record is null) return false;
         if (!backend.BoxExists(record.BoxName))
@@ -282,7 +386,7 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
         var record = await FindAsync(profileId, cancellationToken).ConfigureAwait(false);
         if (record is null) return null;
         var expected = WriteThroughPaths(profileId, workspacePath);
-        var backend = _backendFactory();
+        var backend = _backendFactory(await KindAsync(profileId, cancellationToken).ConfigureAwait(false));
         if (backend is null)
             return new IsolationRuntimeStatus(profileId, record.BoxName, false, false, record.KeyringClaimed, 0, false, expected);
         var exists = backend.BoxExists(record.BoxName);
@@ -360,10 +464,14 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
             throw new ConfigurationException("Isolation box names may contain only 1-64 ASCII letters, digits, or underscores.", "isolation_box_name_invalid");
     }
 
-    private static void EnsureLaunchReady(IIsolationBackend backend, IsolationBoxRecord record)
+    private static void EnsureLaunchReady(IsolationBackendKind kind, IIsolationBackend backend, IsolationBoxRecord record)
     {
         if (!record.KeyringClaimed)
-            throw new HubException("The isolation box has not claimed its keyring entry; refusing an unsafe launch.", "keyring_not_claimed");
+            throw new HubException(
+                kind == IsolationBackendKind.Sandboxie
+                    ? "The isolation box has not claimed its keyring entry; refusing an unsafe launch."
+                    : "The isolation scope has not been prepared; refusing an unsafe launch.",
+                "keyring_not_claimed");
         if (!backend.BoxExists(record.BoxName))
             throw new HubException($"Isolation box '{record.BoxName}' is missing; rerun iso-prepare before launching.", "isolation_box_missing");
     }
