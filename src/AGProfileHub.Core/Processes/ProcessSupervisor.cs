@@ -43,7 +43,10 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
     private async Task<LaunchResult> LaunchCoreAsync(Guid id, AntigravityInstallation installation, CancellationToken cancellationToken)
     {
         var profile = await profiles.GetAsync(id, cancellationToken).ConfigureAwait(false);
-        var plan = driver.BuildLaunchPlan(installation, id);
+        // The legacy direct path deliberately uses the plain plan: no
+        // process-local token-store hint, so direct instances keep their
+        // documented shared-credential behavior.
+        var plan = driver.BuildLaunchPlan(installation, id, IsolationBackendKind.Sandboxie);
         await ReconcileLaunchBarrierAsync(installation, cancellationToken).ConfigureAwait(false);
         var snapshots = await catalog.SnapshotAsync(installation.ExecutablePath, cancellationToken).ConfigureAwait(false);
         var status = await ownership.ResolveAsync(profile, installation, snapshots, cancellationToken).ConfigureAwait(false);

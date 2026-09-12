@@ -8,7 +8,7 @@ public interface IAntigravityDriver
 {
     Task<AntigravityInstallation> DiscoverAsync(CancellationToken cancellationToken = default);
     LaunchPlan BuildLaunchPlan(AntigravityInstallation installation, Guid profileId,
-        IsolationBackendKind backend = IsolationBackendKind.Sandboxie);
+        IsolationBackendKind backend);
 }
 
 public sealed class AntigravityDriver(HubPaths paths, ConfigRepository repository) : IAntigravityDriver
@@ -60,7 +60,7 @@ public sealed class AntigravityDriver(HubPaths paths, ConfigRepository repositor
     /// credential scope, so its launch plan must stay exactly as it was.
     /// </param>
     public LaunchPlan BuildLaunchPlan(AntigravityInstallation installation, Guid profileId,
-        IsolationBackendKind backend = IsolationBackendKind.Sandboxie)
+        IsolationBackendKind backend)
     {
         if (!installation.IsKnownCompatible) throw new HubException(installation.CompatibilityDetail, "version_unverified");
         paths.EnsureProfileLayout(profileId);

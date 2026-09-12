@@ -92,9 +92,9 @@ static async Task TestIsolationSetupAsync()
 static async Task TestProfileResolveAsync()
 {
     using var fixture = new Fixture();
-    var alpha = await fixture.Profiles.CreateAsync("Work Alpha");
-    var beta = await fixture.Profiles.CreateAsync("Work Beta");
-    var personal = await fixture.Profiles.CreateAsync("Personal");
+    var alpha = await fixture.Profiles.CreateAsync("Work Alpha", null, IsolationBackendKind.ProcessLocal);
+    var beta = await fixture.Profiles.CreateAsync("Work Beta", null, IsolationBackendKind.ProcessLocal);
+    var personal = await fixture.Profiles.CreateAsync("Personal", null, IsolationBackendKind.ProcessLocal);
 
     Equal(alpha.Id, (await fixture.Profiles.ResolveAsync(alpha.Id.ToString("D"))).Id);
     Equal(beta.Id, (await fixture.Profiles.ResolveAsync("work beta")).Id);
@@ -314,7 +314,7 @@ static Task TestProcessLocalLaunchPlanAsync()
 
     // The sandbox plan must not gain anything: that path already owns a private
     // credential scope, so its launch stays byte-for-byte what it was.
-    var sandboxed = driver.BuildLaunchPlan(installation, id);
+    var sandboxed = driver.BuildLaunchPlan(installation, id, IsolationBackendKind.Sandboxie);
     True(!sandboxed.Environment.ContainsKey("WSL_DISTRO_NAME"), "sandbox launches must not carry the process-local detector");
     Equal(1, sandboxed.Arguments.Count);
 
@@ -418,7 +418,7 @@ static Task TestLaunchPlanAsync()
 {
     using var fixture = new Fixture();
     var driver = new AntigravityDriver(fixture.Paths, fixture.Repository);
-    var plan = driver.BuildLaunchPlan(new AntigravityInstallation(fixture.Executable, "2.12.2", true, "test"), Guid.NewGuid());
+    var plan = driver.BuildLaunchPlan(new AntigravityInstallation(fixture.Executable, "2.12.2", true, "test"), Guid.NewGuid(), IsolationBackendKind.Sandboxie);
     True(plan.Arguments.Single().StartsWith("--user-data-dir=", StringComparison.Ordinal));
     True(plan.Environment["USERPROFILE"].EndsWith("home", StringComparison.OrdinalIgnoreCase));
     True(plan.Environment["HOMEPATH"].StartsWith('\\'));
@@ -697,7 +697,7 @@ static Task TestUnknownVersionAsync()
     using var fixture = new Fixture();
     var id = Guid.NewGuid();
     var driver = new AntigravityDriver(fixture.Paths, fixture.Repository);
-    Throws<HubException>(() => driver.BuildLaunchPlan(new AntigravityInstallation(fixture.Executable, "99.0.0", false, "Unverified version"), id));
+    Throws<HubException>(() => driver.BuildLaunchPlan(new AntigravityInstallation(fixture.Executable, "99.0.0", false, "Unverified version"), id, IsolationBackendKind.ProcessLocal));
     True(!Directory.Exists(fixture.Paths.ProfileRoot(id)), "unsupported version must not mutate profile data");
     return Task.CompletedTask;
 }
@@ -811,7 +811,7 @@ sealed class FakeDriver(HubPaths paths, string executable) : IAntigravityDriver
 {
     public Task<AntigravityInstallation> DiscoverAsync(CancellationToken cancellationToken = default) => Task.FromResult(new AntigravityInstallation(executable, "2.12.2", true, "test"));
     public LaunchPlan BuildLaunchPlan(AntigravityInstallation installation, Guid profileId,
-        IsolationBackendKind backend = IsolationBackendKind.Sandboxie)
+        IsolationBackendKind backend)
     {
         paths.EnsureProfileLayout(profileId);
         return new LaunchPlan(executable, "2.12.2", [$"--user-data-dir={paths.UserData(profileId)}"], new Dictionary<string, string>(), "fake --user-data-dir=<managed>");

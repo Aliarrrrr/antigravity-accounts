@@ -366,9 +366,6 @@ internal static class CliApplication
         return found;
     }
 
-    private static Guid ParseId(string value) => Guid.TryParse(value, out var id) && id != Guid.Empty
-        ? id : throw new UsageException($"Invalid profile ID '{value}'. Expected a UUID.");
-
     private static IsolationBackendKind ParseBackend(string value) => value.Trim().ToLowerInvariant() switch
     {
         "sandboxie" or "sandbox" => IsolationBackendKind.Sandboxie,

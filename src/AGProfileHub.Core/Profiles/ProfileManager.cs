@@ -39,8 +39,8 @@ public sealed class ProfileManager(ConfigRepository repository, HubPaths paths)
         throw new HubException($"'{term}' matches multiple profiles: {listed}. Use more characters or the UUID.", "profile_name_ambiguous");
     }
 
-    public async Task<ProfileRegistration> CreateAsync(string name, string? workspacePath = null,
-        IsolationBackendKind backend = IsolationBackendKind.Sandboxie, CancellationToken cancellationToken = default)
+    public async Task<ProfileRegistration> CreateAsync(string name, string? workspacePath,
+        IsolationBackendKind backend, CancellationToken cancellationToken = default)
     {
         name = ValidateName(name);
         workspacePath = ValidateWorkspace(workspacePath);
