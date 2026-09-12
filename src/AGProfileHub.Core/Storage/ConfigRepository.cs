@@ -75,7 +75,8 @@ public sealed class ConfigRepository
         if (File.Exists(path)) File.Delete(path);
     }
     internal Task<FileLock> LockProfileAsync(Guid id, CancellationToken cancellationToken) => FileLock.AcquireAsync(_paths.ProfileLock(id), LockTimeout, cancellationToken);
-    internal Task<FileLock> LockLaunchAsync(CancellationToken cancellationToken) => FileLock.AcquireAsync(_paths.GlobalLaunchLock, LockTimeout, cancellationToken);
+    internal Task<FileLock> LockLaunchAsync(CancellationToken cancellationToken, TimeSpan? timeout = null) =>
+        FileLock.AcquireAsync(_paths.GlobalLaunchLock, timeout ?? LockTimeout, cancellationToken);
     internal async Task<LaunchBarrierRecord?> ReadLaunchBarrierAsync(CancellationToken cancellationToken)
     {
         if (!File.Exists(_paths.LaunchBarrierFile)) return null;

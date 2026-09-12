@@ -35,6 +35,10 @@ public interface IProfileIsolation
 public sealed class IsolatedProfileLauncher : IProfileIsolation
 {
     private static readonly TimeSpan LockTimeout = TimeSpan.FromSeconds(10);
+    // Launch holds the global launch lock through discovery (60 s) and scope
+    // verification (120 s); contenders must wait longer than the worst case
+    // instead of failing with a misleading lock timeout.
+    private static readonly TimeSpan LaunchLockTimeout = TimeSpan.FromMinutes(4);
     private static readonly TimeSpan DefaultScopeVerificationTimeout = TimeSpan.FromSeconds(120);
 
     /// <summary>
@@ -143,7 +147,7 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
 
     public async Task<IsolationLaunchResult> LaunchAsync(Guid profileId, CancellationToken cancellationToken = default)
     {
-        await using var launchHeld = await _repository.LockLaunchAsync(cancellationToken).ConfigureAwait(false);
+        await using var launchHeld = await _repository.LockLaunchAsync(cancellationToken, LaunchLockTimeout).ConfigureAwait(false);
         await using var profileHeld = await _repository.LockProfileAsync(profileId, cancellationToken).ConfigureAwait(false);
         return await LaunchCoreAsync(profileId, cancellationToken).ConfigureAwait(false);
     }
@@ -279,7 +283,7 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
 
     public async Task<bool> StopAsync(Guid profileId, CancellationToken cancellationToken = default)
     {
-        await using var launchHeld = await _repository.LockLaunchAsync(cancellationToken).ConfigureAwait(false);
+        await using var launchHeld = await _repository.LockLaunchAsync(cancellationToken, LaunchLockTimeout).ConfigureAwait(false);
         await using var profileHeld = await _repository.LockProfileAsync(profileId, cancellationToken).ConfigureAwait(false);
         return await StopCoreAsync(profileId, cancellationToken).ConfigureAwait(false);
     }
@@ -305,7 +309,7 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
 
     public async Task<IsolationLaunchResult> RestartAsync(Guid profileId, CancellationToken cancellationToken = default)
     {
-        await using var launchHeld = await _repository.LockLaunchAsync(cancellationToken).ConfigureAwait(false);
+        await using var launchHeld = await _repository.LockLaunchAsync(cancellationToken, LaunchLockTimeout).ConfigureAwait(false);
         await using var profileHeld = await _repository.LockProfileAsync(profileId, cancellationToken).ConfigureAwait(false);
         await StopCoreAsync(profileId, cancellationToken).ConfigureAwait(false);
         return await LaunchCoreAsync(profileId, cancellationToken).ConfigureAwait(false);
