@@ -4,6 +4,7 @@
     <!-- Design tokens -->
     <Color x:Key="ColorSurface">#FFFFFF</Color>
     <Color x:Key="ColorSurfaceAlt">#F4F5F7</Color>
+    <Color x:Key="ColorSurfaceSubtle">#FAFBFC</Color>
     <Color x:Key="ColorCard">#FFFFFF</Color>
     <Color x:Key="ColorBorder">#E0E3E8</Color>
     <Color x:Key="ColorTextPrimary">#1C1F24</Color>
@@ -14,6 +15,7 @@
     <Color x:Key="ColorSuccessBg">#E1F1E8</Color>
     <Color x:Key="ColorWarning">#8A6100</Color>
     <Color x:Key="ColorWarningBg">#FBF0D3</Color>
+    <Color x:Key="ColorWarningBorder">#E7C46A</Color>
     <Color x:Key="ColorDanger">#B83227</Color>
     <Color x:Key="ColorDangerBg">#F9E5E2</Color>
     <Color x:Key="ColorInfo">#1D5FA8</Color>
@@ -21,6 +23,7 @@
 
     <SolidColorBrush x:Key="Brush.Surface" Color="{StaticResource ColorSurface}"/>
     <SolidColorBrush x:Key="Brush.SurfaceAlt" Color="{StaticResource ColorSurfaceAlt}"/>
+    <SolidColorBrush x:Key="Brush.SurfaceSubtle" Color="{StaticResource ColorSurfaceSubtle}"/>
     <SolidColorBrush x:Key="Brush.Card" Color="{StaticResource ColorCard}"/>
     <SolidColorBrush x:Key="Brush.Border" Color="{StaticResource ColorBorder}"/>
     <SolidColorBrush x:Key="Brush.TextPrimary" Color="{StaticResource ColorTextPrimary}"/>
@@ -31,6 +34,7 @@
     <SolidColorBrush x:Key="Brush.SuccessBg" Color="{StaticResource ColorSuccessBg}"/>
     <SolidColorBrush x:Key="Brush.Warning" Color="{StaticResource ColorWarning}"/>
     <SolidColorBrush x:Key="Brush.WarningBg" Color="{StaticResource ColorWarningBg}"/>
+    <SolidColorBrush x:Key="Brush.WarningBorder" Color="{StaticResource ColorWarningBorder}"/>
     <SolidColorBrush x:Key="Brush.Danger" Color="{StaticResource ColorDanger}"/>
     <SolidColorBrush x:Key="Brush.DangerBg" Color="{StaticResource ColorDangerBg}"/>
     <SolidColorBrush x:Key="Brush.Info" Color="{StaticResource ColorInfo}"/>
@@ -161,12 +165,13 @@
         <Setter Property="HorizontalGridLinesBrush" Value="{StaticResource Brush.Border}"/>
         <Setter Property="VerticalGridLinesBrush" Value="Transparent"/>
         <Setter Property="RowBackground" Value="Transparent"/>
-        <Setter Property="AlternatingRowBackground" Value="#FAFBFC"/>
+        <Setter Property="AlternatingRowBackground" Value="{StaticResource Brush.SurfaceSubtle}"/>
         <Setter Property="HeadersVisibility" Value="Column"/>
         <Setter Property="CanUserAddRows" Value="False"/>
         <Setter Property="IsReadOnly" Value="True"/>
         <Setter Property="SelectionMode" Value="Single"/>
-        <Setter Property="RowHeight" Value="48"/>
+        <!-- Minimum only: rows grow with wrapped detail text instead of clipping it. -->
+        <Setter Property="MinRowHeight" Value="48"/>
         <Setter Property="ColumnHeaderStyle">
             <Setter.Value>
                 <Style TargetType="DataGridColumnHeader">
@@ -184,7 +189,6 @@
                 <Style TargetType="DataGridCell">
                     <Setter Property="BorderThickness" Value="0"/>
                     <Setter Property="Padding" Value="8,4"/>
-                    <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
                     <Style.Triggers>
                         <Trigger Property="IsSelected" Value="True">
                             <Setter Property="Background" Value="{StaticResource Brush.InfoBg}"/>

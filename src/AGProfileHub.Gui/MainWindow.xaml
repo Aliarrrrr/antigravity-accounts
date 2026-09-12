@@ -21,7 +21,9 @@
         <Border Grid.Row="0" Padding="20,18,20,14">
             <DockPanel>
                 <TextBlock x:Name="DataRootText" DockPanel.Dock="Right"
-                           Style="{StaticResource SecondaryText}" VerticalAlignment="Center"/>
+                           Style="{StaticResource SecondaryText}" VerticalAlignment="Center"
+                           MaxWidth="340" TextTrimming="CharacterEllipsis"
+                           ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
                 <StackPanel Orientation="Horizontal">
                     <Border Width="32" Height="32" CornerRadius="8"
                             Background="{StaticResource Brush.Accent}" VerticalAlignment="Center">
@@ -41,7 +43,7 @@
         <!-- Info bar -->
         <Border x:Name="InfoBar" Grid.Row="1" Margin="20,0,20,12"
                 Style="{StaticResource InfoBar}"
-                Background="{StaticResource Brush.WarningBg}" BorderBrush="#E7C46A"
+                Background="{StaticResource Brush.WarningBg}" BorderBrush="{StaticResource Brush.WarningBorder}"
                 Visibility="Collapsed">
             <DockPanel>
                 <Button DockPanel.Dock="Right" Content="✕" Click="DismissInfo_Click"
@@ -125,7 +127,9 @@
                                     <Button Content="{Binding PrimaryActionText}" Tag="{Binding ProfileId}"
                                             Click="PrimaryAction_Click" Style="{StaticResource CompactAccentButton}"/>
                                     <Button Content="⋯" Tag="{Binding ProfileId}" Click="Menu_Click"
-                                            Style="{StaticResource CompactButton}" Margin="6,0,0,0" Padding="8,4">
+                                            Style="{StaticResource CompactButton}" Margin="6,0,0,0" Padding="8,4"
+                                            AutomationProperties.Name="Profile actions"
+                                            ToolTip="More actions for this profile">
                                         <Button.ContextMenu>
                                             <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                                                 <MenuItem Header="Launch" Tag="{Binding ProfileId}" Click="Launch_Click"/>

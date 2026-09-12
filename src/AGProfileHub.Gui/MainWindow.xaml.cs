@@ -20,6 +20,9 @@ public partial class MainWindow : Window
     public MainWindow(string? dataRoot)
     {
         _service = HubBootstrap.CreateDefault(dataRoot);
+        // The version is part of the window identity: the product refuses to run
+        // against unverified Antigravity versions, so reports must name it.
+        Title = $"Antigravity Profile Hub {HubVersion.InformationalVersion}";
         InitializeComponent();
         ProfilesGrid.ItemsSource = _rows;
         DataRootText.Text = _service.DataRoot;
@@ -62,22 +65,60 @@ public partial class MainWindow : Window
             "Launch all requires every Profile to have a prepared isolation scope.";
         EmptyState.Visibility = _rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         ProfilesGrid.Visibility = _rows.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-        var needsFix = _rows.Count(row => row.NeedsFix);
-        if (needsFix > 0)
+
+        var needsFixIds = new HashSet<Guid>(_rows.Where(row => row.NeedsFix).Select(row => row.ProfileId));
+        var deeplinkHintDue = needsFixIds.Count == 0 && _rows.Count >= 2 &&
+            !_deeplinkHintDismissed && !_service.IsDeepLinkRegistered;
+        // A dismissal only sticks while the situation it described is unchanged:
+        // a different set of profiles needing fix, or a second profile joining
+        // without callback routing, must surface the bar again.
+        var fixSetChanged = needsFixIds.Count > 0 &&
+            (_dismissedNeedsFix is null || !needsFixIds.SetEquals(_dismissedNeedsFix));
+        if (needsFixIds.Count > 0 && (!_infoBarDismissed || fixSetChanged))
         {
-            InfoText.Text = needsFix == 1
+            InfoText.Text = needsFixIds.Count == 1
                 ? "1 profile has incomplete isolation. Use ⋯ → Fix isolation to repair it with one click."
-                : $"{needsFix} profiles have incomplete isolation. Use ⋯ → Fix isolation on each to repair it.";
+                : $"{needsFixIds.Count} profiles have incomplete isolation. Use ⋯ → Fix isolation on each to repair it.";
             InfoBar.Visibility = Visibility.Visible;
+            _infoMode = InfoMode.Fix;
+            _infoBarDismissed = false;
+            _dismissedNeedsFix = null;
+        }
+        else if (deeplinkHintDue)
+        {
+            InfoText.Text = "Two or more profiles can sign in at the same time. Register the callback routing once " +
+                "with the Callbacks button so concurrent logins reach the right window; the previous handler stays restorable.";
+            InfoBar.Visibility = Visibility.Visible;
+            _infoMode = InfoMode.Deeplink;
         }
         else
         {
             InfoBar.Visibility = Visibility.Collapsed;
+            _infoMode = InfoMode.None;
+            if (needsFixIds.Count == 0) { _infoBarDismissed = false; _dismissedNeedsFix = null; }
         }
         StatusText.Text = $"{_rows.Count} profile(s)";
     }
 
-    private void DismissInfo_Click(object sender, RoutedEventArgs e) => InfoBar.Visibility = Visibility.Collapsed;
+    private enum InfoMode { None, Fix, Deeplink }
+    private InfoMode _infoMode;
+    private bool _infoBarDismissed;
+    private HashSet<Guid>? _dismissedNeedsFix;
+    private bool _deeplinkHintDismissed;
+
+    private void DismissInfo_Click(object sender, RoutedEventArgs e)
+    {
+        if (_infoMode == InfoMode.Fix)
+        {
+            _infoBarDismissed = true;
+            _dismissedNeedsFix = new HashSet<Guid>(_rows.Where(row => row.NeedsFix).Select(row => row.ProfileId));
+        }
+        else if (_infoMode == InfoMode.Deeplink)
+        {
+            _deeplinkHintDismissed = true;
+        }
+        InfoBar.Visibility = Visibility.Collapsed;
+    }
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RunAsync(RefreshAsync);
 
@@ -326,13 +367,20 @@ public partial class MainWindow : Window
 
     private async Task RunAsync(Func<Task> action)
     {
-        if (_busy) return;
+        if (_busy)
+        {
+            // A click during a long launch must not vanish silently.
+            StatusText.Text = "An operation is already in progress; wait for it to finish…";
+            return;
+        }
         _busy = true;
         Mouse.OverrideCursor = Cursors.Wait;
         try { await action(); }
         catch (Exception ex)
         {
-            MessageBox.Show(FormatException(ex), "Operation failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            var openLogs = MessageBox.Show(FormatException(ex) + "\n\nOpen the log folder?",
+                "Operation failed", MessageBoxButton.YesNo, MessageBoxImage.Error) == MessageBoxResult.Yes;
+            if (openLogs) OpenFolderSafely(_service.OpenLogsFolder);
             await RefreshAsync();
         }
         finally
@@ -352,7 +400,7 @@ public partial class MainWindow : Window
         Guid.TryParse((sender as FrameworkElement)?.Tag?.ToString(), out id) && id != Guid.Empty;
 
     private static string FormatException(Exception ex) =>
-        ex is HubException hub ? $"[{hub.Code}] {hub.Message}" : "Unexpected error.";
+        ex is HubException hub ? $"[{hub.Code}] {hub.Message}" : $"Unexpected error: {ex.Message}";
 
     private static Brush Res(string key) => (Brush)Application.Current.Resources[key];
 
