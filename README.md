@@ -206,6 +206,6 @@ pwsh -NoProfile -File .\scripts\Publish.ps1     # 便携包
 - Google 登录完全由官方 Antigravity 完成；Hub 不保存密码、不导出 token、不复制 Cookie。
 - Hub 写入磁盘的只有各 Profile 自己目录内的登录令牌文件（由官方应用生成）。
 - Profile 作用域解决的是**同一 Windows 用户**下的应用状态与认证冲突，不是 Windows 用户之间的安全边界。
-- 验证工具链在 `scripts/`（`Probe-*.py`、`Smoke-ProcessLocalCore.py`）：Antigravity 升级后跑一遍即可确认机制仍然有效。
+- 机制验证工具在 `scripts/`（`Probe-*.py`）：用一次性 TEMP 数据根验证文件令牌存储与进程环境传播；Antigravity 升级后按 `MANUAL_TEST_PLAN.md` 重跑一遍即可确认机制仍然有效。会改动真实数据的一次性历史脚本已隔离到 `scripts/legacy/`，不要在日常环境运行。
 
 进一步阅读：[SECURITY.md](SECURITY.md) · [KEYRING_ISOLATION_REPORT.md](KEYRING_ISOLATION_REPORT.md) · [MANUAL_TEST_PLAN.md](MANUAL_TEST_PLAN.md) · [ARCHITECTURE.md](ARCHITECTURE.md) · [DECISIONS.md](DECISIONS.md) · [CHANGELOG.md](CHANGELOG.md) · [PROJECT_STATE.md](PROJECT_STATE.md)
