@@ -51,6 +51,10 @@ public sealed class ProfileManager(ConfigRepository repository, HubPaths paths)
         paths.EnsureProfileLayout(profile.Id);
         return await repository.UpdateProfilesAsync(document =>
         {
+            // Names address profiles interactively, so a duplicate would make
+            // every lookup ambiguous.
+            if (document.Profiles.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)))
+                throw new HubException($"A profile named '{name}' already exists. Profile names must be unique.", "profile_name_conflict");
             var profiles = document.Profiles.ToList();
             profiles.Add(profile);
             return (document with { Profiles = profiles }, profile);
@@ -64,6 +68,8 @@ public sealed class ProfileManager(ConfigRepository repository, HubPaths paths)
         {
             var index = document.Profiles.FindIndex(p => p.Id == id);
             if (index < 0) throw new ProfileNotFoundException(id);
+            if (document.Profiles.Any(p => p.Id != id && string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)))
+                throw new HubException($"A profile named '{name}' already exists. Profile names must be unique.", "profile_name_conflict");
             var updated = document.Profiles[index] with { Name = name, UpdatedUtc = DateTimeOffset.UtcNow };
             var profiles = document.Profiles.ToList();
             profiles[index] = updated;

@@ -217,11 +217,23 @@ static async Task TestProfileCrudAsync()
     var profile = await fixture.Hub.CreateProfileAsync("  Pro A  ");
     Equal("Pro A", profile.Name);
     File.WriteAllText(Path.Combine(fixture.Paths.ProfileRoot(profile.Id), "keep.txt"), "fixture");
+
+    // Names address profiles interactively, so a duplicate is refused on
+    // create and on rename, case-insensitively.
+    await ThrowsAsync<HubException>(() => fixture.Hub.CreateProfileAsync("pro a"));
+    var second = await fixture.Hub.CreateProfileAsync("Second");
+    await ThrowsAsync<HubException>(() => fixture.Hub.RenameProfileAsync(profile.Id, "SECOND"));
+
     var renamed = await fixture.Hub.RenameProfileAsync(profile.Id, "Builder");
     Equal(profile.Id, renamed.Id);
     var removed = await fixture.Hub.RemoveProfileAsync(profile.Id);
     Equal(profile.Id, removed.Id);
     True(File.Exists(Path.Combine(fixture.Paths.ProfileRoot(profile.Id), "keep.txt")), "remove must preserve profile data");
+
+    // The freed name can be used again.
+    var reuse = await fixture.Hub.CreateProfileAsync("Builder");
+    Equal("Builder", reuse.Name);
+    _ = second;
 }
 
 static async Task TestConcurrentCreatesAsync()
