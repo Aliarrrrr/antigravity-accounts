@@ -23,12 +23,15 @@ jobs:
       - name: Validate tag and locate package
         shell: pwsh
         run: |
-          $release = Get-ChildItem artifacts/package -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          $package = Join-Path $release.FullName 'AGProfileHub'
-          $manifest = Get-Content (Join-Path $package 'package-manifest.json') -Raw | ConvertFrom-Json
+          $manifestFile = Get-ChildItem artifacts/package -Recurse -Filter 'package-manifest.json' |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $manifestFile) { throw 'Publish.ps1 did not produce a package-manifest.json.' }
+          $package = $manifestFile.Directory.FullName
+          $release = Split-Path $package -Parent
+          $manifest = Get-Content $manifestFile.FullName -Raw | ConvertFrom-Json
           if ($env:GITHUB_REF_NAME -ne "v$($manifest.hubVersion)") { throw "Tag $env:GITHUB_REF_NAME does not match package v$($manifest.hubVersion)." }
           "PACKAGE_ROOT=$package" | Out-File $env:GITHUB_ENV -Append
-          "RELEASE_ROOT=$($release.FullName)" | Out-File $env:GITHUB_ENV -Append
+          "RELEASE_ROOT=$release" | Out-File $env:GITHUB_ENV -Append
       - name: Test package structure
         shell: pwsh
         run: ./scripts/Test-PackageStructure.ps1 -PackageRoot $env:PACKAGE_ROOT
@@ -46,10 +49,10 @@ jobs:
         with:
           name: AGProfileHub-${{ github.ref_name }}-win-x64
           path: |
-            artifacts/package/*/AGProfileHub-*-win-x64.zip
-            artifacts/package/*/AGProfileHub-*-win-x64.zip.sha256.json
-            artifacts/package/*/AGProfileHub-Setup-win-x64-*.exe
-            artifacts/package/*/AGProfileHub-Setup-win-x64-*.exe.sha256.json
+            artifacts/package/*/*/AGProfileHub-*-win-x64.zip
+            artifacts/package/*/*/AGProfileHub-*-win-x64.zip.sha256.json
+            artifacts/package/*/*/AGProfileHub-Setup-win-x64-*.exe
+            artifacts/package/*/*/AGProfileHub-Setup-win-x64-*.exe.sha256.json
           if-no-files-found: error
       - name: Create GitHub release
         shell: pwsh
@@ -57,5 +60,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $assets = Get-ChildItem $env:RELEASE_ROOT -File | Where-Object { $_.Extension -in '.zip','.exe','.json' } | ForEach-Object FullName
-          $notes = "Experimental Windows x64 release. Validated only with Antigravity Desktop 2.12.2 and Sandboxie Plus 1.18.2 / core 5.73.2. Re-run acceptance after either dependency changes. Authentication remains in official Antigravity; this project does not import passwords, OAuth tokens, or cookies."
+          $notes = "Experimental Windows x64 release. Validated only with Antigravity Desktop 2.12.2; no sandbox product is required. Re-run acceptance after Antigravity updates. Authentication remains in official Antigravity; this project does not import passwords, OAuth tokens, or cookies."
           gh release create $env:GITHUB_REF_NAME $assets --title "Antigravity Profile Hub $env:GITHUB_REF_NAME (experimental)" --prerelease --latest=false --verify-tag --notes $notes --generate-notes
