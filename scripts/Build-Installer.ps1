@@ -17,7 +17,7 @@ if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'package
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 if ($manifest.hubVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'The package manifest contains an invalid Hub version.' }
 if (-not $manifest.selfContained) { throw 'The daily-use installer must be built from a self-contained package.' }
-foreach ($relative in @('hub\AGProfileHub.Gui.exe', 'cli\AGProfileHub.Cli.exe', 'scripts\New-IsolationBox.ps1', 'scripts\Set-IsolationWriteThrough.ps1')) {
+foreach ($relative in @('hub\AGProfileHub.Gui.exe', 'cli\AGProfileHub.Cli.exe')) {
     if (-not (Test-Path -LiteralPath (Join-Path $package $relative) -PathType Leaf)) { throw "Package is missing '$relative'." }
 }
 

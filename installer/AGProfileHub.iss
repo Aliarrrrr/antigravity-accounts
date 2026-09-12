@@ -58,9 +58,6 @@ begin
   Missing := '';
   if not FileExists(ExpandConstant('{localappdata}\Programs\antigravity\Antigravity.exe')) then
     Missing := '- Official Antigravity Desktop' + #13#10;
-  if not FileExists(ExpandConstant('{pf}\Sandboxie-Plus\Start.exe')) and
-     not FileExists(ExpandConstant('{pf}\Sandboxie\Start.exe')) then
-    Missing := Missing + '- Sandboxie Plus' + #13#10;
   Result := Missing;
 end;
 
