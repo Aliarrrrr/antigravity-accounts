@@ -35,6 +35,10 @@ public sealed class AntigravityDriver(HubPaths paths, ConfigRepository repositor
         if (executable is null)
             throw new HubException("Antigravity Desktop was not found. Configure an explicit executable path.", "executable_not_found");
         executable = PathSafety.CanonicalizeExistingFile(executable);
+        // A pinned executable must still be the one that was configured, or the
+        // Hub would launch — and the deep-link handoff would relaunch — whatever
+        // silently replaced it.
+        await ExecutableAttestation.VerifyAsync(executable, settings.ExecutableSha256, cancellationToken).ConfigureAwait(false);
         var info = FileVersionInfo.GetVersionInfo(executable);
         var version = info.ProductVersion ?? info.FileVersion ?? "unknown";
         var normalized = NormalizeVersion(version);

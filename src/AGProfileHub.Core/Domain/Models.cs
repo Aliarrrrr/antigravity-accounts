@@ -34,6 +34,15 @@ public sealed record HubSettings
 {
     public int SchemaVersion { get; init; } = SchemaVersions.Current;
     public string? AntigravityExecutablePath { get; init; }
+
+    /// <summary>
+    /// SHA-256 of the configured executable, recorded when it was configured
+    /// and verified before every launch or deep-link handoff. Absent in older
+    /// documents means "not pinned": the executable keeps working, and doctor
+    /// recommends reconfiguring to pin it. Like the backend field this is an
+    /// additive optional change, not a schema bump.
+    /// </summary>
+    public string? ExecutableSha256 { get; init; }
     public string? LastTestedExecutablePath { get; init; }
     public string? LastTestedVersion { get; init; }
     public int ProbeStrategyRevision { get; init; } = 1;

@@ -60,6 +60,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("stopping one profile keeps another profile's pending", TestStopKeepsForeignPendingAsync),
     ("a corrupt registration record blocks the launch before anything starts", TestCorruptRegistrationBlocksLaunchAsync),
     ("callback URIs are validated before any handoff", TestCallbackUriValidationAsync),
+    ("the configured executable is digest-pinned everywhere it is used", TestExecutableDigestPinningAsync),
 };
 
 var failures = new List<string>();
@@ -1028,6 +1029,34 @@ static async Task TestCallbackUriValidationAsync()
 
     // Boundary: exactly the cap is accepted, and the scheme is case-insensitive.
     DeepLinkRouter.ValidateCallbackUri(new string('a', DeepLinkRouter.MaxCallbackUriLength - "antigravity://".Length).Insert(0, "ANTIGRAVITY://"));
+}
+
+static async Task TestExecutableDigestPinningAsync()
+{
+    using var fixture = new Fixture();
+    var driver = new AntigravityDriver(fixture.Paths, fixture.Repository);
+
+    // A legacy configuration without a pin keeps working unchanged.
+    await fixture.Repository.WriteSettingsAsync(new HubSettings { AntigravityExecutablePath = fixture.Executable });
+    _ = await driver.DiscoverAsync();
+
+    // Configuring the executable records its digest.
+    var settings = await fixture.Hub.ConfigureExecutableAsync(fixture.Executable);
+    var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(fixture.Executable))).ToLowerInvariant();
+    Equal(expected, settings.ExecutableSha256);
+    _ = await driver.DiscoverAsync();
+
+    // A silently swapped binary is refused by discovery...
+    await File.WriteAllTextAsync(fixture.Executable, "swapped payload");
+    await ThrowsAsync<HubException>(() => driver.DiscoverAsync());
+
+    // ...and by the deep-link handoff, which would otherwise relaunch it for
+    // every webpage-triggered antigravity:// callback.
+    var id = Guid.NewGuid();
+    await DeepLinkRouter.WritePendingAsync(fixture.Paths, id, fixture.Paths.UserData(id));
+    await ThrowsAsync<HubException>(() => Task.Run(() =>
+        DeepLinkRouter.BuildHandoff(fixture.Paths, "antigravity://oauth/callback?code=x")));
+    DeepLinkRouter.ClearPending(fixture.Paths);
 }
 
 static void True(bool condition, string? message = null) { if (!condition) throw new InvalidOperationException(message ?? "Expected true."); }

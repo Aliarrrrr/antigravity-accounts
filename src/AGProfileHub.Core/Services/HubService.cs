@@ -165,11 +165,13 @@ public sealed class HubService
     public async Task<HubSettings> ConfigureExecutableAsync(string executablePath, CancellationToken cancellationToken = default)
     {
         var executable = PathSafety.CanonicalizeExistingFile(executablePath);
+        var sha256 = await ExecutableAttestation.ComputeSha256Async(executable, cancellationToken).ConfigureAwait(false);
         var current = await _repository.ReadSettingsAsync(cancellationToken);
         var changed = !string.Equals(current.AntigravityExecutablePath, executable, StringComparison.OrdinalIgnoreCase);
         var updated = current with
         {
             AntigravityExecutablePath = executable,
+            ExecutableSha256 = sha256,
             AuthIsolationAttestedUtc = changed ? null : current.AuthIsolationAttestedUtc,
             AuthIsolationAttestedVersion = changed ? null : current.AuthIsolationAttestedVersion
         };
@@ -198,6 +200,8 @@ public sealed class HubService
             warnings.Add($"[{ex.Code}] The global launch barrier could not be validated. New launches fail closed.");
         }
         if (installation is not null && !installation.IsKnownCompatible) warnings.Add(installation.CompatibilityDetail);
+        if (installation is not null && string.IsNullOrWhiteSpace(settings.ExecutableSha256))
+            warnings.Add("The configured Antigravity executable is not hash-pinned. Run configure-executable once to pin it; until then a swapped binary would not be refused at launch or callback handoff.");
         if (installation is not null && settings.LastTestedVersion is not null && !string.Equals(settings.LastTestedVersion, installation.Version, StringComparison.OrdinalIgnoreCase))
             warnings.Add($"Installed version {installation.Version} differs from last tested version {settings.LastTestedVersion}.");
         if (installation is not null && settings.AuthIsolationAttestedVersion is not null && !string.Equals(settings.AuthIsolationAttestedVersion, installation.Version, StringComparison.OrdinalIgnoreCase))

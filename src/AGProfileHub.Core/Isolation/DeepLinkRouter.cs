@@ -159,22 +159,29 @@ public static class DeepLinkRouter
 
     /// <summary>
     /// Locates the vendor executable exactly like the driver does: the configured path first,
-    /// then the standard install locations. Read-only; the callback path must never create or
-    /// mutate Hub state.
+    /// then the standard install locations, and — like the driver — only when it still matches
+    /// the configured digest. Read-only; the callback path must never create or mutate Hub state.
     /// </summary>
     private static string ResolveHandoffExecutable(HubPaths paths)
     {
         string? configured = null;
+        string? pinnedSha256 = null;
         if (File.Exists(paths.SettingsFile))
         {
             var settings = new AtomicJsonStore(paths.DataRoot).ReadAsync(paths.SettingsFile,
                 HubJsonContext.Default.HubSettings, () => new HubSettings(), CancellationToken.None)
                 .ConfigureAwait(false).GetAwaiter().GetResult();
             configured = settings.AntigravityExecutablePath;
+            pinnedSha256 = settings.ExecutableSha256;
         }
         foreach (var candidate in AntigravityDriver.DiscoveryCandidates(configured))
         {
-            try { return PathSafety.CanonicalizeExistingFile(candidate); }
+            try
+            {
+                var executable = PathSafety.CanonicalizeExistingFile(candidate);
+                ExecutableAttestation.VerifyAsync(executable, pinnedSha256).ConfigureAwait(false).GetAwaiter().GetResult();
+                return executable;
+            }
             catch (ConfigurationException) { }
         }
         throw new HubException("Cannot locate the Antigravity executable required by the deep-link router.",
