@@ -451,9 +451,9 @@ internal static class CliApplication
           launch <name-or-id> | stop <name-or-id> [--force] | restart <name-or-id> [--force] | launch-all | stop-all [--force]
           create <name> [--workspace <path>] | rename <name-or-id> <new-name> | remove <name-or-id> | workspace <name-or-id> <path|none>
           iso-prepare <name-or-id> [--box <name>] [--fresh]
-                                                Prepare a dedicated box; --fresh acknowledges safe overwrite
-          iso-launch <name-or-id>               Launch the unmodified desktop inside the profile's box
-          iso-stop <name-or-id>                 Terminate everything inside the profile's box
+                                                Prepare a dedicated scope; --fresh acknowledges a takeover
+          iso-launch <name-or-id>               Launch the unmodified desktop inside the profile's scope
+          iso-stop <name-or-id>                 Terminate everything inside the profile's scope
           iso-status                            Inspect scope readiness
           open-data [name-or-id] | open-logs | configure-executable <path> | shortcut <name-or-id> [--directory <path>]
           configure-isolation <sandboxie|process-local>
