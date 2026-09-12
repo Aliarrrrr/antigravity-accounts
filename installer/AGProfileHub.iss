@@ -19,8 +19,9 @@ DefaultDirName={localappdata}\Programs\AntigravityProfileHub
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
+; The package ships win-x64 binaries only; no ARM64 build has been validated.
+ArchitecturesAllowed=x64
+ArchitecturesInstallIn64BitMode=x64
 OutputBaseFilename=AGProfileHub-Setup-win-x64-{#MyAppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
@@ -54,13 +55,17 @@ Filename: "{app}\hub\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Worki
 Filename: "{app}\cli\AGProfileHub.Cli.exe"; Parameters: "configure-deeplink restore"; Flags: runhidden waituntilterminated skipifdoesntexist
 
 [Code]
+// Mirrors the Hub's own discovery order (AntigravityDriver.DiscoveryCandidates):
+// the default per-user location first, then Program Files. A custom install
+// location is reported as "not detected here" rather than silently passing.
 function DependencySummary(): String;
 var
   Missing: String;
 begin
   Missing := '';
-  if not FileExists(ExpandConstant('{localappdata}\Programs\antigravity\Antigravity.exe')) then
-    Missing := '- Official Antigravity Desktop' + #13#10;
+  if (not FileExists(ExpandConstant('{localappdata}\Programs\antigravity\Antigravity.exe'))) and
+     (not FileExists(ExpandConstant('{pf}\Antigravity\Antigravity.exe'))) then
+    Missing := '- Official Antigravity Desktop (looked in %LOCALAPPDATA%\Programs\antigravity and %ProgramFiles%\Antigravity)' + #13#10;
   Result := Missing;
 end;
 

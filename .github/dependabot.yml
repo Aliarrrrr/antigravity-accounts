@@ -1,0 +1,16 @@
+version: 2
+updates:
+  - package-ecosystem: "nuget"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # System.Management / System.CodeDom move with the .NET 10 release train;
+    # review each bump together with packages.lock.json.
+    groups:
+      dotnet-packages:
+        patterns:
+          - "System.*"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
