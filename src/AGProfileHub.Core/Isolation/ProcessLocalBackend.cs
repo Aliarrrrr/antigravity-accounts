@@ -111,14 +111,6 @@ public sealed class ProcessLocalBackend(HubPaths paths) : IIsolationBackend
         return [.. inScope.Order()];
     }
 
-    /// <summary>
-    /// No rule has to be granted: with the operating system left alone the
-    /// Profile's own directories are ordinary directories. Reporting the scope
-    /// root keeps the write-through gate meaningful for both backends.
-    /// </summary>
-    public IReadOnlyList<string> GetIndexedSettingValues(string scope, string setting, int maximum = 64) =>
-        [Paths.ProfileRoot(ProfileIdFromScope(scope))];
-
     public void Terminate(string scope)
     {
         foreach (var pid in ListPids(scope))
@@ -133,15 +125,6 @@ public sealed class ProcessLocalBackend(HubPaths paths) : IIsolationBackend
                 // Already gone, or not ours to kill; the caller's polling loop decides the outcome.
             }
         }
-    }
-
-    public int RunInBox(string scope, string executable, IReadOnlyList<string> arguments,
-        IReadOnlyDictionary<string, string>? environment = null, bool wait = false)
-    {
-        using var process = Start(executable, arguments, environment);
-        if (!wait) return 0;
-        process.WaitForExit();
-        return process.ExitCode;
     }
 
     public int LaunchDetached(string scope, string executable, IReadOnlyList<string> arguments,
@@ -181,21 +164,6 @@ public sealed class ProcessLocalBackend(HubPaths paths) : IIsolationBackend
         // ASCII keeps cmd's parser deterministic on any code page.
         File.WriteAllText(wrapper, string.Join("\r\n", lines) + "\r\n", new System.Text.ASCIIEncoding());
         return wrapper;
-    }
-
-    private static Process Start(string executable, IReadOnlyList<string> arguments,
-        IReadOnlyDictionary<string, string>? environment)
-    {
-        var info = new ProcessStartInfo(executable) { UseShellExecute = false };
-        foreach (var argument in arguments) info.ArgumentList.Add(argument);
-        if (environment is not null)
-            foreach (var pair in environment) info.Environment[pair.Key] = pair.Value;
-        // The Hub and CLI are frequently started from an Electron host, which sets
-        // ELECTRON_RUN_AS_NODE=1 for its own child processes. Inheriting it turns
-        // the vendor desktop into a plain Node runtime, which then rejects its own
-        // arguments with "bad option", so the instance must never inherit it.
-        info.Environment.Remove("ELECTRON_RUN_AS_NODE");
-        return Process.Start(info) ?? throw new HubException("Failed to start the scoped process.", "isolation_start_failed");
     }
 
     private sealed record ProcessRow(int ProcessId, int ParentProcessId, string Name, string? CommandLine);

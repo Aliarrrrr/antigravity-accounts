@@ -70,8 +70,8 @@ public sealed class HubService
                 var status = await _isolation.GetStatusAsync(profile.Id, profile.WorkspacePath, cancellationToken).ConfigureAwait(false);
                 if (status is null)
                     throw new UnsupportedCapabilityException("Launch all was not started because every profile must have a prepared isolation box.");
-                if (!status.BackendAvailable || !status.BoxExists || !status.KeyringClaimed)
-                    throw new UnsupportedCapabilityException($"Launch all was not started because isolation box '{status.BoxName}' is not ready.");
+                if (!status.BackendAvailable || !status.BoxExists)
+                    throw new UnsupportedCapabilityException($"Launch all was not started because isolation scope '{status.BoxName}' is not ready.");
             }
         }
         var results = new List<LaunchResult>(profiles.Count);
@@ -138,18 +138,8 @@ public sealed class HubService
     public async Task<IsolationStage> DetectIsolationStageAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var profile = await _profiles.GetAsync(id, cancellationToken).ConfigureAwait(false);
-        return _setup is null ? IsolationStage.BackendUnavailable
+        return _setup is null ? IsolationStage.NotStarted
             : await _setup.DetectAsync(id, profile.Backend, profile.WorkspacePath, cancellationToken).ConfigureAwait(false);
-    }
-
-    public async Task<(string BoxName, IReadOnlyList<string> Paths, IReadOnlyList<string> MissingPaths)> GetWriteThroughAsync(
-        Guid id, CancellationToken cancellationToken = default)
-    {
-        var profile = await _profiles.GetAsync(id, cancellationToken).ConfigureAwait(false);
-        if (_isolation is null) throw new UnsupportedCapabilityException("No isolation backend is configured.");
-        var status = await _isolation.GetStatusAsync(id, profile.WorkspacePath, cancellationToken).ConfigureAwait(false)
-            ?? throw new HubException("This profile has no isolation box yet. Run iso-prepare first.", "isolation_not_prepared");
-        return (status.BoxName, _isolation.WriteThroughPaths(id, profile.WorkspacePath), status.MissingWriteThroughPaths);
     }
 
     public Task LaunchWithWorkspaceAsync(Guid id, string workspacePath, CancellationToken cancellationToken = default) =>
@@ -212,26 +202,23 @@ public sealed class HubService
             warnings.Add($"Installed version {installation.Version} differs from last tested version {settings.LastTestedVersion}.");
         if (installation is not null && settings.AuthIsolationAttestedVersion is not null && !string.Equals(settings.AuthIsolationAttestedVersion, installation.Version, StringComparison.OrdinalIgnoreCase))
             warnings.Add("The saved manual authentication-isolation attestation belongs to another version and is invalid.");
-        warnings.Add("Profile boxes isolate application state within one Windows account; they are not a security boundary between Windows users.");
+        warnings.Add("Profile scopes isolate application state within one Windows account; they are not a security boundary between Windows users.");
         var isolationStatuses = _isolation is null ? [] : await _isolation.StatusAsync(cancellationToken).ConfigureAwait(false);
-        if (isolationStatuses.Any(status => !status.BoxExists || !status.KeyringClaimed))
+        if (isolationStatuses.Any(status => !status.BoxExists))
             warnings.Add("At least one registered isolation mapping is not launch-ready; inspect iso-status before launch.");
-        if (isolationStatuses.Any(status => !status.WriteThroughReady))
-            warnings.Add("At least one isolation box is missing direct-write rules. Project/profile edits can remain only in the sandbox copy until configured.");
         if (statuses.Any(status => status.IsolationBoxName is null))
-            warnings.Add("Profiles without a prepared isolation box use the legacy serial path and share the Windows user's host credential entry.");
+            warnings.Add("Profiles without a prepared isolation scope use the legacy serial path and share the Windows user's host credential entry.");
 
-        var preparedReady = isolationStatuses.Count > 0 && isolationStatuses.All(status => status.BackendAvailable && status.BoxExists && status.KeyringClaimed);
+        var preparedReady = isolationStatuses.Count > 0 && isolationStatuses.All(status => status.BackendAvailable && status.BoxExists);
 
         var capabilities = new List<CapabilityFinding>
         {
             new("executableDiscovery", installation is null ? CapabilityState.Unknown : CapabilityState.Verified, installation is null ? "Executable was not found." : "Executable and file version were read without launching."),
-            new("desktopRuntimeIsolation", installation?.IsKnownCompatible == true ? CapabilityState.Verified : CapabilityState.Unknown, "Independent user-data, process-home and Sandboxie box ownership were observed locally for Desktop 2.12.2."),
-            new("visibleConcurrentWindows", preparedReady ? CapabilityState.Verified : CapabilityState.ManualVerificationRequired, "Two prepared boxes were manually accepted with separate visible windows on Desktop 2.12.2."),
-            new("googleAccountIsolation", preparedReady ? CapabilityState.Verified : CapabilityState.ManualVerificationRequired, "The per-box keyring claim fixed the shared gemini:antigravity token collision; distinct concurrent accounts and restart persistence passed manual acceptance on Desktop 2.12.2."),
-            new("workspaceWriteThrough", isolationStatuses.Count > 0 && isolationStatuses.All(status => status.WriteThroughReady) ? CapabilityState.Verified : CapabilityState.ManualVerificationRequired, "Every profile and workspace path must have a matching Sandboxie OpenFilePath rule so edits reach the host filesystem."),
+            new("desktopRuntimeIsolation", installation?.IsKnownCompatible == true ? CapabilityState.Verified : CapabilityState.Unknown, "Independent user-data and per-instance process homes were observed locally for Desktop 2.12.2."),
+            new("visibleConcurrentWindows", preparedReady ? CapabilityState.Verified : CapabilityState.ManualVerificationRequired, "Two prepared scopes were manually accepted with separate visible windows on Desktop 2.12.2."),
+            new("googleAccountIsolation", preparedReady ? CapabilityState.Verified : CapabilityState.ManualVerificationRequired, "Each instance keeps its OAuth token in a per-profile file; distinct concurrent accounts and restart persistence passed manual acceptance on Desktop 2.12.2."),
             new("workspaceForwarding", CapabilityState.Unsupported, "Workspace is metadata; no supported Desktop forwarding contract was found."),
-            new("credentialIsolation", preparedReady ? CapabilityState.Verified : CapabilityState.Experimental, "Hub writes an invalid same-name placeholder only inside a fresh isolation box; it never reads, copies, exports, or purges the real token.")
+            new("credentialIsolation", preparedReady ? CapabilityState.Verified : CapabilityState.Experimental, "A launch is trusted only after the language server reports its per-profile file token store; the Windows user's shared credential entry is never read, copied, or written.")
         };
         return new DoctorReport(DateTimeOffset.UtcNow, _paths.DataRoot, installation?.ExecutablePath, installation?.Version,
             installation is not null, installation?.IsKnownCompatible == true, capabilities, warnings, statuses);
@@ -254,18 +241,16 @@ public sealed class HubService
         if (_isolation is null) return status;
         var isolation = await _isolation.GetStatusAsync(status.ProfileId, status.WorkspacePath, cancellationToken).ConfigureAwait(false);
         if (isolation is null) return status;
-        var readiness = !isolation.BackendAvailable ? "Sandboxie is unavailable" :
-            !isolation.BoxExists ? "box is missing" :
-            !isolation.KeyringClaimed ? "keyring is not claimed" :
-            !isolation.WriteThroughReady ? $"{isolation.MissingWriteThroughPaths.Count} direct-write rule(s) missing" : "ready";
+        var readiness = !isolation.BackendAvailable ? "the isolation backend is unavailable" :
+            !isolation.BoxExists ? "scope is missing" : "ready";
         var reconciledState = status.State == RuntimeState.Stopped && isolation.ProcessCount > 0 ? RuntimeState.Running : status.State;
         if (status.State == RuntimeState.Running && isolation.ProcessCount == 0) reconciledState = RuntimeState.Unknown;
         return status with
         {
             State = reconciledState,
             IsolationBoxName = isolation.BoxName,
-            WriteThroughReady = isolation.WriteThroughReady,
-            Detail = $"{status.Detail} Isolation box {isolation.BoxName}: {readiness}."
+            IsolationReady = isolation.BackendAvailable && isolation.BoxExists,
+            Detail = $"{status.Detail} Isolation scope {isolation.BoxName}: {readiness}."
         };
     }
 }
@@ -281,17 +266,7 @@ public static class HubBootstrap
         var supervisor = new ProcessSupervisor(paths, repository, profiles, driver,
             new WindowsProcessCatalog(), new WindowsProcessLauncher(), new WindowsProcessController(), new StructuredEventLogger(paths));
         var isolation = new IsolatedProfileLauncher(paths, driver, repository);
-        IElevationBridge elevation;
-        try
-        {
-            var cli = DesktopShortcut.FindCliExecutable(AppContext.BaseDirectory);
-            elevation = new WindowsElevationBridge(cli, paths.ElevationRoot);
-        }
-        catch (HubException)
-        {
-            elevation = new UnavailableElevationBridge("The CLI executable could not be located, so elevation is unavailable.");
-        }
-        var setup = new IsolationSetup(isolation, elevation, kind => IsolationBackends.TryCreate(paths, kind));
+        var setup = new IsolationSetup(isolation, kind => IsolationBackends.TryCreate(paths, kind));
         return new HubService(paths, repository, profiles, supervisor, driver, isolation, setup);
     }
 

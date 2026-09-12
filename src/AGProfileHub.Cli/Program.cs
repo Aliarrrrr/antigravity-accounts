@@ -35,35 +35,6 @@ internal static class CliApplication
                 return 0;
             }
 
-            // Runs before any Hub bootstrap: this verb is executed inside
-            // isolation scopes (for example a sandbox) where the Hub data root
-            // must not be created or touched.
-            if (parsed.Command[0].Equals("credential-shim", StringComparison.OrdinalIgnoreCase))
-            {
-                var tail = parsed.Command.Skip(1).ToList();
-                var forceFresh = TakeFlag(tail, "--force") & TakeFlag(tail, "--fresh");
-                var boxId = TakeOption(tail, "--box");
-                RequireNoArguments(tail, "credential-shim --force --fresh [--box <name>]");
-                if (!forceFresh) throw new UsageException("credential-shim is an internal command and requires both --force and --fresh.");
-                var shim = AntigravityKeyring.EnsureIsolation(forceFresh, boxId);
-                if (parsed.Json) WriteJson(shim);
-                else Console.WriteLine($"credential-shim: target={shim.Target} existedBefore={shim.ExistedBefore} created={shim.Created} blobSize={shim.BlobSize}");
-                // Exit codes let a caller that cannot capture sandboxed stdout
-                // still tell "claimed now" from "already owned".
-                return shim.Created ? 11 : 0;
-            }
-
-            // Runs before any Hub bootstrap: this verb is the elevated helper
-            // launched by WindowsElevationBridge. It touches only the two paths
-            // it is given and never creates a Hub data root.
-            if (parsed.Command[0].Equals("admin-helper", StringComparison.OrdinalIgnoreCase))
-            {
-                var tail = parsed.Command.Skip(1).ToList();
-                if (tail.Count != 2)
-                    return WriteError("Usage: admin-helper <request-path> <result-path>", "usage_error", 2, parsed.Json);
-                return AdminOperations.RunHelper(tail[0], tail[1]);
-            }
-
             // Runs before any Hub bootstrap: this verb is what the vendor's deep
             // link is pointed at. It hands the URI to the Profile that is waiting
             // for it, and must never create a Hub data root.
@@ -122,18 +93,13 @@ internal static class CliApplication
                 var report = await hub.DoctorAsync().ConfigureAwait(false);
                 if (!json) PrintDoctor(report);
                 return report;
-            case "credential-status":
-                RequireNoArguments(tail, "credential-status");
-                var keyring = AntigravityKeyring.BuildStatus();
-                if (!json) PrintCredentialStatus(keyring);
-                return keyring;
             case "iso-prepare":
                 var isoBox = TakeOption(tail, "--box");
                 var isoFresh = TakeFlag(tail, "--fresh");
                 RequireCount(tail, 1, "iso-prepare <id> [--box <existing-box-name>] [--fresh]");
                 var isoPrepare = await hub.PrepareIsolationAsync(await ResolveIdAsync(hub, tail[0]), isoBox, isoFresh).ConfigureAwait(false);
                 if (!json)
-                    Console.WriteLine($"isolation: box={isoPrepare.BoxName} boxCreated={isoPrepare.BoxCreated} mappingCreated={isoPrepare.MappingCreated} keyringClaimed={isoPrepare.KeyringClaimed} shimExit={isoPrepare.ShimExitCode}");
+                    Console.WriteLine($"isolation: scope={isoPrepare.BoxName} scopeCreated={isoPrepare.BoxCreated} mappingCreated={isoPrepare.MappingCreated}");
                 return isoPrepare;
             case "iso-launch":
                 RequireCount(tail, 1, "iso-launch <id>");
@@ -151,25 +117,12 @@ internal static class CliApplication
                 var isoStopped = await hub.StopAsync(isoStopId, force: true).ConfigureAwait(false);
                 if (!json) PrintStatus(isoStopped.Status);
                 return isoStopped;
-            case "iso-writethrough":
-                RequireCount(tail, 1, "iso-writethrough <id>");
-                var wtId = await ResolveIdAsync(hub, tail[0]);
-                var wt = await hub.GetWriteThroughAsync(wtId).ConfigureAwait(false);
-                if (!json)
-                {
-                    Console.WriteLine($"Box: {wt.BoxName}");
-                    Console.WriteLine("These directories need direct-write rules, otherwise edits stay inside the sandbox:");
-                    foreach (var item in wt.Paths) Console.WriteLine($"  {(wt.MissingPaths.Contains(item, StringComparer.OrdinalIgnoreCase) ? "MISSING" : "OK     ")}  {item}");
-                    if (wt.MissingPaths.Count > 0)
-                        Console.WriteLine($"Missing rules can be applied with elevation by the Hub itself: fix {tail[0]}");
-                }
-                return new { boxName = wt.BoxName, paths = wt.Paths, missingPaths = wt.MissingPaths, ready = wt.MissingPaths.Count == 0 };
             case "iso-status":
                 RequireNoArguments(tail, "iso-status");
                 var isoStatus = await hub.GetIsolationStatusesAsync().ConfigureAwait(false);
                 if (!json)
                     foreach (var item in isoStatus)
-                        Console.WriteLine($"{item.BoxName}  profile={item.ProfileId}  boxExists={item.BoxExists}  keyringClaimed={item.KeyringClaimed}  writeThrough={item.WriteThroughReady}  processes={item.ProcessCount}");
+                        Console.WriteLine($"{item.BoxName}  profile={item.ProfileId}  scopeExists={item.BoxExists}  processes={item.ProcessCount}");
                 return isoStatus;
             case "list":
             case "ls":
@@ -210,7 +163,7 @@ internal static class CliApplication
                 var openDirect = TakeFlag(tail, "--direct");
                 RequireCount(tail, 1, "open <name-or-id> [--direct]");
                 var openId = await ResolveIdAsync(hub, tail[0]).ConfigureAwait(false);
-                if (!openDirect && await hub.DetectIsolationStageAsync(openId).ConfigureAwait(false) != IsolationStage.BackendUnavailable)
+                if (!openDirect && await hub.DetectIsolationStageAsync(openId).ConfigureAwait(false) != IsolationStage.NotStarted)
                 {
                     var ready = await hub.EnsureIsolationReadyAsync(openId, allowFreshBox: false).ConfigureAwait(false);
                     if (!ready.Ready) throw new HubException($"Isolation is not ready: {ready.Stage}. Run 'fix {tail[0]}' to diagnose.", "isolation_not_ready");
@@ -474,16 +427,6 @@ internal static class CliApplication
         foreach (var warning in report.Warnings) Console.WriteLine($"WARNING: {warning}");
     }
 
-    private static void PrintCredentialStatus(KeyringStatusResult status)
-    {
-        Console.WriteLine($"Shared token target    : {status.Target}");
-        Console.WriteLine($"Present for this user  : {status.HostEntryExists}");
-        Console.WriteLine($"Entry size (bytes)     : {status.HostEntryBlobSize}");
-        Console.WriteLine($"Owned by vendor client : {status.HostEntryBelongsToVendor}");
-        Console.WriteLine($"Guidance               : {status.IsolationGuidance}");
-        Console.WriteLine($"Note                   : {status.Note}");
-    }
-
     private static void PrintHelp()
     {
         Console.WriteLine(HelpText());
@@ -511,8 +454,7 @@ internal static class CliApplication
                                                 Prepare a dedicated box; --fresh acknowledges safe overwrite
           iso-launch <name-or-id>               Launch the unmodified desktop inside the profile's box
           iso-stop <name-or-id>                 Terminate everything inside the profile's box
-          iso-status | iso-writethrough <name-or-id>
-                                                Inspect box and direct-write readiness
+          iso-status                            Inspect scope readiness
           open-data [name-or-id] | open-logs | configure-executable <path> | shortcut <name-or-id> [--directory <path>]
           configure-isolation <sandboxie|process-local>
                                       Backend newly created profiles use (existing ones keep theirs)
@@ -520,11 +462,8 @@ internal static class CliApplication
                                       Route the antigravity:// callback to the profile that is waiting
           callback <uri>              Internal: hand a deep-link callback to the waiting profile
           agent-probe                           Mocked LS/official CLI diagnostic; no real account
-          credential-status                     Report the shared token entry (existence/size only)
-          credential-shim --force --fresh [--box <name>]
-                                      Internal: claim the keyring entry inside the verified box
 
-        Authentication is performed only by official Antigravity. Concurrent accounts require a prepared per-profile isolation box; the legacy direct path remains serial-only.
+        Authentication is performed only by official Antigravity. Concurrent accounts require a prepared per-profile isolation scope; the legacy direct path remains serial-only.
         """;
 
     private static void EnsureStopped(StopResult result)

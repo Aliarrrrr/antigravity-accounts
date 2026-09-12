@@ -6,15 +6,15 @@ The Sandboxie dependency is no longer required. A process-local backend ships as
 
 Two gates were passed against the real desktop: D2 (two Profiles, two Google accounts, one file token per Profile, the host credential entry untouched, restart persistence) and the deep-link handoff probe. The evidence tools live in `scripts/` (`Probe-KeyringBypass.py`, `Probe-DesktopEnvPropagation.py`, `Probe-DualAccountLogin.py`, `Probe-ProcessEnvironment.py`, `Agph-D2-ProfileControl.ps1`) and are part of the regression set.
 
-Sandboxie remains available as an explicit legacy backend for profiles that already own a box; removing its code is the next, separately revertible step.
+The Sandboxie code path has been removed in a separately revertible commit. Profiles recorded as the legacy backend resolve to the same process-local scope, whose launch is verified either way.
 
 ## Earlier state — 2026-09-09
 
 ## Current phase
 
-Authenticated multi-account isolation is proven on the local compatibility pair: Antigravity Desktop 2.12.2 and Sandboxie Plus 1.18.2 / core 5.73.2. The productization pass now routes normal Core/CLI/GUI/shortcut lifecycle operations through a prepared per-profile box. The legacy direct route remains available for unprepared profiles and remains serial-only.
+Authenticated multi-account isolation is proven on Antigravity Desktop 2.12.2, with no external sandbox product. Core/CLI/GUI/shortcut lifecycle operations route through a prepared per-profile scope. The legacy direct route remains available for unprepared profiles and remains serial-only.
 
-The root cause is the language server's fixed Windows Credential Manager target `gemini:antigravity`. Directory-only instances all read the same host entry. A fresh Sandboxie box also falls through to that host entry until it owns a same-named entry. The implemented shim writes an invalid placeholder only inside a confirmed Sandboxie process, causing the vendor's own fallback/storage behavior to remain profile-scoped. Distinct A/B accounts, concurrent use, restart persistence, and non-interference when A restarts were manually accepted. See `KEYRING_ISOLATION_REPORT.md`.
+The root cause is the language server's fixed Windows Credential Manager target `gemini:antigravity`. Directory-only instances all read the same host entry. The shipped mechanism points each instance's home at its own Profile directory and asks the language server for its file token store; the launch verifies the store-selection log line before the instance is trusted. Distinct A/B accounts, concurrent use, restart persistence, and non-interference were manually accepted. See `KEYRING_ISOLATION_REPORT.md` and the probe scripts under `scripts/`.
 
 ## Completed in the takeover pass
 
@@ -48,7 +48,7 @@ Both accepted A/B boxes currently report `backendAvailable=true`, `boxExists=tru
 1. Manually verify an actual Profile/workspace write reaches the host and survives restart.
 2. Manually verify logout in A does not log out B, and vice versa. Authentication actions remain user-only.
 3. Run the real-process package shortcut smoke after the accepted A/B instances are intentionally stopped; its disposable direct launch is currently (correctly) blocked by the live-root guard.
-4. Re-run authenticated acceptance after either Antigravity or Sandboxie changes version.
+4. Re-run authenticated acceptance after Antigravity changes version.
 
 ## Deferred scope
 

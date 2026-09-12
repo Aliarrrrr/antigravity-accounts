@@ -163,7 +163,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            if (await _service.DetectIsolationStageAsync(id) != IsolationStage.BackendUnavailable)
+            if (await _service.DetectIsolationStageAsync(id) != IsolationStage.NotStarted)
             {
                 var ready = await _service.EnsureIsolationReadyAsync(id);
                 if (!ready.Ready) throw new HubException($"Isolation is not ready: {ready.Stage}.", "isolation_not_ready");
@@ -353,7 +353,7 @@ public partial class MainWindow : Window
             };
             var isolation = status.IsolationBoxName is null
                 ? "Direct / serial"
-                : status.WriteThroughReady == true ? "Ready" : "Write missing";
+                : status.IsolationReady == true ? "Ready" : "Needs fix";
             return new ProfileRow
             {
                 ProfileId = status.ProfileId,

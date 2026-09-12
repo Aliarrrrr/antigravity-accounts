@@ -12,20 +12,17 @@ public static class SchemaVersions
 /// </summary>
 /// <remarks>
 /// The backend is an additive, optional field rather than a schema-version bump:
-/// a document written by an older build simply deserialises to
-/// <see cref="Sandboxie"/>, so no migration is needed and unknown future schemas
-/// are still rejected. The one hazard is a downgrade: an older build reading
-/// <see cref="ProcessLocal"/> would treat the Profile as Sandboxie, so the field
-/// is only written when it differs from the record's default.
+/// a document written by an older build simply deserialises without it, so no
+/// migration is needed and unknown future schemas are still rejected. Sandboxie
+/// support has been removed; the recorded value resolves to the same
+/// process-local scope either way.
 /// </remarks>
 [JsonConverter(typeof(JsonStringEnumConverter<IsolationBackendKind>))]
 public enum IsolationBackendKind { Sandboxie = 0, ProcessLocal = 1 }
 
-public sealed record ProfileRegistration(Guid Id, string Name, string? WorkspacePath, DateTimeOffset CreatedUtc, DateTimeOffset UpdatedUtc)
-{
-    /// <summary>Isolation backend for this Profile. Absent in older documents means Sandboxie.</summary>
-    public IsolationBackendKind Backend { get; init; } = IsolationBackendKind.Sandboxie;
-}
+public sealed record ProfileRegistration(Guid Id, string Name, string? WorkspacePath, DateTimeOffset CreatedUtc, DateTimeOffset UpdatedUtc,
+    /// <summary>Isolation backend for this Profile. Absent in older documents means the process-local default.</summary>
+    IsolationBackendKind Backend = IsolationBackendKind.ProcessLocal);
 
 public sealed record ProfilesDocument
 {
@@ -76,7 +73,7 @@ public sealed record LaunchBarrierRecord
 }
 
 public sealed record ProfileStatus(Guid ProfileId, string Name, RuntimeState State, ProcessIdentity? Root, string? Detail, string? WorkspacePath,
-    string? IsolationBoxName = null, bool? WriteThroughReady = null);
+    string? IsolationBoxName = null, bool? IsolationReady = null);
 public sealed record LaunchResult(ProfileStatus Status, bool StartedNewProcess);
 public sealed record StopResult(ProfileStatus Status, bool WasRunning, bool Graceful);
 
@@ -119,6 +116,4 @@ public sealed class LaunchStateUncertainException(string message, Exception? inn
 [JsonSerializable(typeof(IsolationScopeMarker))]
 [JsonSerializable(typeof(PendingCallback))]
 [JsonSerializable(typeof(DeepLinkRegistration))]
-[JsonSerializable(typeof(ElevationRequest))]
-[JsonSerializable(typeof(ElevationResult))]
 public partial class HubJsonContext : JsonSerializerContext;

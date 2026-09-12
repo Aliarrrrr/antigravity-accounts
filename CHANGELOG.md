@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Removed
+
+- The Sandboxie dependency, end to end: the sandbox backend, the elevated box/`OpenFilePath` administration, the keyring shim and its CLI verbs, and the write-through gates. No administrator rights are needed at any point.
+
+### Changed
+
+- Profiles recorded as the legacy sandbox backend resolve to the same process-local scope; the launch-time store-selection verification keeps them off the shared Windows credential entry either way. Old configuration documents load unchanged.
+
+### Added
+
+- `configure-deeplink register|restore` routes the vendor `antigravity://` callback to the Profile that is waiting for it, so concurrent sign-ins reach the right window; registering keeps the previous handler and can always be restored.
+
+
+
 - **Profiles can now run without Sandboxie.** A process-local backend gives each Profile its own identity by pointing the instance's home at its managed data root and asking the language server to keep its OAuth token in a file there, instead of the one shared Windows credential entry. Preparing a scope needs no elevation, no credential shim and no direct-write rules, and a launch is not trusted until the language server proves in its own log that it switched to the file store.
 - New CLI: `configure-isolation <sandboxie|process-local>` (backend for newly created profiles; existing profiles keep theirs), `new --backend <...>` (override for one profile), `configure-deeplink <register|restore>` and `callback <uri>` (route the vendor deep link to the profile that is waiting for it, so concurrent sign-ins land in the right window).
 - Deep-link routing is explicit: registering points `antigravity://` at the Hub and keeps the previous handler, so it can always be restored.
