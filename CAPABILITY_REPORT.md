@@ -1,5 +1,7 @@
 # Capability report — 2026-09-09
 
+> **Superseded in 0.4.0** — the Sandboxie combination described here was replaced by the process-local backend (per-Profile home, file token store with launch-time verification, deep-link routing). Kept as the historical record of the original acceptance.
+
 ## Verdict
 
 Antigravity Desktop 2.12.2 can run concurrent Google-account Profiles under one Windows user when each instance uses both dedicated filesystem paths and a dedicated Sandboxie box whose local credential store already owns the fixed target `gemini:antigravity`. This exact combination passed manual A/B authentication and restart acceptance with Sandboxie Plus 1.18.2 / core 5.73.2.

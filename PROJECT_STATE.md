@@ -4,11 +4,13 @@
 
 The Sandboxie dependency is no longer required. A process-local backend ships as the default for new Profiles: each Profile points the instance's home at its managed data root and asks the language server to keep its OAuth token in a file there, so instances stop sharing the Windows user's `gemini:antigravity` credential entry. A launch fails closed unless the language server proves in its own log that it switched to the file store, and the vendor's `antigravity://` callback is routed to the Profile that is waiting for it, so concurrent sign-ins land in the right window.
 
-Two gates were passed against the real desktop: D2 (two Profiles, two Google accounts, one file token per Profile, the host credential entry untouched, restart persistence) and the deep-link handoff probe. The evidence tools live in `scripts/` (`Probe-KeyringBypass.py`, `Probe-DesktopEnvPropagation.py`, `Probe-DualAccountLogin.py`, `Probe-ProcessEnvironment.py`, `Agph-D2-ProfileControl.ps1`) and are part of the regression set.
+The D2 gate passed against the real desktop (two Profiles, two Google accounts, one file token per Profile, the host credential entry untouched, restart persistence). The evidence tools live in `scripts/` (`Probe-KeyringBypass.py`, `Probe-DesktopEnvPropagation.py`, `Probe-DualAccountLogin.py`, `Probe-ProcessEnvironment.py`, `Agph-D2-ProfileControl.ps1`) and are part of the regression set.
+
+Correction (0.4.1 audit): the earlier claim of a passed "deep-link handoff probe" was wrong — only the registration write was probed, and the handoff launched the Hub CLI instead of the vendor desktop, dropping every callback. Fixed; concurrent sign-in still needs one real end-to-end acceptance run.
 
 The Sandboxie code path has been removed in a separately revertible commit. Profiles recorded as the legacy backend resolve to the same process-local scope, whose launch is verified either way.
 
-## Earlier state — 2026-09-09
+## Earlier state — 2026-09-09 (historical, Sandboxie era)
 
 ## Current phase
 

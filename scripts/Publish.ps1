@@ -45,10 +45,10 @@ try {
             $file = Join-Path $root $name
             if (Test-Path -LiteralPath $file -PathType Leaf) { Copy-Item -LiteralPath $file -Destination $packageRoot }
         }
-        # 复制隔离相关的可选脚本（若存在），用于安装包结构与人工双账号验收。
+        # 复制可选探针脚本（若存在），用于安装包结构与人工双账号验收。
         $scripts = Join-Path $packageRoot 'scripts'
         New-Item -ItemType Directory -Path $scripts | Out-Null
-        foreach ($name in @('Probe-Antigravity.ps1', 'New-IsolationBox.ps1', 'Set-IsolationWriteThrough.ps1')) {
+        foreach ($name in @('Probe-Antigravity.ps1')) {
             $source = Join-Path $PSScriptRoot $name
             if (Test-Path -LiteralPath $source -PathType Leaf) { Copy-Item -LiteralPath $source -Destination $scripts }
         }

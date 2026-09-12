@@ -59,7 +59,7 @@ public partial class MainWindow : Window
         var allIsolated = _rows.All(row => row.IsolationBoxName is not null);
         LaunchAllButton.IsEnabled = _rows.Count <= 1 || allIsolated;
         LaunchAllButton.ToolTip = LaunchAllButton.IsEnabled ? null :
-            "Launch all requires every Profile to have a prepared isolation box.";
+            "Launch all requires every Profile to have a prepared isolation scope.";
         EmptyState.Visibility = _rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         ProfilesGrid.Visibility = _rows.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         var needsFix = _rows.Count(row => row.NeedsFix);
@@ -115,7 +115,7 @@ public partial class MainWindow : Window
     private async void Workspace_Click(object sender, RoutedEventArgs e)
     {
         if (!TryGetProfileId(sender, out var id)) return;
-        var path = InputDialog.Ask(this, "Workspace metadata", "Workspace path (leave blank to clear). It is added to direct-write rules.");
+        var path = InputDialog.Ask(this, "Workspace metadata", "Workspace path (leave blank to clear). Recorded as metadata only; the desktop does not open it automatically.");
         if (path is null) return;
         await RunAsync(async () =>
         {
@@ -127,7 +127,7 @@ public partial class MainWindow : Window
     private async void Remove_Click(object sender, RoutedEventArgs e)
     {
         if (!TryGetProfileId(sender, out var id)) return;
-        if (MessageBox.Show("Remove registration? Profile data and its isolation box are kept.", "Remove profile",
+        if (MessageBox.Show("Remove registration? Profile data and its isolation scope are kept.", "Remove profile",
                 MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
         await RunAsync(async () =>

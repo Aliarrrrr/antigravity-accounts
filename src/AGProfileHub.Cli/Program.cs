@@ -105,7 +105,7 @@ internal static class CliApplication
                 RequireCount(tail, 1, "iso-launch <id>");
                 var isoLaunchId = await ResolveIdAsync(hub, tail[0]);
                 if (await hub.GetIsolationStatusAsync(isoLaunchId).ConfigureAwait(false) is null)
-                    throw new HubException("This profile has no isolation box yet. Run iso-prepare first.", "isolation_not_prepared");
+                    throw new HubException("This profile has no isolation scope yet. Run iso-prepare first.", "isolation_not_prepared");
                 var isoLaunch = await hub.LaunchAsync(isoLaunchId).ConfigureAwait(false);
                 if (!json) PrintStatus(isoLaunch.Status);
                 return isoLaunch;
@@ -113,7 +113,7 @@ internal static class CliApplication
                 RequireCount(tail, 1, "iso-stop <id>");
                 var isoStopId = await ResolveIdAsync(hub, tail[0]);
                 if (await hub.GetIsolationStatusAsync(isoStopId).ConfigureAwait(false) is null)
-                    throw new HubException("This profile has no isolation box yet. Run iso-prepare first.", "isolation_not_prepared");
+                    throw new HubException("This profile has no isolation scope yet. Run iso-prepare first.", "isolation_not_prepared");
                 var isoStopped = await hub.StopAsync(isoStopId, force: true).ConfigureAwait(false);
                 if (!json) PrintStatus(isoStopped.Status);
                 return isoStopped;
@@ -415,7 +415,7 @@ internal static class CliApplication
     }
 
     private static void PrintStatus(ProfileStatus status) =>
-        Console.WriteLine($"{status.ProfileId:D}  {status.Name}  {status.State}  PID {status.Root?.ProcessId.ToString() ?? "-"}  BOX {status.IsolationBoxName ?? "-"}  {status.Detail}");
+        Console.WriteLine($"{status.ProfileId:D}  {status.Name}  {status.State}  PID {status.Root?.ProcessId.ToString() ?? "-"}  SCOPE {status.IsolationBoxName ?? "-"}  {status.Detail}");
 
     private static void PrintDoctor(DoctorReport report)
     {

@@ -54,7 +54,7 @@ public sealed class HubService
         if (box is null) return await _processes.LaunchAsync(id, cancellationToken).ConfigureAwait(false);
         var launched = await _isolation!.LaunchAsync(id, cancellationToken).ConfigureAwait(false);
         return new LaunchResult(new ProfileStatus(id, profile.Name, RuntimeState.Running, null,
-            launched.StartedNewProcess ? $"Started in isolation box {launched.BoxName}." : $"Already running in isolation box {launched.BoxName}.",
+            launched.StartedNewProcess ? $"Started in isolation scope {launched.BoxName}." : $"Already running in isolation scope {launched.BoxName}.",
             profile.WorkspacePath, launched.BoxName), launched.StartedNewProcess);
     }
     public async Task<IReadOnlyList<LaunchResult>> LaunchAllAsync(CancellationToken cancellationToken = default)
@@ -64,12 +64,12 @@ public sealed class HubService
         if (profiles.Count > 1)
         {
             if (_isolation is null)
-                throw new UnsupportedCapabilityException("Launch all requires every profile to have a prepared isolation box.");
+                throw new UnsupportedCapabilityException("Launch all requires every profile to have a prepared isolation scope.");
             foreach (var profile in profiles)
             {
                 var status = await _isolation.GetStatusAsync(profile.Id, profile.WorkspacePath, cancellationToken).ConfigureAwait(false);
                 if (status is null)
-                    throw new UnsupportedCapabilityException("Launch all was not started because every profile must have a prepared isolation box.");
+                    throw new UnsupportedCapabilityException("Launch all was not started because every profile must have a prepared isolation scope.");
                 if (!status.BackendAvailable || !status.BoxExists)
                     throw new UnsupportedCapabilityException($"Launch all was not started because isolation scope '{status.BoxName}' is not ready.");
             }
@@ -85,7 +85,7 @@ public sealed class HubService
         if (box is null) return await _processes.StopAsync(id, force, cancellationToken).ConfigureAwait(false);
         var wasRunning = await _isolation!.StopAsync(id, cancellationToken).ConfigureAwait(false);
         return new StopResult(new ProfileStatus(id, profile.Name, RuntimeState.Stopped, null,
-            wasRunning ? $"Terminated dedicated isolation box {box.BoxName}." : $"Isolation box {box.BoxName} was already stopped.",
+            wasRunning ? $"Terminated the dedicated isolation scope {box.BoxName}." : $"Isolation scope {box.BoxName} was already stopped.",
             profile.WorkspacePath, box.BoxName), wasRunning, false);
     }
     public async Task<string> CreateShortcutAsync(Guid id, string cliExecutable, string? directory = null, CancellationToken cancellationToken = default)
@@ -123,9 +123,9 @@ public sealed class HubService
         _isolation is null ? Task.FromResult<IReadOnlyList<IsolationRuntimeStatus>>([]) : _isolation.StatusAsync(cancellationToken);
 
     /// <summary>
-    /// Runs the idempotent setup chain (box, registration, keyring,
-    /// direct-write) and returns the stage that was reached. This is the
-    /// single entry point used by both the new-user commands and launch.
+    /// Runs the idempotent setup chain (scope creation and registration) and
+    /// returns the stage that was reached. This is the single entry point used
+    /// by both the new-user commands and launch.
     /// </summary>
     public async Task<IsolationSetupReport> EnsureIsolationReadyAsync(Guid id, bool allowFreshBox = false,
         CancellationToken cancellationToken = default)
