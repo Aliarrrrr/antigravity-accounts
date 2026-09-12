@@ -50,6 +50,8 @@ var tests = new (string Name, Func<Task> Run)[]
     ("shortcut binds UUID and quoted data root without overwriting", TestShortcutAsync),
     ("isolation setup is idempotent", TestIsolationSetupAsync),
     ("profiles resolve by name or unique prefix", TestProfileResolveAsync),
+    ("scope attribution parses argv strictly and rejects look-alike paths", TestScopeAttributionStrictAsync),
+    ("scope children require a plausible creation order", TestScopeChildStartGuardAsync),
 };
 
 var failures = new List<string>();
@@ -766,6 +768,89 @@ static async Task TestShortcutAsync()
     True(bytes.SequenceEqual(File.ReadAllBytes(path)), "existing shortcut must be preserved");
     Equal("\"D:\\data root\\\\\"", DesktopShortcut.QuoteArgument("D:\\data root\\"));
 }
+static async Task TestScopeAttributionStrictAsync()
+{
+    // A space-free root keeps every negative case in the argv domain where a
+    // single token really is the whole value; quoted handling has its own case.
+    var expected = @"D:\root\profiles\ABCDEF01\user-data";
+    var now = DateTimeOffset.UtcNow;
+    ProcessLocalBackend.ProcessRow Row(int pid, int ppid, string name, string? commandLine, int startOffsetSeconds = 0) =>
+        new(pid, ppid, name, commandLine, now.AddSeconds(startOffsetSeconds));
+
+    // The quoted and bare argv forms of the exact path both match.
+    var exactQuoted = new[] { Row(10, 1, "Antigravity.exe", $"\"C:\\apps\\Antigravity.exe\" --user-data-dir=\"{expected}\" --flag") };
+    Equal(1, ProcessLocalBackend.SelectScopeProcesses(exactQuoted, expected).Count);
+    var exactBare = new[] { Row(10, 1, "Antigravity.exe", $"C:\\apps\\Antigravity.exe --user-data-dir={expected}") };
+    Equal(1, ProcessLocalBackend.SelectScopeProcesses(exactBare, expected).Count);
+
+    // A quoted path containing spaces stays one argv element and still matches.
+    var spaced = @"D:\data root\profiles\ABCDEF01\user-data";
+    var quotedSpaces = new[] { Row(17, 1, "Antigravity.exe", $"Antigravity.exe --user-data-dir=\"{spaced}\"") };
+    Equal(1, ProcessLocalBackend.SelectScopeProcesses(quotedSpaces, spaced).Count);
+
+    // A path that merely embeds the expected one as a prefix or infix must not match:
+    // the old substring comparison attributed such look-alike roots to this scope.
+    var lookAlikes = new[]
+    {
+        Row(11, 1, "Antigravity.exe", $"Antigravity.exe --user-data-dir={expected}-old"),
+        Row(12, 1, "Antigravity.exe", $"Antigravity.exe --user-data-dir=\"{expected}\\extra\""),
+        Row(13, 1, "Antigravity.exe", "Antigravity.exe --user-data-dir=--user-data-dir="),
+        Row(14, 1, "language_server.exe", $"language_server --user-data-dir={expected}")
+    };
+    Equal(0, ProcessLocalBackend.SelectScopeProcesses(lookAlikes, expected).Count);
+
+    // A command line with two --user-data-dir values is ambiguous and matches nothing.
+    var ambiguous = new[] { Row(15, 1, "Antigravity.exe", $"Antigravity.exe --user-data-dir={expected} --user-data-dir=C:\\other") };
+    Equal(0, ProcessLocalBackend.SelectScopeProcesses(ambiguous, expected).Count);
+
+    // Attribution is a full-path comparison: case differences still match.
+    var sloppyCase = new[] { Row(16, 1, "Antigravity.exe", $"Antigravity.exe --user-data-dir=\"{expected.ToLowerInvariant()}\"") };
+    Equal(1, ProcessLocalBackend.SelectScopeProcesses(sloppyCase, expected).Count);
+}
+
+static async Task TestScopeChildStartGuardAsync()
+{
+    var expected = @"D:\root\profiles\ABCDEF01\user-data";
+    var now = DateTimeOffset.UtcNow;
+    ProcessLocalBackend.ProcessRow Row(int pid, int ppid, string name, string? commandLine, int startOffsetSeconds) =>
+        new(pid, ppid, name, commandLine, now.AddSeconds(startOffsetSeconds));
+
+    // A language server child created after the desktop root joins the scope.
+    var family = new[]
+    {
+        Row(20, 1, "Antigravity.exe", $"Antigravity.exe --user-data-dir=\"{expected}\"", 0),
+        Row(21, 20, "language_server.exe", "language_server --pipe", 5)
+    };
+    Equal(2, ProcessLocalBackend.SelectScopeProcesses(family, expected).Count);
+
+    // A reused parent PID must not pull an unrelated older process into the
+    // scope: a child created before its in-scope parent is left out.
+    var reusedParent = new[]
+    {
+        Row(30, 1, "Antigravity.exe", $"Antigravity.exe --user-data-dir=\"{expected}\"", 0),
+        Row(31, 30, "language_server.exe", "language_server --pipe", -600)
+    };
+    Equal(1, ProcessLocalBackend.SelectScopeProcesses(reusedParent, expected).Count);
+
+    // A child whose creation time cannot be parsed stays outside the scope.
+    var unverifiableChild = new[]
+    {
+        Row(40, 1, "Antigravity.exe", $"Antigravity.exe --user-data-dir=\"{expected}\"", 0),
+        new ProcessLocalBackend.ProcessRow(41, 40, "language_server.exe", "language_server --pipe", DateTimeOffset.MinValue)
+    };
+    Equal(1, ProcessLocalBackend.SelectScopeProcesses(unverifiableChild, expected).Count);
+
+    // Grandchildren inherit through the same guard: after an older child is
+    // rejected, its own children are unreachable from the scope.
+    var blockedChain = new[]
+    {
+        Row(50, 1, "Antigravity.exe", $"Antigravity.exe --user-data-dir=\"{expected}\"", 0),
+        Row(51, 50, "language_server.exe", "language_server --pipe", -600),
+        Row(52, 51, "language_server.exe", "language_server --pipe", 9)
+    };
+    Equal(1, ProcessLocalBackend.SelectScopeProcesses(blockedChain, expected).Count);
+}
+
 static void True(bool condition, string? message = null) { if (!condition) throw new InvalidOperationException(message ?? "Expected true."); }
 static void Equal<T>(T expected, T actual) { if (!EqualityComparer<T>.Default.Equals(expected, actual)) throw new InvalidOperationException($"Expected '{expected}', got '{actual}'."); }
 static void Throws<T>(Action action) where T : Exception { try { action(); } catch (T) { return; } throw new InvalidOperationException($"Expected {typeof(T).Name}."); }

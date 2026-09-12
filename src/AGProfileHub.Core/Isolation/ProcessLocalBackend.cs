@@ -87,31 +87,66 @@ public sealed class ProcessLocalBackend(HubPaths paths) : IIsolationBackend
         var expected = Paths.UserData(profileId);
         var processes = QueryProcesses();
         if (processes.Count == 0) return [];
+        return SelectScopeProcesses(processes, expected);
+    }
 
-        var roots = processes
+    /// <summary>
+    /// Attributes processes to a scope. Pure so the matching contract can be
+    /// tested without a live WMI enumeration.
+    /// </summary>
+    /// <remarks>
+    /// A root is a desktop process whose <c>--user-data-dir</c> argument equals
+    /// this scope's directory exactly: the command line is parsed with the same
+    /// argv rules the vendor desktop uses (<see cref="CommandLineIdentity"/>) and
+    /// the value is compared as a full path, so a path that merely contains the
+    /// expected one as a prefix or substring can never be mistaken for it. A
+    /// child joins the scope only while its parent is in scope and it was
+    /// created no earlier than one second before that parent started, which is
+    /// the same guard the legacy serial path uses against a reused parent PID.
+    /// </remarks>
+    internal static IReadOnlyList<ProcessRow> SelectScopeProcesses(IReadOnlyList<ProcessRow> processes, string expectedUserData)
+    {
+        var inScope = new Dictionary<int, DateTimeOffset>();
+        foreach (var row in processes)
+        {
             // Win32_Process.Name carries the extension; Process.ProcessName strips
             // it, so a check against "Antigravity" here would never match.
-            .Where(p => p.Name.Equals("Antigravity.exe", StringComparison.OrdinalIgnoreCase))
-            .Where(p => p.CommandLine?.Contains($"--user-data-dir=\"{expected}\"", StringComparison.OrdinalIgnoreCase) == true ||
-                        p.CommandLine?.Contains($"--user-data-dir={expected}", StringComparison.OrdinalIgnoreCase) == true)
-            .Select(p => p.ProcessId)
-            .ToHashSet();
+            if (!row.Name.Equals("Antigravity.exe", StringComparison.OrdinalIgnoreCase)) continue;
+            var claimed = CommandLineIdentity.TryGetUserDataPath(row.CommandLine ?? string.Empty);
+            if (claimed is null || !PathEquals(claimed, expectedUserData)) continue;
+            inScope[row.ProcessId] = row.StartedUtc;
+        }
 
-        var inScope = new HashSet<int>(roots);
         bool grew;
         do
         {
             grew = false;
             foreach (var process in processes)
             {
-                if (inScope.Contains(process.ProcessId) || !inScope.Contains(process.ParentProcessId)) continue;
-                inScope.Add(process.ProcessId);
+                if (inScope.ContainsKey(process.ProcessId)) continue;
+                if (!inScope.TryGetValue(process.ParentProcessId, out var parentStarted)) continue;
+                if (process.StartedUtc == DateTimeOffset.MinValue || process.StartedUtc < parentStarted.AddSeconds(-1)) continue;
+                inScope[process.ProcessId] = process.StartedUtc;
                 grew = true;
             }
         }
         while (grew);
 
-        return [.. processes.Where(p => inScope.Contains(p.ProcessId))];
+        return [.. processes.Where(p => inScope.ContainsKey(p.ProcessId))];
+    }
+
+    private static bool PathEquals(string? left, string? right)
+    {
+        if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right)) return false;
+        try
+        {
+            return string.Equals(Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar),
+                Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
     }
 
     public void Terminate(string scope)
@@ -204,7 +239,7 @@ public sealed class ProcessLocalBackend(HubPaths paths) : IIsolationBackend
     // escape for a literal percent sign.
     private static string EscapeBatch(string value) => value.Replace("%", "%%", StringComparison.Ordinal);
 
-    private sealed record ProcessRow(int ProcessId, int ParentProcessId, string Name, string? CommandLine, DateTimeOffset StartedUtc);
+    internal sealed record ProcessRow(int ProcessId, int ParentProcessId, string Name, string? CommandLine, DateTimeOffset StartedUtc);
 
     private static IReadOnlyList<ProcessRow> QueryProcesses()
     {
