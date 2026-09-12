@@ -13,6 +13,11 @@
 ### Added
 
 - `configure-deeplink register|restore` routes the vendor `antigravity://` callback to the Profile that is waiting for it, so concurrent sign-ins reach the right window; registering keeps the previous handler and can always be restored.
+- A launcher re-assertion puts the callback registration back after every desktop start, because the vendor desktop rewrites the scheme to itself while starting up.
+
+### Fixed
+
+- Creating or renaming a Profile no longer accepts a name that another Profile already uses; duplicate names made every name-based lookup ambiguous.
 
 
 
