@@ -61,6 +61,8 @@
                 <Button Content="Stop all" Style="{StaticResource ToolbarButton}" Click="StopAll_Click"/>
                 <Button Content="Refresh" Style="{StaticResource ToolbarButton}" Click="Refresh_Click"/>
                 <Button Content="Doctor" Style="{StaticResource ToolbarButton}" Click="Doctor_Click"/>
+                <Button Content="Callbacks" Style="{StaticResource ToolbarButton}" Click="DeepLink_Click"
+                        ToolTip="Route antigravity:// sign-in callbacks through this Hub so concurrent logins reach the right window"/>
                 <Button Content="Settings" Style="{StaticResource ToolbarButton}" Click="Settings_Click"/>
                 <Button Content="Data" Style="{StaticResource ToolbarButton}" Click="OpenData_Click"/>
                 <Button Content="Logs" Style="{StaticResource ToolbarButton}" Click="OpenLogs_Click"/>

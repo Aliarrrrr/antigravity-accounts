@@ -92,7 +92,10 @@ public partial class MainWindow : Window
             {
                 await _service.EnsureIsolationReadyAsync(profile.Id);
             }
-            catch (UnsupportedCapabilityException) { }
+            catch (UnsupportedCapabilityException ex)
+            {
+                StatusText.Text = $"Profile created, but isolation was not prepared: {ex.Message}";
+            }
             await RefreshAsync();
         });
     }
@@ -263,6 +266,35 @@ public partial class MainWindow : Window
     }
 
     private void OpenData_Click(object sender, RoutedEventArgs e) => OpenFolderSafely(() => _service.OpenDataFolder());
+
+    private async void DeepLink_Click(object sender, RoutedEventArgs e)
+    {
+        await RunAsync(() =>
+        {
+            if (_service.IsDeepLinkRegistered)
+            {
+                var answer = MessageBox.Show(this,
+                    "Sign-in callbacks are currently routed through this Hub.\n\nRestore the previous antigravity:// handler?",
+                    "Deep-link routing", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (answer == MessageBoxResult.Yes)
+                    StatusText.Text = _service.RestoreDeepLink()
+                        ? "The previous antigravity:// handler was restored."
+                        : "Nothing was restored: this Hub no longer owns the registration.";
+            }
+            else
+            {
+                var answer = MessageBox.Show(this,
+                    "Route antigravity:// sign-in callbacks through this Hub, so concurrent logins reach the right window?\n\nThe previous handler is backed up and can be restored here or with 'agprofile configure-deeplink restore'.",
+                    "Deep-link routing", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (answer == MessageBoxResult.Yes)
+                {
+                    _service.RegisterDeepLink(DesktopShortcut.FindCliExecutable(AppContext.BaseDirectory));
+                    StatusText.Text = "Sign-in callbacks now route through this Hub.";
+                }
+            }
+            return Task.CompletedTask;
+        });
+    }
     private async void Settings_Click(object sender, RoutedEventArgs e)
     {
         var picker = new Microsoft.Win32.OpenFileDialog { Title = "Select Antigravity executable", Filter = "Antigravity executable (*.exe)|*.exe", CheckFileExists = true };

@@ -50,6 +50,9 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\hub\{#MyAppExeName}"; Worki
 [Run]
 Filename: "{app}\hub\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
 
+[UninstallRun]
+Filename: "{app}\cli\AGProfileHub.Cli.exe"; Parameters: "configure-deeplink restore"; Flags: runhidden waituntilterminated skipifdoesntexist
+
 [Code]
 function DependencySummary(): String;
 var

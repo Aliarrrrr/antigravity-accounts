@@ -227,6 +227,15 @@ public sealed class HubService
     public void OpenDataFolder(Guid? profileId = null) => OpenFolder(profileId is null ? _paths.DataRoot : _paths.ProfileRoot(profileId.Value));
     public void OpenLogsFolder() => OpenFolder(_paths.LogsRoot);
 
+    /// <summary>True when the antigravity:// scheme points at this Hub's router.</summary>
+    public bool IsDeepLinkRegistered => DeepLinkRouter.IsRegisteredFor(_paths);
+
+    /// <summary>Routes the vendor callback through this Hub; the previous handler is kept for restore.</summary>
+    public void RegisterDeepLink(string cliExecutable) => DeepLinkRouter.Register(_paths, cliExecutable);
+
+    /// <summary>Puts the previous handler back when this Hub owns the registration.</summary>
+    public bool RestoreDeepLink() => DeepLinkRouter.Restore(_paths);
+
     private static void OpenFolder(string path)
     {
         PathSafety.RejectExistingPathAncestors(path);
