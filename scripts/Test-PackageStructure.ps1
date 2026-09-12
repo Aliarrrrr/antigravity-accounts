@@ -17,8 +17,7 @@ function Check([string]$Name, [bool]$Condition) {
 try {
     $required = @(
         'package-manifest.json', 'README.md', 'SECURITY.md', 'CHANGELOG.md', 'VERSIONING.md',
-        'hub\AGProfileHub.Gui.exe', 'cli\AGProfileHub.Cli.exe',
-        'scripts\New-IsolationBox.ps1', 'scripts\Set-IsolationWriteThrough.ps1'
+        'hub\AGProfileHub.Gui.exe', 'cli\AGProfileHub.Cli.exe'
     )
     foreach ($relative in $required) {
         Check "contains $relative" (Test-Path -LiteralPath (Join-Path $package $relative) -PathType Leaf)
@@ -42,7 +41,7 @@ try {
     Check 'packaged scripts contain no development-machine paths' ([bool]($portableText -notmatch 'C:\\Users\\ZLF|D:\\mutigravity|\.workbuddy'))
 
     $help = & $cli --data-root (Join-Path $testRoot 'data') --json help
-    Check 'packaged CLI help runs' ([bool]($LASTEXITCODE -eq 0 -and (($help | Out-String | ConvertFrom-Json).help -match 'iso-writethrough')))
+    Check 'packaged CLI help runs' ([bool]($LASTEXITCODE -eq 0 -and (($help | Out-String | ConvertFrom-Json).help -match 'configure-deeplink')))
 }
 finally {
     $resolved = [IO.Path]::GetFullPath($testRoot)
