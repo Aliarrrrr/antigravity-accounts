@@ -59,6 +59,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("a failed launch clears the waiting grant", TestFailedLaunchClearsPendingAsync),
     ("stopping one profile keeps another profile's pending", TestStopKeepsForeignPendingAsync),
     ("a corrupt registration record blocks the launch before anything starts", TestCorruptRegistrationBlocksLaunchAsync),
+    ("callback URIs are validated before any handoff", TestCallbackUriValidationAsync),
 };
 
 var failures = new List<string>();
@@ -1013,6 +1014,20 @@ static async Task TestCorruptRegistrationBlocksLaunchAsync()
     await ThrowsAsync<HubException>(() => launcher.LaunchAsync(id));
     True(backend.LaunchCalls == 0, "a corrupt registration record must fail before the desktop starts");
     True(!File.Exists(DeepLinkRouter.PendingPath(fixture.Paths)), "the failed launch must not leave a waiting grant");
+}
+
+static async Task TestCallbackUriValidationAsync()
+{
+    // The OS handler quotes %1 so a webpage cannot inject a second argument;
+    // the router still refuses anything that is not a plausible vendor URI.
+    await ThrowsAsync<HubException>(() => Task.Run(() => DeepLinkRouter.ValidateCallbackUri("--user-data-dir=C:\\evil")));
+    await ThrowsAsync<HubException>(() => Task.Run(() => DeepLinkRouter.ValidateCallbackUri("https://example.com/oauth")));
+    await ThrowsAsync<HubException>(() => Task.Run(() => DeepLinkRouter.ValidateCallbackUri("antigravity://oauth?code=x\n--gpu-launcher=evil")));
+    await ThrowsAsync<HubException>(() => Task.Run(() => DeepLinkRouter.ValidateCallbackUri("")));
+    await ThrowsAsync<HubException>(() => Task.Run(() => DeepLinkRouter.ValidateCallbackUri(new string('a', DeepLinkRouter.MaxCallbackUriLength + 1))));
+
+    // Boundary: exactly the cap is accepted, and the scheme is case-insensitive.
+    DeepLinkRouter.ValidateCallbackUri(new string('a', DeepLinkRouter.MaxCallbackUriLength - "antigravity://".Length).Insert(0, "ANTIGRAVITY://"));
 }
 
 static void True(bool condition, string? message = null) { if (!condition) throw new InvalidOperationException(message ?? "Expected true."); }

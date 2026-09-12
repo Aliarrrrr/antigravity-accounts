@@ -110,9 +110,30 @@ public static class DeepLinkRouter
     /// <returns>The pid of the short-lived handoff process, or 0 when nothing is waiting.</returns>
     public static int Route(HubPaths paths, string uri)
     {
+        ValidateCallbackUri(uri);
         var start = BuildHandoff(paths, uri);
         if (start is null) return 0;
         return System.Diagnostics.Process.Start(start)?.Id ?? 0;
+    }
+
+    /// <summary>The longest callback URI the router accepts.</summary>
+    public const int MaxCallbackUriLength = 8192;
+
+    /// <summary>
+    /// Validates a callback URI before it can reach <see cref="Process.Start"/>.
+    /// The OS handler quotes <c>%1</c>, so a webpage already cannot inject a
+    /// second argument into the relaunched desktop; this closes the rest of the
+    /// gap in our own hands: only the vendor scheme, a bounded length, and no
+    /// control characters are ever forwarded.
+    /// </summary>
+    public static void ValidateCallbackUri(string uri)
+    {
+        if (string.IsNullOrWhiteSpace(uri) || !uri.StartsWith(Scheme + ":", StringComparison.OrdinalIgnoreCase))
+            throw new HubException($"The deep-link callback must be an {Scheme}:// URI.", "deeplink_callback_invalid");
+        if (uri.Length > MaxCallbackUriLength)
+            throw new HubException($"The deep-link callback URI exceeds {MaxCallbackUriLength} characters.", "deeplink_callback_invalid");
+        if (uri.Any(char.IsControl))
+            throw new HubException("The deep-link callback URI contains control characters.", "deeplink_callback_invalid");
     }
 
     /// <summary>
@@ -186,7 +207,18 @@ public static class DeepLinkRouter
         };
         new AtomicJsonStore(paths.DataRoot).WriteAsync(RegistrationPath(paths), record,
             HubJsonContext.Default.DeepLinkRegistration, CancellationToken.None).ConfigureAwait(false).GetAwaiter().GetResult();
-        WriteRegisteredCommand(record.RouterCommand);
+        try
+        {
+            WriteRegisteredCommand(record.RouterCommand);
+        }
+        catch
+        {
+            // A record that claims ownership while the scheme was never
+            // switched would let EnsureRegistered flip the scheme later as if
+            // the registration had succeeded. Remove the record instead.
+            File.Delete(RegistrationPath(paths));
+            throw;
+        }
     }
 
     /// <summary>
