@@ -239,6 +239,7 @@ public sealed class ProcessLocalBackend(HubPaths paths) : IIsolationBackend
         return rows;
     }
 
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     private static DateTimeOffset ParseCreationDate(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return DateTimeOffset.MinValue;
