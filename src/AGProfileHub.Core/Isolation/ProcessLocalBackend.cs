@@ -86,7 +86,9 @@ public sealed class ProcessLocalBackend(HubPaths paths) : IIsolationBackend
         if (processes.Count == 0) return [];
 
         var roots = processes
-            .Where(p => p.Name.Equals("Antigravity", StringComparison.OrdinalIgnoreCase))
+            // Win32_Process.Name carries the extension; Process.ProcessName strips
+            // it, so a check against "Antigravity" here would never match.
+            .Where(p => p.Name.Equals("Antigravity.exe", StringComparison.OrdinalIgnoreCase))
             .Where(p => p.CommandLine?.Contains($"--user-data-dir=\"{expected}\"", StringComparison.OrdinalIgnoreCase) == true ||
                         p.CommandLine?.Contains($"--user-data-dir={expected}", StringComparison.OrdinalIgnoreCase) == true)
             .Select(p => p.ProcessId)
@@ -145,8 +147,40 @@ public sealed class ProcessLocalBackend(HubPaths paths) : IIsolationBackend
     public int LaunchDetached(string scope, string executable, IReadOnlyList<string> arguments,
         IReadOnlyDictionary<string, string> environment)
     {
-        using var process = Start(executable, arguments, environment);
+        // The Hub and CLI are frequently started from an Electron host. Anything
+        // they launch directly lands in that host's job object, which kills the
+        // vendor desktop's Chromium children and forbids breaking away. Routing
+        // the start through the shell (explorer.exe) with a small wrapper moves
+        // the desktop into the interactive session, which is the only context in
+        // which the vendor desktop survives.
+        var wrapper = WriteLaunchWrapper(scope, executable, arguments, environment);
+        var info = new ProcessStartInfo("explorer.exe", $"\"{wrapper}\"") { UseShellExecute = false };
+        info.Environment.Remove("ELECTRON_RUN_AS_NODE");
+        var process = Process.Start(info)
+            ?? throw new HubException("Failed to start the isolation launcher.", "isolation_start_failed");
         return process.Id;
+    }
+
+    private string WriteLaunchWrapper(string scope, string executable, IReadOnlyList<string> arguments,
+        IReadOnlyDictionary<string, string> environment)
+    {
+        var profileId = ProfileIdFromScope(scope);
+        var wrapper = Path.Combine(Paths.ProfileRoot(profileId), "launch.cmd");
+        var lines = new List<string> { "@echo off" };
+        // The shell does not reliably hand a custom environment block down to the
+        // wrapper's child, so the wrapper sets the instance's home itself. This
+        // mirrors the exact wrapper that was proven against the real desktop.
+        foreach (var pair in environment)
+        {
+            if (string.Equals(pair.Key, "ELECTRON_RUN_AS_NODE", StringComparison.OrdinalIgnoreCase)) continue;
+            lines.Add($"set \"{pair.Key}={pair.Value}\"");
+        }
+        lines.Add("set \"ELECTRON_RUN_AS_NODE=\"");
+        var quoted = string.Join(" ", arguments.Select(argument => $"\"{argument}\""));
+        lines.Add($"start \"\" \"{executable}\" {quoted}");
+        // ASCII keeps cmd's parser deterministic on any code page.
+        File.WriteAllText(wrapper, string.Join("\r\n", lines) + "\r\n", new System.Text.ASCIIEncoding());
+        return wrapper;
     }
 
     private static Process Start(string executable, IReadOnlyList<string> arguments,

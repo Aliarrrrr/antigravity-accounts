@@ -36,7 +36,7 @@ public interface IProfileIsolation
 public sealed class IsolatedProfileLauncher : IProfileIsolation
 {
     private static readonly TimeSpan LockTimeout = TimeSpan.FromSeconds(10);
-    private static readonly TimeSpan DefaultScopeVerificationTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan DefaultScopeVerificationTimeout = TimeSpan.FromSeconds(120);
 
     /// <summary>
     /// The language server announces its credential-store choice with this
@@ -264,7 +264,12 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
         var plan = _driver.BuildLaunchPlan(installation, profileId, kind);
         backend.LaunchDetached(record.BoxName, plan.ExecutablePath, plan.Arguments, plan.Environment);
 
-        for (var attempt = 0; attempt < 10; attempt++)
+        // Process enumeration (and a cold profile's first start) can take well
+        // past the old ten-second window, so the wait is deadline-based. A launch
+        // that never produces a process is still reported as uncertain, but slow
+        // starts are no longer mistaken for one.
+        var launchDeadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(60);
+        while (DateTimeOffset.UtcNow < launchDeadline)
         {
             await Task.Delay(1000, cancellationToken).ConfigureAwait(false);
             var pids = backend.ListPids(record.BoxName);
@@ -320,6 +325,9 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
         {
             if (!File.Exists(path)) return false;
             await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            // The language server rewrites its log on every start, so a log that
+            // is shorter than the floor is a fresh file and the floor is stale.
+            if (stream.Length < floor) floor = 0;
             if (stream.Length <= floor) return false;
             stream.Seek(floor, SeekOrigin.Begin);
             using var reader = new StreamReader(stream);
