@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- **Profiles can now run without Sandboxie.** A process-local backend gives each Profile its own identity by pointing the instance's home at its managed data root and asking the language server to keep its OAuth token in a file there, instead of the one shared Windows credential entry. Preparing a scope needs no elevation, no credential shim and no direct-write rules, and a launch is not trusted until the language server proves in its own log that it switched to the file store.
+- New CLI: `configure-isolation <sandboxie|process-local>` (backend for newly created profiles; existing profiles keep theirs), `new --backend <...>` (override for one profile), `configure-deeplink <register|restore>` and `callback <uri>` (route the vendor deep link to the profile that is waiting for it, so concurrent sign-ins land in the right window).
+- Deep-link routing is explicit: registering points `antigravity://` at the Hub and keeps the previous handler, so it can always be restored.
+- The backend choice is an additive, optional field rather than a schema bump: documents written before it existed load as Sandboxie, and unknown future schemas are still rejected (ADR-014).
+- Tests: 51/51.
+
 - Unified development entry point `hub.ps1` (PowerShell 5.1/7) with `build`, `test`, `run`, `cli`, `publish`, `version` and `check` verbs; restore/build/test run through the shared `scripts/Common.ps1` environment.
 - Locked restore and a Release publishing gate: `packages.lock.json` is generated for all four projects and committed; `Build.ps1 -LockedRestore -Test` enforces it, and `publish -Release` requires a clean tree, an exact `v<version>` tag and a matching CHANGELOG entry.
 - Added the `version` CLI verb (`--version`/`-v`), printing the product version and exiting before any Hub bootstrap.

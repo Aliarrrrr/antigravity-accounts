@@ -1,4 +1,14 @@
-# Project state — 2026-09-09
+# Project state — 2026-09-12
+
+## Current phase
+
+The Sandboxie dependency is no longer required. A process-local backend ships as the default for new Profiles: each Profile points the instance's home at its managed data root and asks the language server to keep its OAuth token in a file there, so instances stop sharing the Windows user's `gemini:antigravity` credential entry. A launch fails closed unless the language server proves in its own log that it switched to the file store, and the vendor's `antigravity://` callback is routed to the Profile that is waiting for it, so concurrent sign-ins land in the right window.
+
+Two gates were passed against the real desktop: D2 (two Profiles, two Google accounts, one file token per Profile, the host credential entry untouched, restart persistence) and the deep-link handoff probe. The evidence tools live in `scripts/` (`Probe-KeyringBypass.py`, `Probe-DesktopEnvPropagation.py`, `Probe-DualAccountLogin.py`, `Probe-ProcessEnvironment.py`, `Agph-D2-ProfileControl.ps1`) and are part of the regression set.
+
+Sandboxie remains available as an explicit legacy backend for profiles that already own a box; removing its code is the next, separately revertible step.
+
+## Earlier state — 2026-09-09
 
 ## Current phase
 

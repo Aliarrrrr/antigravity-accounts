@@ -441,11 +441,12 @@ static Task TestPathContainmentAsync()
 static async Task TestIsolationBackendDefaultsAsync()
 {
     using var fixture = new Fixture();
+    // New Profiles are process-local: no sandbox product has to be installed.
     var created = await fixture.Hub.CreateProfileAsync("A");
-    Equal(IsolationBackendKind.Sandboxie, created.Backend);
+    Equal(IsolationBackendKind.ProcessLocal, created.Backend);
 
     // The backend field is additive, so a document written before it existed must
-    // still load and must be read as Sandboxie rather than as "unknown".
+    // still load; a Profile with no field keeps the historical Sandboxie backend.
     var legacy = "{\"schemaVersion\":1,\"profiles\":[{\"id\":\"" + created.Id +
         "\",\"name\":\"A\",\"workspacePath\":null,\"createdUtc\":\"2026-01-01T00:00:00+00:00\"," +
         "\"updatedUtc\":\"2026-01-01T00:00:00+00:00\"}]}";
@@ -454,16 +455,14 @@ static async Task TestIsolationBackendDefaultsAsync()
     Equal(1, profiles.Count);
     Equal(IsolationBackendKind.Sandboxie, profiles[0].Backend);
 
-    // Selecting a backend round-trips, and the default stays Sandboxie otherwise.
-    Equal(IsolationBackendKind.Sandboxie, (await fixture.Repository.ReadSettingsAsync()).DefaultBackend);
-    var settings = await fixture.Repository.ReadSettingsAsync();
-    await fixture.Repository.WriteSettingsAsync(settings with { DefaultBackend = IsolationBackendKind.ProcessLocal });
-    Equal(IsolationBackendKind.ProcessLocal, (await fixture.Repository.ReadSettingsAsync()).DefaultBackend);
+    // An explicit choice always wins over the default, in both directions.
+    Equal(IsolationBackendKind.ProcessLocal, (await fixture.Hub.CreateProfileAsync("Local", null, IsolationBackendKind.ProcessLocal)).Backend);
+    Equal(IsolationBackendKind.Sandboxie, (await fixture.Hub.CreateProfileAsync("Sandboxed", null, IsolationBackendKind.Sandboxie)).Backend);
 
-    // A Profile that does not name a backend inherits the configured default;
-    // one that does name it overrides the default.
-    Equal(IsolationBackendKind.ProcessLocal, (await fixture.Hub.CreateProfileAsync("InheritsDefault")).Backend);
-    Equal(IsolationBackendKind.Sandboxie, (await fixture.Hub.CreateProfileAsync("Named", null, IsolationBackendKind.Sandboxie)).Backend);
+    // The default is itself a setting that round-trips.
+    var settings = await fixture.Repository.ReadSettingsAsync();
+    await fixture.Repository.WriteSettingsAsync(settings with { DefaultBackend = IsolationBackendKind.Sandboxie });
+    Equal(IsolationBackendKind.Sandboxie, (await fixture.Hub.CreateProfileAsync("FollowsSetting")).Backend);
 }
 
 static async Task TestUnknownIsolationBackendAsync()

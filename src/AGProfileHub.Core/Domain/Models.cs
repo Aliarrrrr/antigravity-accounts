@@ -16,7 +16,7 @@ public static class SchemaVersions
 /// <see cref="Sandboxie"/>, so no migration is needed and unknown future schemas
 /// are still rejected. The one hazard is a downgrade: an older build reading
 /// <see cref="ProcessLocal"/> would treat the Profile as Sandboxie, so the field
-/// is only written when it differs from the default.
+/// is only written when it differs from the record's default.
 /// </remarks>
 [JsonConverter(typeof(JsonStringEnumConverter<IsolationBackendKind>))]
 public enum IsolationBackendKind { Sandboxie = 0, ProcessLocal = 1 }
@@ -43,8 +43,12 @@ public sealed record HubSettings
     public DateTimeOffset? AuthIsolationAttestedUtc { get; init; }
     public string? AuthIsolationAttestedVersion { get; init; }
 
-    /// <summary>Backend applied to newly created Profiles. Absent in older documents means Sandboxie.</summary>
-    public IsolationBackendKind DefaultBackend { get; init; } = IsolationBackendKind.Sandboxie;
+    /// <summary>
+    /// Backend applied to newly created Profiles. Absent in older documents means
+    /// Sandboxie, which is what 0.3.0 wrote; newer builds make new Profiles
+    /// process-local, because that needs no sandbox product installed.
+    /// </summary>
+    public IsolationBackendKind DefaultBackend { get; init; } = IsolationBackendKind.ProcessLocal;
 }
 
 public enum RuntimeState { Stopped, Running, Unknown }
