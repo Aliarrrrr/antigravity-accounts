@@ -1,4 +1,4 @@
-# Antigravity Profile Hub 0.3.0 — 实验版
+# Antigravity Profile Hub 0.4.0 — 实验版
 
 Antigravity Profile Hub 是一个 Windows 原生的 Antigravity Desktop 多 Profile 管理器。它为每个 Profile 分配独立的进程主目录和 Electron user-data，并让语言服务把登录令牌保存在各自的 Profile 目录里，让多个官方 Antigravity Desktop 窗口可以在同一个 Windows 用户下使用不同的 Google 账号——**不需要安装 Sandboxie 或任何沙盒软件**。
 
@@ -63,11 +63,11 @@ Hub 不会捆绑、下载或静默安装 Antigravity Desktop。
 
 ### 2. 选择安装包或便携包
 
-从 [v0.3.0 Release](https://github.com/Aliarrrrr/antigravity-profile-hub/releases/tag/v0.3.0) 下载文件。
+从 [v0.4.0 Release](https://github.com/Aliarrrrr/antigravity-profile-hub/releases/tag/v0.4.0) 下载文件（发布后链接生效）。
 
 | 文件 | 适合场景 | 说明 |
 |---|---|---|
-| `AGProfileHub-Setup-win-x64-0.3.0.exe` | 推荐日常使用 | 按当前用户安装，开始菜单入口稳定，升级方便 |
+| `AGProfileHub-Setup-win-x64-0.4.0.exe` | 推荐日常使用 | 按当前用户安装，开始菜单入口稳定，升级方便 |
 | `AGProfileHub-win-x64.zip` | 免安装、U 盘或测试 | 解压后直接运行，移动目录后需重建快捷方式 |
 | 对应的 `.sha256.json` | 完整性校验 | 保存 Release 构建时计算的 SHA-256 |
 
@@ -76,7 +76,7 @@ Hub 不会捆绑、下载或静默安装 Antigravity Desktop。
 在下载目录打开 PowerShell。安装包示例：
 
 ```powershell
-$File = ".\AGProfileHub-Setup-win-x64-0.3.0.exe"
+$File = ".\AGProfileHub-Setup-win-x64-0.4.0.exe"
 $Expected = (Get-Content "$File.sha256.json" -Raw | ConvertFrom-Json).hash
 $Actual = (Get-FileHash $File -Algorithm SHA256).Hash
 
@@ -95,7 +95,7 @@ $File = ".\AGProfileHub-win-x64.zip"
 
 ### 4. 使用安装器部署
 
-1. 双击 `AGProfileHub-Setup-win-x64-0.3.0.exe`。
+1. 双击 `AGProfileHub-Setup-win-x64-0.4.0.exe`。
 2. 确认来源和 SHA-256 后完成安装。当前构建尚未进行可信代码签名，Windows SmartScreen 可能显示“未知发布者”。
 3. 可选勾选桌面快捷方式。
 4. 安装完成后，从开始菜单打开 **Antigravity Profile Hub**。
