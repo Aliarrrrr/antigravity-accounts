@@ -1,4 +1,4 @@
-﻿#requires -Version 5.1
+#requires -Version 5.1
 [CmdletBinding()]
 param(
     [switch]$FrameworkDependent,
@@ -32,8 +32,13 @@ try {
         $selfContained = if ($FrameworkDependent) { 'false' } else { 'true' }
         foreach ($spec in @(@{ Name = 'Cli'; Directory = 'cli' }, @{ Name = 'Gui'; Directory = 'hub' })) {
             $project = Join-Path $root "src/AGProfileHub.$($spec.Name)/AGProfileHub.$($spec.Name).csproj"
-            $restoreArgs = @('restore', $project, '-r', $runtime, "-p:SelfContained=$selfContained")
-            if ($locked) { $restoreArgs += '--locked-mode' }
+            # Solution-level restore above already enforced packages.lock.json.
+            # The RID restore for self-contained publish must not use --locked-mode:
+            # lock files only pin the TFM graph, and NuGet rejects a missing RID
+            # (NU1004). Restoring with lock-file writing off keeps the tree clean
+            # so Assert-HubRelease's dirty check still holds.
+            $restoreArgs = @('restore', $project, '-r', $runtime,
+                "-p:SelfContained=$selfContained", '-p:RestorePackagesWithLockFile=false')
             Invoke-HubCommand -FilePath $context.DotNet -Arguments $restoreArgs
             $publishArgs = @('publish', $project, '-c', 'Release', '-r', $runtime, '--no-restore',
                 '--self-contained', $selfContained, '-p:PublishSingleFile=false', '-o', (Join-Path $packageRoot $spec.Directory))
