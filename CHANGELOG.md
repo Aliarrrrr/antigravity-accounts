@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.4.3] - Unreleased
+## [0.4.3] - 2026-09-13
 
 Security and truthfulness remediation from the 0.4.2 full audit (`docs/compose/spec/audit-042-report.md`). **59 automated checks pass.** Manual acceptance on Desktop 2.12.2 completed 2026-09-13 (see `MANUAL_TEST_PLAN.md`).
 
