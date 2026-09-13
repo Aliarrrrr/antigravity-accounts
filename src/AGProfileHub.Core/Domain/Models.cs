@@ -50,9 +50,9 @@ public sealed record HubSettings
     public string? AuthIsolationAttestedVersion { get; init; }
 
     /// <summary>
-    /// Backend applied to newly created Profiles. Absent in older documents means
-    /// Sandboxie, which is what 0.3.0 wrote; newer builds make new Profiles
-    /// process-local, because that needs no sandbox product installed.
+    /// Backend applied to newly created Profiles. Missing in JSON loads as
+    /// process-local (the C# default). Older builds that recorded Sandboxie
+    /// still resolve to the same process-local scope at launch.
     /// </summary>
     public IsolationBackendKind DefaultBackend { get; init; } = IsolationBackendKind.ProcessLocal;
 }

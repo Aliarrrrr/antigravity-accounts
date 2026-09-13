@@ -61,7 +61,7 @@
                 <Button Content="+ New profile" Style="{StaticResource AccentButton}"
                         Click="Create_Click" Margin="0,0,8,0"/>
                 <Button x:Name="LaunchAllButton" Content="Open all" Style="{StaticResource ToolbarButton}" Click="LaunchAll_Click"/>
-                <Button Content="Stop all" Style="{StaticResource ToolbarButton}" Click="StopAll_Click"/>
+                <Button Content="Stop all" Style="{StaticResource DangerButton}" Click="StopAll_Click"/>
                 <Button Content="Refresh" Style="{StaticResource ToolbarButton}" Click="Refresh_Click"/>
                 <Button Content="Doctor" Style="{StaticResource ToolbarButton}" Click="Doctor_Click"/>
                 <Button Content="Callbacks" Style="{StaticResource ToolbarButton}" Click="DeepLink_Click"
@@ -97,14 +97,16 @@
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
-                    <DataGridTextColumn Header="Isolation" Binding="{Binding Isolation}" Width="1.1*">
-                        <DataGridTextColumn.ElementStyle>
-                            <Style TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
-                                <Setter Property="ToolTip" Value="{Binding IsolationBoxName}"/>
-                                <Setter Property="VerticalAlignment" Value="Center"/>
-                            </Style>
-                        </DataGridTextColumn.ElementStyle>
-                    </DataGridTextColumn>
+                    <DataGridTemplateColumn Header="Isolation" Width="1.1*">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource Badge}" Background="{Binding IsolationBg}"
+                                        VerticalAlignment="Center" ToolTip="{Binding IsolationBoxName}">
+                                    <TextBlock Text="{Binding Isolation}" FontSize="11" Foreground="{Binding IsolationFg}"/>
+                                </Border>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
                     <DataGridTextColumn Header="PID" Binding="{Binding PidText}" Width="0.6*">
                         <DataGridTextColumn.ElementStyle>
                             <Style TargetType="TextBlock" BasedOn="{StaticResource SecondaryText}">
@@ -135,9 +137,9 @@
                                             <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                                                 <MenuItem Header="Launch" Tag="{Binding ProfileId}" Click="Launch_Click"/>
                                                 <MenuItem Header="Stop" Tag="{Binding ProfileId}" Click="Stop_Click"/>
-                                                <MenuItem Header="Force stop" Tag="{Binding ProfileId}" Click="ForceStop_Click"/>
+                                                <MenuItem Header="Force stop (may lose unsaved work)" Tag="{Binding ProfileId}" Click="ForceStop_Click"/>
                                                 <MenuItem Header="Restart" Tag="{Binding ProfileId}" Click="Restart_Click"/>
-                                                <MenuItem Header="Force restart" Tag="{Binding ProfileId}" Click="ForceRestart_Click"/>
+                                                <MenuItem Header="Force restart (may lose unsaved work)" Tag="{Binding ProfileId}" Click="ForceRestart_Click"/>
                                                 <Separator/>
                                                 <MenuItem Header="Fix isolation" Tag="{Binding ProfileId}" Click="Fix_Click"/>
                                                 <MenuItem Header="Prepare isolation" Tag="{Binding ProfileId}" Click="PrepareIsolation_Click"/>

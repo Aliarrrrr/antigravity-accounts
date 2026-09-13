@@ -181,7 +181,9 @@ public partial class MainWindow : Window
     private async void PrimaryAction_Click(object sender, RoutedEventArgs e)
     {
         if (!TryGetProfileId(sender, out var id)) return;
-        var running = _rows.FirstOrDefault(row => row.ProfileId == id)?.IsRunning == true;
+        var row = _rows.FirstOrDefault(r => r.ProfileId == id);
+        var running = row?.IsRunning == true;
+        var displayName = row?.Name ?? "profile";
         await RunAsync(async () =>
         {
             if (running)
@@ -190,10 +192,11 @@ public partial class MainWindow : Window
             }
             else
             {
+                StatusText.Text = $"Opening {displayName}… cold start can take 1–2 minutes; do not kill the window.";
                 await EnsureIsolationThenLaunchAsync(id);
             }
             await RefreshAsync();
-        });
+        }, running ? "Stopping…" : $"Opening {displayName}…");
     }
 
     private void Menu_Click(object sender, RoutedEventArgs e)
@@ -231,21 +234,26 @@ public partial class MainWindow : Window
 
     private async void ForceStop_Click(object sender, RoutedEventArgs e)
     {
-        if (TryGetProfileId(sender, out var id))
-            await RunAsync(async () => { await _service.StopAsync(id, force: true); await RefreshAsync(); });
+        if (!TryGetProfileId(sender, out var id)) return;
+        if (!ConfirmDestructive("Force stop this profile?", "Unsaved work in its Antigravity window may be lost.")) return;
+        await RunAsync(async () => { await _service.StopAsync(id, force: true); await RefreshAsync(); }, "Force stopping…");
     }
 
     private async void Restart_Click(object sender, RoutedEventArgs e)
     {
         if (TryGetProfileId(sender, out var id))
-            await RunAsync(async () => { await _service.RestartAsync(id); await RefreshAsync(); });
+            await RunAsync(async () => { await _service.RestartAsync(id); await RefreshAsync(); }, "Restarting…");
     }
 
     private async void ForceRestart_Click(object sender, RoutedEventArgs e)
     {
-        if (TryGetProfileId(sender, out var id))
-            await RunAsync(async () => { await _service.RestartAsync(id, force: true); await RefreshAsync(); });
+        if (!TryGetProfileId(sender, out var id)) return;
+        if (!ConfirmDestructive("Force restart this profile?", "Unsaved work in its Antigravity window may be lost.")) return;
+        await RunAsync(async () => { await _service.RestartAsync(id, force: true); await RefreshAsync(); }, "Force restarting…");
     }
+
+    private bool ConfirmDestructive(string title, string detail) =>
+        MessageBox.Show(this, detail, title, MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
 
     private async void Fix_Click(object sender, RoutedEventArgs e)
     {
@@ -280,13 +288,14 @@ public partial class MainWindow : Window
 
     private async void StopAll_Click(object sender, RoutedEventArgs e)
     {
+        if (!ConfirmDestructive("Stop all profiles?", "Unsaved work in any Antigravity window may be lost.")) return;
         await RunAsync(async () =>
         {
             var results = new List<StopResult>();
             foreach (var profile in await _service.ListProfilesAsync()) results.Add(await _service.StopAsync(profile.Id));
             await RefreshAsync();
             foreach (var result in results) EnsureStopped(result);
-        });
+        }, "Stopping all profiles…");
     }
 
     private async void Doctor_Click(object sender, RoutedEventArgs e)
@@ -365,7 +374,7 @@ public partial class MainWindow : Window
         if (TryGetProfileId(sender, out var id)) OpenFolderSafely(() => _service.OpenDataFolder(id));
     }
 
-    private async Task RunAsync(Func<Task> action)
+    private async Task RunAsync(Func<Task> action, string? busyStatus = null)
     {
         if (_busy)
         {
@@ -375,6 +384,7 @@ public partial class MainWindow : Window
         }
         _busy = true;
         Mouse.OverrideCursor = Cursors.Wait;
+        if (!string.IsNullOrWhiteSpace(busyStatus)) StatusText.Text = busyStatus;
         try { await action(); }
         catch (Exception ex)
         {
@@ -417,6 +427,8 @@ public partial class MainWindow : Window
         public string Isolation { get; init; } = "";
         public string? IsolationBoxName { get; init; }
         public bool IsRunning { get; init; }
+        public Brush IsolationBg { get; init; } = Brushes.Transparent;
+        public Brush IsolationFg { get; init; } = Brushes.Transparent;
 
         public string PrimaryActionText => IsRunning ? "Close" : "Open";
         public string PidText => RootProcessId?.ToString() ?? "—";
@@ -434,6 +446,12 @@ public partial class MainWindow : Window
             var isolation = status.IsolationBoxName is null
                 ? "Direct / serial"
                 : status.IsolationReady == true ? "Ready" : "Needs fix";
+            var (isoBg, isoFg) = isolation switch
+            {
+                "Ready" => (Res("Brush.SuccessBg"), Res("Brush.Success")),
+                "Needs fix" => (Res("Brush.DangerBg"), Res("Brush.Danger")),
+                _ => (Res("Brush.WarningBg"), Res("Brush.Warning"))
+            };
             return new ProfileRow
             {
                 ProfileId = status.ProfileId,
@@ -446,6 +464,8 @@ public partial class MainWindow : Window
                 WorkspacePath = status.WorkspacePath,
                 Isolation = isolation,
                 IsolationBoxName = status.IsolationBoxName,
+                IsolationBg = isoBg,
+                IsolationFg = isoFg,
                 IsRunning = status.State == RuntimeState.Running
             };
         }

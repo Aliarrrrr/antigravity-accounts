@@ -1,4 +1,4 @@
-# Antigravity Profile Hub 0.4.2 — 实验版
+# Antigravity Profile Hub 0.4.3 — 实验版
 
 > **English (summary).** Antigravity Profile Hub is a native Windows manager that lets multiple official Antigravity Desktop windows run under one Windows user, each signed in to a different Google account. Per-profile isolation (own home, own file-based token store, fail-closed launch verification) needs no sandbox product and no administrator rights. Authentication always happens in official Antigravity/Google pages — the Hub never touches passwords, OAuth tokens, or cookies. Only **Windows x64 + Antigravity Desktop 2.12.2** are verified; full documentation is Chinese below.
 
@@ -47,17 +47,17 @@ Antigravity Profile Hub 是一个 Windows 原生的 Antigravity Desktop 多 Prof
 
 ### 安装
 
-从 [v0.4.2 Release](https://github.com/Aliarrrrr/antigravity-profile-hub/releases/tag/v0.4.2) 下载：
+从 [v0.4.3 Release](https://github.com/Aliarrrrr/antigravity-profile-hub/releases/tag/v0.4.3) 下载（若尚未发布，请在源码分支上本地 `hub.ps1 publish`）：
 
 | 文件 | 适合 |
 |---|---|
-| `AGProfileHub-Setup-win-x64-0.4.2.exe` | 推荐日常使用（按当前用户安装） |
-| `AGProfileHub-0.4.2-win-x64.zip` | 免安装 / 便携 |
+| `AGProfileHub-Setup-win-x64-0.4.3.exe` | 推荐日常使用（按当前用户安装） |
+| `AGProfileHub-0.4.3-win-x64.zip` | 免安装 / 便携 |
 
 校验（在下载目录）：
 
 ```powershell
-$File = ".\AGProfileHub-Setup-win-x64-0.4.2.exe"
+$File = ".\AGProfileHub-Setup-win-x64-0.4.3.exe"
 $Expected = (Get-Content "$File.sha256.json" -Raw | ConvertFrom-Json).hash
 if ((Get-FileHash $File -Algorithm SHA256).Hash -ne $Expected) { throw "SHA-256 不匹配" }
 "校验通过"
@@ -75,7 +75,7 @@ $Hub = "$env:LOCALAPPDATA\Programs\AntigravityProfileHub\agprofile.cmd"   # 安�
 & $Hub setup
 ```
 
-重点确认 `executableDiscovery` 为 `Verified`、版本为 2.12.2。如果找不到 Antigravity：
+重点确认 `executableDiscovery` 为 `Verified`、版本为 2.12.2，并已执行一次 `configure-executable`（未钉扎哈希时 launch/回调会拒绝启动）。如果找不到 Antigravity：
 
 ```powershell
 & $Hub configure-executable "C:\Users\你\AppData\Local\Programs\antigravity\Antigravity.exe"

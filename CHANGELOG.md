@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.4.3] - Unreleased
+
+Security and truthfulness remediation from the 0.4.2 full audit (`docs/compose/spec/audit-042-report.md`). 58 automated checks pass.
+
+### Fixed
+
+- **Launch and deep-link handoff refused an unpinned executable** (`executable_not_pinned`). Doctor still inspects an unpinned path so the user can run `configure-executable` once.
+- **Warm scopes skipped token-store proof**: a live scope without a Hub-written `scope-attestation.json` is no longer reported as a healthy isolated session (`isolation_scope_unverified`). Attestation is written after a verified cold start and cleared on stop.
+- **Language-server log length read failure no longer lowers the verification floor** (fail closed as `isolation_scope_unverified`).
+- **`EnsureRegistered` no longer replays a free-form `RouterCommand` from disk** into `HKCU`; the command is rebuilt from a CLI-shaped executable plus this data root.
+- **Callback handoff resolves `--user-data-dir` from ProfileId** (managed path), not the free-form path in the pending file.
+- **Doctor no longer marks concurrent Google account isolation / visible windows as fully Verified** when scopes are merely prepared; it reports `concurrentSignInRouting` as manual-verification-required.
+
+### Changed
+
+- `MANUAL_TEST_PLAN.md` rewritten for process-local (no Sandboxie verbs); concurrent sign-in E2E remains an explicit outstanding gate.
+- `ARCHITECTURE.md` shortcut implementation is COM `IShellLinkW` (not WScript.Shell).
+- SECURITY.md documents warm attestation, router-command rebuild, authoritative handoff path, and the single-slot pending limitation.
+- Settings comment no longer claims missing `defaultBackend` loads as Sandboxie.
+
 ## [0.4.2] - 2026-09-13
 
 Audit-remediation release: every finding from the full 0.4.1 audit was fixed in its own revertible commit. 54 automated checks pass.

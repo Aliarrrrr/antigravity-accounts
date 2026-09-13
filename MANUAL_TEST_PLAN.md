@@ -1,58 +1,51 @@
-# Manual verification — isolated multi-account backend
+# Manual verification — process-local multi-account (0.4.3)
 
 Real Google authentication is never automated. Do not send credentials, OAuth codes, token/cookie exports, account identifiers, or screenshots containing private account information. Record only pass/fail and non-sensitive behavior.
 
-## Accepted on 2026-09-09
+**0.4.0+ does not use Sandboxie.** Scope preparation needs no elevation. The only verified vendor build remains Antigravity Desktop **2.12.2** on Windows x64.
 
-Using Antigravity Desktop 2.12.2 and Sandboxie Plus 1.18.2 / core 5.73.2:
+## Gate before any run
 
-| Test | Result | Non-sensitive observation |
-|---|---|---|
-| Separate rendered windows | passed | One visible official Desktop window per box |
-| Distinct accounts concurrently | passed | User confirmed A and B displayed their intended different accounts |
-| Box-local authentication state | passed | A/B/host credential entry metadata and one-way fingerprints differed; token contents were not exported |
-| Restart persistence | passed | A retained its intended account after full box-process restart |
-| Cross-Profile restart isolation | passed | B root PID and process count stayed unchanged while A restarted |
-| Host login non-interference | passed | Host entry size/fingerprint stayed unchanged |
+1. `agprofile setup` (or `doctor`): `executableDiscovery` is Verified, version is 2.12.2.
+2. `configure-executable <path to Antigravity.exe>` if doctor reports `executable_not_pinned` — launch and callback handoff refuse unpinned binaries.
+3. For two or more profiles that will sign in concurrently: `configure-deeplink register` (or GUI **Callbacks**).
 
-The earlier directory-only and empty-box Sandboxie failures remain valuable historical evidence: a missing box-local `gemini:antigravity` read fell through to the host. The passing setup first claims that name inside each fresh box.
+## A. Already-signed-in concurrent windows (previously accepted)
 
-## Required setup checks for every Profile
+1. Create A and B (`new`), each with a ready isolation scope (`Ready` in GUI / `fix` if needed).
+2. Open A, sign in to Google account #1 in the official window.
+3. Open B, sign in to Google account #2 in the official window.
+4. Confirm both windows stay on different accounts without logging each other out.
+5. `restart A` — A must not require a fresh sign-in.
+6. Confirm B's window and process count stay unchanged while A restarts.
 
-1. `iso-status` reports `backendAvailable=true`, `boxExists=true`, and `keyringClaimed=true`.
-2. `iso-writethrough <id>` reports `ready=true`. If not, save work and stop the affected box, then run the emitted `Set-IsolationWriteThrough.ps1` command from an elevated prompt.
-3. `status <id>` reports the expected box name and exact owned root/user-data identity.
-4. Never use `iso-prepare --fresh` on a box that has already signed in; it is only an acknowledgement for an unregistered, never-used box.
+Pass criteria: two visible official windows, distinct accounts, restart persistence.
 
-## Remaining manual gates
+## B. Concurrent sign-in callback routing (0.4.1 repair — **required, still outstanding**)
 
-### A. Workspace direct-write
+With deep-link routing registered:
 
-1. Create a disposable workspace outside the managed Profile root and associate it with A.
-2. Apply the exact write-through rules reported by `iso-writethrough A`.
-3. In A, create and modify a harmless marker file in that workspace.
-4. Confirm the host filesystem and a normal editor see the change immediately.
-5. Restart A and confirm the same file remains visible.
-6. Confirm B cannot accidentally redirect A's workspace through its own Profile mapping. Do not test simultaneous edits to the same repository; Agent Safe worktrees are deferred.
+1. Stop A and B completely.
+2. Start A and B at the same time; open Google sign-in in both windows before completing either.
+3. Complete sign-in for A, then for B (or interleave if the vendor allows).
+4. Confirm each OAuth callback lands in the window that is waiting (the account that finishes is the one shown in that profile).
+5. Confirm no third Antigravity window appears that is not A or B.
+6. `configure-deeplink restore` when finished, and confirm `antigravity://` returns to the previous handler if the vendor owns it.
 
-### B. Logout non-interference
+Pass criteria: both profiles end signed in to the intended accounts; Hub logs/`callback` verb do not show dropped handoffs. **Do not treat concurrent sign-in as supported until this section passes once on 2.12.2.**
 
-1. With A and B running and showing their intended accounts, log out of A using the official UI.
-2. Confirm B remains logged into B without a process restart or account change.
-3. Reauthenticate A through the official flow and confirm B remains unchanged.
-4. Repeat with B logging out while A stays active.
+## C. Isolation proof and warm path
 
-### C. Product entry points
+1. Open A through the Hub (GUI Open or `open A`). After cold start, `profiles/<uuid>/scope-attestation.json` exists.
+2. Manually start `Antigravity.exe --user-data-dir=<A user-data>` **without** the Hub (no WSL_DISTRO_NAME). Confirm the next Hub `open A` refuses `isolation_scope_unverified` until the foreign instance is stopped and A is opened through the Hub.
+3. After a Hub-verified open, `open A` again while it is running reports already-running / does not start a second root.
 
-1. Launch A from GUI, B from its desktop shortcut, then run `launch-all`; no duplicate root should appear.
-2. Restart A from GUI; B must remain running.
-3. Close/reopen Hub while both remain active; both rows must reconcile to Running with their box names.
-4. Save work, stop each isolated Profile, and confirm only its dedicated box reaches zero processes.
+## D. Destructive and lifecycle entries
 
-### D. Update revalidation
+1. GUI **Force stop** and **Stop all** require an explicit confirmation.
+2. CLI `stop --force` / `stop-all --force` still work for scripts (documented; no interactive prompt).
+3. Remove registration keeps profile data on disk.
 
-After Antigravity or Sandboxie changes version, repeat setup checks and tests A-C before treating account isolation as supported. Unknown Antigravity versions must remain blocked by the driver.
+## E. Update revalidation
 
-## Current machine note
-
-Both current default Profile mappings now report `writeThroughReady=true` with no missing paths. This proves the intended bare `OpenFilePath` rules are configured; it does not replace the live workspace file creation/restart test in section A.
+After Antigravity changes version, repeat A–C before treating multi-account isolation as supported. Unknown Antigravity versions remain blocked by the driver (`version_unverified`).

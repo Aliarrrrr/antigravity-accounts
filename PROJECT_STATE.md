@@ -1,6 +1,12 @@
 # Project state — 2026-09-13
 
-## Current phase (0.4.2)
+## Current phase (0.4.3-p1 fix branch)
+
+0.4.2 full audit (`docs/compose/spec/audit-042-report.md`) is remediated on `fix/0.4.3-p1`: launch/handoff require an executable pin; warm scopes need Hub `scope-attestation.json`; `EnsureRegistered` rebuilds the scheme command (CLI-shaped + this data root); handoff derives user-data from ProfileId; Doctor no longer over-claims concurrent sign-in; MANUAL_TEST_PLAN rewritten for process-local; GUI gains busy launch text, force/stop-all confirmations, and isolation badges. 58/58 automated checks pass. Version bumped to 0.4.3 (unreleased).
+
+Outstanding: one real end-to-end concurrent sign-in acceptance run (MANUAL_TEST_PLAN §B); package/tag/publish after merge; pending grants remain a single last-writer slot until multi-slot routing exists.
+
+## Earlier state — 0.4.2 (2026-09-13)
 
 A full external audit of 0.4.1 was remediated commit by commit. Security: scope attribution now parses argv strictly with a child start-time guard; an unreadable process list fails closed everywhere instead of reading as "idle"; pending callback grants expire (30 minutes) and are cleared on every failed launch and by their own profile's stop only; the deep-link registration is validated before a launch starts anything; callback URIs are validated (scheme, length, control characters); `configure-executable` pins the executable by SHA-256 and both discovery and the handoff refuse a swapped binary. Release integrity: the tag workflow runs the real `-Release` gate, CI restores locked, the package manifest records the actual mechanism and config schema, and Test-PackageStructure asserts those fields. Maintenance: CLI verb semantics aligned (`create` aliases `new`, `close` honours `graceful_close_pending`, `doctor`/`setup` gate on the executable check), GUI communicates busy/error/deeplink-hint states, installer dependency check matches driver discovery, dependabot added, MIT LICENSE added, stale-era documents moved to `docs/history/`, one-off scripts quarantined under `scripts/legacy/` with warnings.
 

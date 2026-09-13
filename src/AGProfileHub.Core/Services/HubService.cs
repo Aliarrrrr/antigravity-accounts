@@ -201,7 +201,7 @@ public sealed class HubService
         }
         if (installation is not null && !installation.IsKnownCompatible) warnings.Add(installation.CompatibilityDetail);
         if (installation is not null && string.IsNullOrWhiteSpace(settings.ExecutableSha256))
-            warnings.Add("The configured Antigravity executable is not hash-pinned. Run configure-executable once to pin it; until then a swapped binary would not be refused at launch or callback handoff.");
+            warnings.Add("The Antigravity executable is not hash-pinned. Launch and callback handoff refuse to start until you run configure-executable once.");
         if (installation is not null && settings.LastTestedVersion is not null && !string.Equals(settings.LastTestedVersion, installation.Version, StringComparison.OrdinalIgnoreCase))
             warnings.Add($"Installed version {installation.Version} differs from last tested version {settings.LastTestedVersion}.");
         if (installation is not null && settings.AuthIsolationAttestedVersion is not null && !string.Equals(settings.AuthIsolationAttestedVersion, installation.Version, StringComparison.OrdinalIgnoreCase))
@@ -219,10 +219,11 @@ public sealed class HubService
         {
             new("executableDiscovery", installation is null ? CapabilityState.Unknown : CapabilityState.Verified, installation is null ? "Executable was not found." : "Executable and file version were read without launching."),
             new("desktopRuntimeIsolation", installation?.IsKnownCompatible == true ? CapabilityState.Verified : CapabilityState.Unknown, "Independent user-data and per-instance process homes were observed locally for Desktop 2.12.2."),
-            new("visibleConcurrentWindows", preparedReady ? CapabilityState.Verified : CapabilityState.ManualVerificationRequired, "Two prepared scopes were manually accepted with separate visible windows on Desktop 2.12.2."),
-            new("googleAccountIsolation", preparedReady ? CapabilityState.Verified : CapabilityState.ManualVerificationRequired, "Each instance keeps its OAuth token in a per-profile file; distinct concurrent accounts and restart persistence passed manual acceptance on Desktop 2.12.2."),
+            new("visibleConcurrentWindows", preparedReady ? CapabilityState.Verified : CapabilityState.ManualVerificationRequired, "Already-signed-in concurrent windows were manually accepted on Desktop 2.12.2. This does not prove concurrent sign-in callback routing."),
+            new("concurrentSignInRouting", CapabilityState.ManualVerificationRequired, "Deep-link routing was repaired in 0.4.1. One real end-to-end concurrent Google sign-in (two windows, callbacks land in the waiting profile) is still required before relying on that scenario."),
+            new("googleAccountIsolation", preparedReady ? CapabilityState.Observed : CapabilityState.ManualVerificationRequired, "Each prepared instance keeps its OAuth token in a per-profile file and a Hub-verified cold start must prove it. Concurrent sign-in E2E remains pending; do not treat scopes as a security boundary between Windows users."),
             new("workspaceForwarding", CapabilityState.Unsupported, "Workspace is metadata; no supported Desktop forwarding contract was found."),
-            new("credentialIsolation", preparedReady ? CapabilityState.Verified : CapabilityState.Experimental, "A launch is trusted only after the language server reports its per-profile file token store; the Windows user's shared credential entry is never read, copied, or written.")
+            new("credentialIsolation", preparedReady ? CapabilityState.Observed : CapabilityState.Experimental, "A cold launch is trusted only after the language server reports its per-profile file token store; warm scopes require a Hub-written attestation. The Windows user's shared credential entry is never read, copied, or written.")
         };
         return new DoctorReport(DateTimeOffset.UtcNow, _paths.DataRoot, installation?.ExecutablePath, installation?.Version,
             installation is not null, installation?.IsKnownCompatible == true, capabilities, warnings, statuses);
