@@ -2,24 +2,24 @@
 
 ## [0.4.3] - Unreleased
 
-Security and truthfulness remediation from the 0.4.2 full audit (`docs/compose/spec/audit-042-report.md`). 58 automated checks pass.
+Security and truthfulness remediation from the 0.4.2 full audit (`docs/compose/spec/audit-042-report.md`). **59 automated checks pass.** Manual acceptance on Desktop 2.12.2 completed 2026-09-13 (see `MANUAL_TEST_PLAN.md`).
 
 ### Fixed
 
 - **Launch and deep-link handoff refused an unpinned executable** (`executable_not_pinned`). Doctor still inspects an unpinned path so the user can run `configure-executable` once.
 - **Warm scopes skipped token-store proof**: a live scope without a Hub-written `scope-attestation.json` is no longer reported as a healthy isolated session (`isolation_scope_unverified`). Attestation is written after a verified cold start; it is cleared when the Hub observes the scope idle, when stop fails or the box is missing, and on a successful terminate. A foreign process started outside the Hub still has to be stopped and reopened through the Hub before the scope is trusted again.
 - **Language-server log length read failure no longer lowers the verification floor** (fail closed as `isolation_scope_unverified`).
-- **`EnsureRegistered` no longer replays a free-form `RouterCommand` from disk** into `HKCU`; the command is rebuilt from a CLI-shaped executable plus this data root.
+- **`EnsureRegistered` no longer replays a free-form `RouterCommand` from disk** into `HKCU`; the command is rebuilt from a CLI-shaped executable plus this data root, and the ownership record is rewritten to match so restore/`IsRegisteredFor` stay consistent.
 - **Callback handoff resolves `--user-data-dir` from ProfileId** (managed path), not the free-form path in the pending file.
-- **Doctor no longer marks concurrent Google account isolation / visible windows as fully Verified** when scopes are merely prepared; it reports `concurrentSignInRouting` as manual-verification-required.
+- **Doctor no longer marks concurrent Google account isolation / visible windows as fully Verified** when scopes are merely prepared; `concurrentSignInRouting` is Verified only after this release's recorded E2E.
 
 ### Deferred (documented, not fixed)
 
-- Pending deep-link grants remain a single last-writer slot: two Profiles signing in at the same instant can steal each other's callback. Finish one sign-in before starting the next; multi-slot routing is deferred until concurrent E2E is proven.
+- Pending deep-link grants remain a single last-writer slot: two Profiles signing in at the same instant can steal each other's callback. Finish one sign-in before starting the next; multi-slot routing is deferred until a stronger concurrent-OAuth requirement appears.
 
 ### Changed
 
-- `MANUAL_TEST_PLAN.md` rewritten for process-local (no Sandboxie verbs); concurrent sign-in E2E remains an explicit outstanding gate.
+- `MANUAL_TEST_PLAN.md` rewritten for process-local (no Sandboxie verbs) and carries the 2026-09-13 acceptance record (A/B/C passed).
 - `ARCHITECTURE.md` shortcut implementation is COM `IShellLinkW` (not WScript.Shell).
 - SECURITY.md documents warm attestation, router-command rebuild, authoritative handoff path, and the single-slot pending limitation.
 - Settings comment no longer claims missing `defaultBackend` loads as Sandboxie.

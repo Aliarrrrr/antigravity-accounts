@@ -2,9 +2,11 @@
 
 ## Current phase (0.4.3-p1 fix branch)
 
-0.4.2 full audit (`docs/compose/spec/audit-042-report.md`) is remediated on `fix/0.4.3-p1`: launch/handoff require an executable pin; warm scopes need Hub `scope-attestation.json`; `EnsureRegistered` rebuilds the scheme command (CLI-shaped + this data root); handoff derives user-data from ProfileId; Doctor no longer over-claims concurrent sign-in; MANUAL_TEST_PLAN rewritten for process-local; GUI gains busy launch text, force/stop-all confirmations, and isolation badges. 58/58 automated checks pass. Version bumped to 0.4.3 (unreleased).
+0.4.2 full audit (`docs/compose/spec/audit-042-report.md`) is remediated on `fix/0.4.3-p1`: launch/handoff require an executable pin; warm scopes need Hub `scope-attestation.json`; `EnsureRegistered` rebuilds the scheme command (CLI-shaped + this data root); handoff derives user-data from ProfileId; Doctor reflects concurrent sign-in honestly; MANUAL_TEST_PLAN rewritten for process-local; GUI gains busy launch text, force/stop-all confirmations, and isolation badges. **59/59 automated checks pass.** Version bumped to 0.4.3 (unreleased).
 
-Outstanding: one real end-to-end concurrent sign-in acceptance run (MANUAL_TEST_PLAN §B); package/tag/publish after merge; pending grants remain a single last-writer slot until multi-slot routing exists.
+**Manual acceptance (Desktop 2.12.2, 2026-09-13) passed** for A (already-signed-in concurrent windows + restart), B (sign-in with deep-link routing: two roots, no third window, callbacks in waiting profile), and C (attestation / warm already-running / foreign start `isolation_scope_unverified`). Deeplink restored to the vendor handler after B.
+
+Remaining before release: merge to master, `v0.4.3` tag, `publish -Release`. Pending grants remain a single last-writer slot (SEC-07 deferred by design).
 
 ## Earlier state — 0.4.2 (2026-09-13)
 

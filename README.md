@@ -25,7 +25,7 @@ Antigravity Profile Hub 是一个 Windows 原生的 Antigravity Desktop 多 Prof
 | 能力 | 状态 |
 |---|---|
 | 两个不同 Google 账号的窗口**并发保持各自登录**（已登录后的并行运行） | ✅ 已人工验收（2.12.2，process-local 机制） |
-| 并发**登录时**的 `antigravity://` 回调路由 | ⚠️ 机制在 0.4.1 修复（0.4.0 路由会丢弃全部回调），修复后的真实端到端并发登录验收**待完成**；验收通过前请勿依赖该场景 |
+| 并发**登录时**的 `antigravity://` 回调路由 | ✅ 已人工验收（2026-09-13，0.4.3-p1）：双窗口登录、回调落入等待窗、无第三根进程、restart 不丢号。**pending 仍为单槽**，同一瞬间两边都发起 OAuth 时请先完成一侧再点另一侧 |
 | Profile 独立启动 / 停止 / 重启 / 桌面快捷方式 | ✅ |
 | 隔离作用域自动配置与自愈（`new` / `fix`，无提权） | ✅ |
 | 按名字（显示名 / 唯一前缀 / UUID）操作 Profile | ✅ |
@@ -118,7 +118,7 @@ $Hub = "$env:LOCALAPPDATA\Programs\AntigravityProfileHub\agprofile.cmd"   # 安�
 2. `& $Hub restart "工作A"` 后 A 不需要重新登录。
 
 > [!WARNING]
-> 回调路由在 0.4.1 修复（此前路由会把每个回调都丢弃）。**修复后的首次真实并发登录端到端验收尚未完成**（见上方能力表）；依赖该场景前请先按 `MANUAL_TEST_PLAN.md` 完成一次 A/B 登录验收。
+> 回调路由在 0.4.1 修复（此前路由会把每个回调都丢弃），并在 2026-09-13 于 2.12.2 上完成人工端到端验收。**pending 仍是单槽**：两个窗口几乎同时发起 OAuth 时，请先完成一侧登录再点另一侧。测完可 `configure-deeplink restore` 还原系统注册。
 
 测完想还原系统注册：`& $Hub configure-deeplink restore`。
 
