@@ -2,8 +2,8 @@
 feature: audit-042
 status: delivered
 updated: 2026-09-13
-branch: master
-commits: 7f518d8..7f518d8  # report-only; docs added uncommitted on master per user override
+branch: fix/0.4.3-p1
+commits: cc56c08..HEAD  # audit report on master; remediation on fix/0.4.3-p1
 ---
 
 # 0.4.2 第一性原理全量审计
