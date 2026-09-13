@@ -61,6 +61,10 @@ var tests = new (string Name, Func<Task> Run)[]
     ("a corrupt registration record blocks the launch before anything starts", TestCorruptRegistrationBlocksLaunchAsync),
     ("callback URIs are validated before any handoff", TestCallbackUriValidationAsync),
     ("the configured executable is digest-pinned everywhere it is used", TestExecutableDigestPinningAsync),
+    ("ensure-registered refuses a tampered router command", TestEnsureRegisteredRejectsTamperedCommandAsync),
+    ("a warm scope without Hub attestation is not trusted", TestWarmScopeRequiresAttestationAsync),
+    ("isolated launch refuses an unpinned executable", TestIsolatedLaunchRequiresPinAsync),
+    ("handoff resolves user-data from the profile id", TestHandoffUsesAuthoritativeUserDataAsync),
 };
 
 var failures = new List<string>();
@@ -412,7 +416,11 @@ static async Task TestDeepLinkRouterAsync()
 
     // The handoff must relaunch the vendor desktop, never the Hub CLI: the CLI
     // cannot receive OAuth URIs and would drop the callback with a usage error.
-    await fixture.Repository.WriteSettingsAsync(new HubSettings { AntigravityExecutablePath = fixture.Executable });
+    await fixture.Repository.WriteSettingsAsync(new HubSettings
+    {
+        AntigravityExecutablePath = fixture.Executable,
+        ExecutableSha256 = await ExecutableAttestation.ComputeSha256Async(fixture.Executable)
+    });
     var handoff = DeepLinkRouter.BuildHandoff(fixture.Paths, "antigravity://oauth/callback?code=x");
     True(handoff is not null, "a waiting profile produces a handoff");
     Equal(Path.GetFullPath(fixture.Executable), handoff!.FileName);
@@ -506,6 +514,9 @@ static async Task TestCrossDataRootLaunchSerializationAsync()
         var pathsB = new HubPaths(Path.Combine(parent, "data-b"), guardRoot);
         var repositoryA = new ConfigRepository(pathsA);
         var repositoryB = new ConfigRepository(pathsB);
+        var pin = await ExecutableAttestation.ComputeSha256Async(executable);
+        await repositoryA.WriteSettingsAsync(new HubSettings { AntigravityExecutablePath = executable, ExecutableSha256 = pin });
+        await repositoryB.WriteSettingsAsync(new HubSettings { AntigravityExecutablePath = executable, ExecutableSha256 = pin });
         var profilesA = new ProfileManager(repositoryA, pathsA);
         var profilesB = new ProfileManager(repositoryB, pathsB);
         var world = new FakeProcessWorld(pathsA, executable);
@@ -905,7 +916,11 @@ static async Task TestPendingExpiryAsync()
     using var fixture = new Fixture();
     var id = Guid.NewGuid();
     var userData = fixture.Paths.UserData(id);
-    await fixture.Repository.WriteSettingsAsync(new HubSettings { AntigravityExecutablePath = fixture.Executable });
+    await fixture.Repository.WriteSettingsAsync(new HubSettings
+    {
+        AntigravityExecutablePath = fixture.Executable,
+        ExecutableSha256 = await ExecutableAttestation.ComputeSha256Async(fixture.Executable)
+    });
 
     await DeepLinkRouter.WritePendingAsync(fixture.Paths, id, userData);
     True(DeepLinkRouter.BuildHandoff(fixture.Paths, "antigravity://oauth/callback?code=x") is not null,
@@ -1017,6 +1032,121 @@ static async Task TestCorruptRegistrationBlocksLaunchAsync()
     True(!File.Exists(DeepLinkRouter.PendingPath(fixture.Paths)), "the failed launch must not leave a waiting grant");
 }
 
+static async Task TestEnsureRegisteredRejectsTamperedCommandAsync()
+{
+    using var fixture = new Fixture();
+    if (!OperatingSystem.IsWindows())
+    {
+        // Canonicalize is pure enough to test without the registry write path.
+        var cli = Path.Combine(fixture.Root, "cli", "AGProfileHub.Cli.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(cli)!);
+        File.WriteAllBytes(cli, []);
+        var rebuilt = DeepLinkRouter.CanonicalizeRouterCommand(
+            fixture.Paths, $"\"{cli}\" --data-root \"C:\\evil\" callback \"%1\"");
+        True(rebuilt.Contains(fixture.Paths.DataRoot, StringComparison.OrdinalIgnoreCase),
+            "the data root is always this Hub's");
+        True(!rebuilt.Contains("C:\\evil", StringComparison.OrdinalIgnoreCase));
+        await ThrowsAsync<HubException>(() => Task.Run(() => DeepLinkRouter.CanonicalizeRouterCommand(
+            fixture.Paths, "\"C:\\Windows\\System32\\cmd.exe\" /c evil")));
+        return;
+    }
+
+    var cliPath = Path.Combine(fixture.Root, "cli", "AGProfileHub.Cli.exe");
+    Directory.CreateDirectory(Path.GetDirectoryName(cliPath)!);
+    File.WriteAllBytes(cliPath, []);
+    var registrationPath = Path.Combine(fixture.Paths.DataRoot, "runtime", "deeplink-registration.json");
+    Directory.CreateDirectory(Path.GetDirectoryName(registrationPath)!);
+    File.WriteAllText(registrationPath, JsonSerializer.Serialize(
+        new DeepLinkRegistration
+        {
+            PreviousCommand = null,
+            RouterCommand = "\"C:\\Windows\\System32\\cmd.exe\" /c start evil \"%1\"",
+            RegisteredUtc = DateTimeOffset.UtcNow
+        },
+        new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+    await ThrowsAsync<HubException>(() => Task.Run(() => DeepLinkRouter.EnsureRegistered(fixture.Paths)));
+}
+
+static async Task TestWarmScopeRequiresAttestationAsync()
+{
+    using var fixture = new Fixture();
+    var backend = new FakeIsolationBackend();
+    var launcher = new IsolatedProfileLauncher(fixture.Paths, new FakeDriver(fixture.Paths, fixture.Executable),
+        fixture.Repository, _ => backend);
+    var id = Guid.NewGuid();
+    await fixture.Repository.UpdateProfilesAsync(document =>
+    {
+        var registration = new ProfileRegistration(id, "Warm", null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+        {
+            Backend = IsolationBackendKind.ProcessLocal
+        };
+        document.Profiles.Add(registration);
+        return (document, registration);
+    });
+    await launcher.PrepareAsync(id);
+    backend.LaunchDetached(IsolatedProfileLauncher.BoxNameFor(id), fixture.Executable, [], new Dictionary<string, string>());
+
+    // Live processes without a Hub-written attestation are not a trusted session.
+    await ThrowsAsync<HubException>(() => launcher.LaunchAsync(id));
+
+    fixture.Paths.EnsureProfileLayout(id);
+    await File.WriteAllTextAsync(
+        Path.Combine(fixture.Paths.ProfileRoot(id), "scope-attestation.json"),
+        JsonSerializer.Serialize(
+            new ScopeAttestation { ProfileId = id, VerifiedUtc = DateTimeOffset.UtcNow },
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+    var warm = await launcher.LaunchAsync(id);
+    True(!warm.StartedNewProcess, "an attested warm scope is reported as already running");
+}
+
+static async Task TestIsolatedLaunchRequiresPinAsync()
+{
+    using var fixture = new Fixture();
+    await fixture.Repository.WriteSettingsAsync(new HubSettings { AntigravityExecutablePath = fixture.Executable });
+    var backend = new FakeIsolationBackend();
+    var launcher = new IsolatedProfileLauncher(fixture.Paths, new FakeDriver(fixture.Paths, fixture.Executable),
+        fixture.Repository, _ => backend);
+    var id = Guid.NewGuid();
+    await fixture.Repository.UpdateProfilesAsync(document =>
+    {
+        var registration = new ProfileRegistration(id, "Unpinned", null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+        {
+            Backend = IsolationBackendKind.ProcessLocal
+        };
+        document.Profiles.Add(registration);
+        return (document, registration);
+    });
+    await launcher.PrepareAsync(id);
+    var ex = await ThrowsCaptureAsync<HubException>(() => launcher.LaunchAsync(id));
+    Equal("executable_not_pinned", ex.Code);
+    Equal(0, backend.LaunchCalls);
+}
+
+static async Task TestHandoffUsesAuthoritativeUserDataAsync()
+{
+    using var fixture = new Fixture();
+    var id = Guid.NewGuid();
+    var expected = fixture.Paths.UserData(id);
+    var lying = Path.Combine(fixture.Root, "not-the-profile", "user-data");
+    Directory.CreateDirectory(lying);
+    await DeepLinkRouter.WritePendingAsync(fixture.Paths, id, lying);
+    await fixture.Repository.WriteSettingsAsync(new HubSettings
+    {
+        AntigravityExecutablePath = fixture.Executable,
+        ExecutableSha256 = await ExecutableAttestation.ComputeSha256Async(fixture.Executable)
+    });
+    var handoff = DeepLinkRouter.BuildHandoff(fixture.Paths, "antigravity://oauth/callback?code=x");
+    True(handoff is not null);
+    Equal($"--user-data-dir={expected}", handoff!.ArgumentList[0]);
+}
+
+static async Task<HubException> ThrowsCaptureAsync<T>(Func<Task> action) where T : HubException
+{
+    try { await action(); }
+    catch (T ex) { return ex; }
+    throw new InvalidOperationException($"Expected {typeof(T).Name}.");
+}
+
 static async Task TestCallbackUriValidationAsync()
 {
     // The OS handler quotes %1 so a webpage cannot inject a second argument;
@@ -1081,6 +1211,8 @@ sealed class Fixture : IDisposable
         Profiles = new ProfileManager(Repository, Paths);
         Executable = Path.Combine(Root, "fake-antigravity.exe");
         File.WriteAllBytes(Executable, []);
+        var sha256 = ExecutableAttestation.ComputeSha256Async(Executable).GetAwaiter().GetResult();
+        Repository.WriteSettingsAsync(new HubSettings { AntigravityExecutablePath = Executable, ExecutableSha256 = sha256 }).GetAwaiter().GetResult();
         World = new FakeProcessWorld(Paths, Executable);
         Hub = HubBootstrap.CreateForTesting(Paths, Repository, Profiles, new FakeDriver(Paths, Executable), World, World, World,
             launchVerificationAttempts: launchVerificationAttempts, launchVerificationDelay: launchVerificationDelay, isolation: isolation);

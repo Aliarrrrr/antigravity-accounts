@@ -40,4 +40,17 @@ public static class ExecutableAttestation
                 "so the Hub refuses to launch or relaunch it. Re-run configure-executable if the vendor updated it.",
                 "executable_attestation_changed");
     }
+
+    /// <summary>
+    /// Fails closed when the executable was never pinned. Discovery and doctor
+    /// may still inspect an unpinned install; launch and deep-link handoff may not.
+    /// </summary>
+    public static void RequirePinned(string? pinnedSha256)
+    {
+        if (!string.IsNullOrWhiteSpace(pinnedSha256)) return;
+        throw new HubException(
+            "The Antigravity executable is not hash-pinned, so a swapped binary cannot be refused. " +
+            "Run 'configure-executable <path>' once, then launch again.",
+            "executable_not_pinned");
+    }
 }

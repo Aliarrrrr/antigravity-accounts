@@ -81,6 +81,14 @@ public sealed record LaunchBarrierRecord
     public ProcessIdentity? Root { get; init; }
 }
 
+/// <summary>Written after a cold start proves the scope switched to its own file token store.</summary>
+public sealed record ScopeAttestation
+{
+    public int SchemaVersion { get; init; } = SchemaVersions.Current;
+    public Guid ProfileId { get; init; }
+    public DateTimeOffset VerifiedUtc { get; init; }
+}
+
 public sealed record ProfileStatus(Guid ProfileId, string Name, RuntimeState State, ProcessIdentity? Root, string? Detail, string? WorkspacePath,
     string? IsolationBoxName = null, bool? IsolationReady = null);
 public sealed record LaunchResult(ProfileStatus Status, bool StartedNewProcess);
@@ -125,4 +133,5 @@ public sealed class LaunchStateUncertainException(string message, Exception? inn
 [JsonSerializable(typeof(IsolationScopeMarker))]
 [JsonSerializable(typeof(PendingCallback))]
 [JsonSerializable(typeof(DeepLinkRegistration))]
+[JsonSerializable(typeof(ScopeAttestation))]
 public partial class HubJsonContext : JsonSerializerContext;

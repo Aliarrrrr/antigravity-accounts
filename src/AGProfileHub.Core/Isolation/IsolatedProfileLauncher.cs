@@ -163,9 +163,16 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
 
         if (HasVendorProcess(backend, record.BoxName))
         {
+            // A warm scope is only trusted when a Hub-verified cold start wrote
+            // the attestation for this profile. An instance started outside the
+            // Hub (no WSL_DISTRO_NAME, no token-store proof) must not be
+            // reported as a healthy isolated session.
+            EnsureScopeAttested(profileId);
             var running = backend.ListPids(record.BoxName);
             return new IsolationLaunchResult(profileId, record.BoxName, running, false);
         }
+
+        await RequirePinnedExecutableAsync(cancellationToken).ConfigureAwait(false);
 
         // Only the part of the log this launch appends to counts; earlier runs
         // prove nothing about this one.
@@ -207,6 +214,7 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
                 try { DeepLinkRouter.EnsureRegistered(_paths); }
                 catch { backend.Terminate(record.BoxName); throw; }
                 await RequireFileTokenStoreAsync(profileId, backend, record.BoxName, storeLogFloor, cancellationToken).ConfigureAwait(false);
+                WriteScopeAttestation(profileId);
                 return new IsolationLaunchResult(profileId, record.BoxName, pids, true);
             }
             throw new LaunchStateUncertainException("The isolation launcher exited but no process appeared in the expected scope.");
@@ -228,7 +236,50 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
     private static long LogLength(string path)
     {
         try { return File.Exists(path) ? new FileInfo(path).Length : 0; }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return 0; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Treating an unreadable length as 0 would lower the floor and let
+            // a pre-planted marker count as proof. Fail closed instead.
+            throw new HubException(
+                "The language-server log length could not be read, so token-store verification cannot proceed.",
+                "isolation_scope_unverified", ex);
+        }
+    }
+
+    private async Task RequirePinnedExecutableAsync(CancellationToken cancellationToken)
+    {
+        var settings = await _repository.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+        ExecutableAttestation.RequirePinned(settings.ExecutableSha256);
+    }
+
+    private static string ScopeAttestationPath(HubPaths paths, Guid profileId) =>
+        Path.Combine(paths.ProfileRoot(profileId), "scope-attestation.json");
+
+    private void EnsureScopeAttested(Guid profileId)
+    {
+        var path = ScopeAttestationPath(_paths, profileId);
+        if (File.Exists(path)) return;
+        throw new HubException(
+            $"Profile {profileId:D} has live processes but no Hub-written token-store attestation. " +
+            "Stop the scope and open it through the Hub so isolation can be proven.",
+            "isolation_scope_unverified");
+    }
+
+    private void WriteScopeAttestation(Guid profileId)
+    {
+        _paths.EnsureProfileLayout(profileId);
+        new AtomicJsonStore(_paths.DataRoot).WriteAsync(ScopeAttestationPath(_paths, profileId),
+            new ScopeAttestation { ProfileId = profileId, VerifiedUtc = DateTimeOffset.UtcNow },
+            HubJsonContext.Default.ScopeAttestation, CancellationToken.None)
+            .ConfigureAwait(false).GetAwaiter().GetResult();
+    }
+
+    private void ClearScopeAttestation(Guid profileId)
+    {
+        var path = ScopeAttestationPath(_paths, profileId);
+        if (!File.Exists(path)) return;
+        try { File.Delete(path); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
     /// <summary>
@@ -294,22 +345,15 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
     /// <summary>True only when a vendor application process is alive in the scope.</summary>
     private static bool HasVendorProcess(IIsolationBackend backend, string boxName)
     {
-        foreach (var pid in backend.ListPids(boxName))
+        // The backend already attributes only Antigravity / language_server (and
+        // their in-scope children). A non-empty list is the ownership claim;
+        // re-inspecting each PID here would treat a recycled PID as idle and
+        // fall through into a second cold start.
+        try { return backend.ListPids(boxName).Count > 0; }
+        catch (HubException ex) when (ex.Code == "process_enumeration_unavailable")
         {
-            try
-            {
-                using var process = System.Diagnostics.Process.GetProcessById(pid);
-                var name = process.ProcessName;
-                if (name.Equals("Antigravity", StringComparison.OrdinalIgnoreCase) ||
-                    name.Equals("language_server", StringComparison.OrdinalIgnoreCase))
-                    return true;
-            }
-            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
-            {
-                // The pid vanished between listing and inspection; treat as idle.
-            }
+            throw;
         }
-        return false;
     }
 
     public async Task<bool> StopAsync(Guid profileId, CancellationToken cancellationToken = default)
@@ -336,7 +380,11 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
         backend.Terminate(record.BoxName);
         for (var attempt = 0; attempt < 20; attempt++)
         {
-            if (backend.ListPids(record.BoxName).Count == 0) return true;
+            if (backend.ListPids(record.BoxName).Count == 0)
+            {
+                ClearScopeAttestation(profileId);
+                return true;
+            }
             await Task.Delay(250, cancellationToken).ConfigureAwait(false);
         }
         throw new HubException("The isolation scope still contains processes after termination.", "isolation_stop_failed");

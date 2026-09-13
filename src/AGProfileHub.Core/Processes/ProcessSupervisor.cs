@@ -43,6 +43,8 @@ public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repositor
     private async Task<LaunchResult> LaunchCoreAsync(Guid id, AntigravityInstallation installation, CancellationToken cancellationToken)
     {
         var profile = await profiles.GetAsync(id, cancellationToken).ConfigureAwait(false);
+        var settings = await repository.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+        ExecutableAttestation.RequirePinned(settings.ExecutableSha256);
         // The legacy direct path deliberately uses the plain plan: no
         // process-local token-store hint, so direct instances keep their
         // documented shared-credential behavior.

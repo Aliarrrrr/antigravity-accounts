@@ -148,8 +148,12 @@ public static class DeepLinkRouter
         var pending = ReadPendingAsync(paths).ConfigureAwait(false).GetAwaiter().GetResult();
         if (pending is null) return null;
         var executable = ResolveHandoffExecutable(paths);
+        // The ProfileId selects the waiter; the path is always the managed
+        // user-data directory for that id. A tampered pending cannot point the
+        // handoff at another profile's tree or an arbitrary directory.
+        var userDataPath = paths.UserData(pending.ProfileId);
         var info = new System.Diagnostics.ProcessStartInfo(executable) { UseShellExecute = false };
-        info.ArgumentList.Add($"--user-data-dir={pending.UserDataPath}");
+        info.ArgumentList.Add($"--user-data-dir={userDataPath}");
         info.ArgumentList.Add(uri);
         // The handoff process is the desktop itself, not a Node runtime: the
         // host that started the Hub may have set ELECTRON_RUN_AS_NODE=1.
@@ -174,6 +178,10 @@ public static class DeepLinkRouter
             configured = settings.AntigravityExecutablePath;
             pinnedSha256 = settings.ExecutableSha256;
         }
+        // The callback path relaunches a binary: an unpinned install is refused
+        // the same way a mismatched pin is, so a webpage-triggered handoff cannot
+        // start whatever replaced Antigravity.exe.
+        ExecutableAttestation.RequirePinned(pinnedSha256);
         foreach (var candidate in AntigravityDriver.DiscoveryCandidates(configured))
         {
             try
@@ -242,8 +250,44 @@ public static class DeepLinkRouter
         var record = new AtomicJsonStore(paths.DataRoot).ReadAsync(path, HubJsonContext.Default.DeepLinkRegistration,
             () => throw new ConfigurationException("The deep-link registration record is invalid.", "deeplink_registration_invalid"),
             CancellationToken.None).ConfigureAwait(false).GetAwaiter().GetResult();
-        if (ReadRegisteredCommand() != record.RouterCommand)
-            WriteRegisteredCommand(record.RouterCommand);
+        // Rebuild the command from this data root and a CLI-shaped executable
+        // instead of replaying the stored string: a tampered record must not be
+        // able to point the scheme at an arbitrary program.
+        var expected = CanonicalizeRouterCommand(paths, record.RouterCommand);
+        if (ReadRegisteredCommand() != expected)
+            WriteRegisteredCommand(expected);
+    }
+
+    /// <summary>
+    /// Rebuilds the only command this data root is allowed to re-assert.
+    /// The executable must look like the Hub CLI and still exist; the data-root
+    /// argument is always <paramref name="paths"/>.
+    /// </summary>
+    public static string CanonicalizeRouterCommand(HubPaths paths, string storedCommand)
+    {
+        var cli = TryExtractCliExecutable(storedCommand)
+            ?? throw new HubException(
+                "The deep-link registration record does not name this Hub CLI; re-run configure-deeplink register.",
+                "deeplink_registration_invalid");
+        var fileName = Path.GetFileName(cli);
+        if (!fileName.Equals("AGProfileHub.Cli.exe", StringComparison.OrdinalIgnoreCase) &&
+            !fileName.Equals("AGProfileHub.Cli", StringComparison.OrdinalIgnoreCase))
+            throw new HubException(
+                "The deep-link registration record does not name this Hub CLI; re-run configure-deeplink register.",
+                "deeplink_registration_invalid");
+        cli = PathSafety.CanonicalizeExistingFile(cli);
+        return RouterCommand(cli, paths.DataRoot);
+    }
+
+    private static string? TryExtractCliExecutable(string storedCommand)
+    {
+        if (string.IsNullOrWhiteSpace(storedCommand)) return null;
+        var trimmed = storedCommand.TrimStart();
+        if (!trimmed.StartsWith('"')) return null;
+        var end = trimmed.IndexOf('"', 1);
+        if (end <= 1) return null;
+        var candidate = trimmed[1..end];
+        return string.IsNullOrWhiteSpace(candidate) ? null : candidate;
     }
 
     /// <summary>Puts the scheme back the way it was found, if the router owns it.</summary>
