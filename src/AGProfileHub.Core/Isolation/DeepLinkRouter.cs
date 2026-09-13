@@ -247,15 +247,21 @@ public static class DeepLinkRouter
         if (!OperatingSystem.IsWindows()) return;
         var path = RegistrationPath(paths);
         if (!File.Exists(path)) return;
-        var record = new AtomicJsonStore(paths.DataRoot).ReadAsync(path, HubJsonContext.Default.DeepLinkRegistration,
-            () => throw new ConfigurationException("The deep-link registration record is invalid.", "deeplink_registration_invalid"),
-            CancellationToken.None).ConfigureAwait(false).GetAwaiter().GetResult();
+        var record = ReadRegistration(paths);
         // Rebuild the command from this data root and a CLI-shaped executable
         // instead of replaying the stored string: a tampered record must not be
         // able to point the scheme at an arbitrary program.
         var expected = CanonicalizeRouterCommand(paths, record.RouterCommand);
         if (ReadRegisteredCommand() != expected)
             WriteRegisteredCommand(expected);
+        // Keep the ownership record on the same string the registry holds so
+        // Restore / IsRegisteredFor compare like with like after a re-assert.
+        if (!string.Equals(record.RouterCommand, expected, StringComparison.Ordinal))
+        {
+            new AtomicJsonStore(paths.DataRoot).WriteAsync(path, record with { RouterCommand = expected },
+                HubJsonContext.Default.DeepLinkRegistration, CancellationToken.None)
+                .ConfigureAwait(false).GetAwaiter().GetResult();
+        }
     }
 
     /// <summary>
@@ -328,10 +334,13 @@ public static class DeepLinkRouter
     {
         var path = RegistrationPath(paths);
         if (!File.Exists(path)) return null;
-        return new AtomicJsonStore(paths.DataRoot).ReadAsync(path, HubJsonContext.Default.DeepLinkRegistration,
+        return ReadRegistration(paths);
+    }
+
+    private static DeepLinkRegistration ReadRegistration(HubPaths paths) =>
+        new AtomicJsonStore(paths.DataRoot).ReadAsync(RegistrationPath(paths), HubJsonContext.Default.DeepLinkRegistration,
             () => throw new ConfigurationException("The deep-link registration record is invalid.", "deeplink_registration_invalid"),
             CancellationToken.None).ConfigureAwait(false).GetAwaiter().GetResult();
-    }
 
     private static void WriteRegisteredCommand(string command)
     {

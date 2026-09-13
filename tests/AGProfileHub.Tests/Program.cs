@@ -65,6 +65,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("a warm scope without Hub attestation is not trusted", TestWarmScopeRequiresAttestationAsync),
     ("isolated launch refuses an unpinned executable", TestIsolatedLaunchRequiresPinAsync),
     ("handoff resolves user-data from the profile id", TestHandoffUsesAuthoritativeUserDataAsync),
+    ("stopping an idle scope clears the warm attestation", TestIdleStopClearsAttestationAsync),
 };
 
 var failures = new List<string>();
@@ -1145,6 +1146,33 @@ static async Task<HubException> ThrowsCaptureAsync<T>(Func<Task> action) where T
     try { await action(); }
     catch (T ex) { return ex; }
     throw new InvalidOperationException($"Expected {typeof(T).Name}.");
+}
+
+static async Task TestIdleStopClearsAttestationAsync()
+{
+    using var fixture = new Fixture();
+    var backend = new FakeIsolationBackend();
+    var launcher = new IsolatedProfileLauncher(fixture.Paths, new FakeDriver(fixture.Paths, fixture.Executable),
+        fixture.Repository, _ => backend);
+    var id = Guid.NewGuid();
+    await fixture.Repository.UpdateProfilesAsync(document =>
+    {
+        var registration = new ProfileRegistration(id, "Idle", null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+        {
+            Backend = IsolationBackendKind.ProcessLocal
+        };
+        document.Profiles.Add(registration);
+        return (document, registration);
+    });
+    await launcher.PrepareAsync(id);
+    fixture.Paths.EnsureProfileLayout(id);
+    var attestation = Path.Combine(fixture.Paths.ProfileRoot(id), "scope-attestation.json");
+    await File.WriteAllTextAsync(attestation, JsonSerializer.Serialize(
+        new ScopeAttestation { ProfileId = id, VerifiedUtc = DateTimeOffset.UtcNow },
+        new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+
+    Equal(false, await launcher.StopAsync(id));
+    True(!File.Exists(attestation), "an idle stop must drop the previous cold-start attestation");
 }
 
 static async Task TestCallbackUriValidationAsync()

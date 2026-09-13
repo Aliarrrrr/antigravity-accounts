@@ -258,11 +258,26 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
     private void EnsureScopeAttested(Guid profileId)
     {
         var path = ScopeAttestationPath(_paths, profileId);
-        if (File.Exists(path)) return;
-        throw new HubException(
-            $"Profile {profileId:D} has live processes but no Hub-written token-store attestation. " +
-            "Stop the scope and open it through the Hub so isolation can be proven.",
-            "isolation_scope_unverified");
+        if (!File.Exists(path))
+            throw new HubException(
+                $"Profile {profileId:D} has live processes but no Hub-written token-store attestation. " +
+                "Stop the scope and open it through the Hub so isolation can be proven.",
+                "isolation_scope_unverified");
+        try
+        {
+            var attestation = new AtomicJsonStore(_paths.DataRoot).ReadAsync(path, HubJsonContext.Default.ScopeAttestation,
+                () => throw new ConfigurationException("The scope attestation is missing.", "isolation_scope_unverified"),
+                CancellationToken.None).ConfigureAwait(false).GetAwaiter().GetResult();
+            if (attestation.ProfileId != profileId || attestation.VerifiedUtc == default)
+                throw new HubException(
+                    $"Profile {profileId:D} has a stale or foreign scope attestation. " +
+                    "Stop the scope and open it through the Hub so isolation can be proven.",
+                    "isolation_scope_unverified");
+        }
+        catch (ConfigurationException ex)
+        {
+            throw new HubException(ex.Message, "isolation_scope_unverified", ex);
+        }
     }
 
     private void WriteScopeAttestation(Guid profileId)
@@ -343,18 +358,12 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
     }
 
     /// <summary>True only when a vendor application process is alive in the scope.</summary>
-    private static bool HasVendorProcess(IIsolationBackend backend, string boxName)
-    {
+    private static bool HasVendorProcess(IIsolationBackend backend, string boxName) =>
         // The backend already attributes only Antigravity / language_server (and
         // their in-scope children). A non-empty list is the ownership claim;
         // re-inspecting each PID here would treat a recycled PID as idle and
-        // fall through into a second cold start.
-        try { return backend.ListPids(boxName).Count > 0; }
-        catch (HubException ex) when (ex.Code == "process_enumeration_unavailable")
-        {
-            throw;
-        }
-    }
+        // fall through into a second cold start. Enumeration failures propagate.
+        backend.ListPids(boxName).Count > 0;
 
     public async Task<bool> StopAsync(Guid profileId, CancellationToken cancellationToken = default)
     {
@@ -369,14 +378,23 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
         var record = await FindAsync(profileId, cancellationToken).ConfigureAwait(false);
         if (record is null) return false;
         if (!backend.BoxExists(record.BoxName))
+        {
+            ClearScopeAttestation(profileId);
             throw new HubException($"Isolation scope '{record.BoxName}' is missing; refusing to act on another scope.", "isolation_box_missing");
+        }
         // A stopped Profile cannot receive a callback, so it stops advertising
         // itself — but only itself: another profile may still be waiting for
         // its own sign-in.
         var pending = await DeepLinkRouter.ReadPendingWithoutExpiryAsync(_paths, cancellationToken).ConfigureAwait(false);
         if (pending is not null && pending.ProfileId == profileId)
             DeepLinkRouter.ClearPending(_paths);
-        if (backend.ListPids(record.BoxName).Count == 0) return false;
+        if (backend.ListPids(record.BoxName).Count == 0)
+        {
+            // An idle scope must not keep a previous cold-start attestation:
+            // a later foreign start would be treated as a trusted warm session.
+            ClearScopeAttestation(profileId);
+            return false;
+        }
         backend.Terminate(record.BoxName);
         for (var attempt = 0; attempt < 20; attempt++)
         {
@@ -387,6 +405,7 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
             }
             await Task.Delay(250, cancellationToken).ConfigureAwait(false);
         }
+        ClearScopeAttestation(profileId);
         throw new HubException("The isolation scope still contains processes after termination.", "isolation_stop_failed");
     }
 

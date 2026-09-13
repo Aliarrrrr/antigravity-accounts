@@ -196,7 +196,7 @@ public partial class MainWindow : Window
                 await EnsureIsolationThenLaunchAsync(id);
             }
             await RefreshAsync();
-        }, running ? "Stopping…" : $"Opening {displayName}…");
+        }, running ? "Stopping…" : null);
     }
 
     private void Menu_Click(object sender, RoutedEventArgs e)

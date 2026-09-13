@@ -10,13 +10,11 @@ commits: 7f518d8..7f518d8  # report-only; docs added uncommitted on master per u
 
 ## Report
 
-**What was built** — 对 `7f518d8`（0.4.2）完成只读全量审计，覆盖安全/可用/美观/简洁/依赖/可迁移/文档真实性。完整矩阵见 [`audit-042-report.md`](./audit-042-report.md)。独立 Review 抽查 11 条关键 finding 全部 CONFIRM，无 critical。
+**What was built** — 对 `7f518d8`（0.4.2）完成只读全量审计；随后在 `fix/0.4.3-p1` 完成 P1 安全/文档/UX 修复（见 CHANGELOG 0.4.3 Unreleased）。
 
-核心结论：0.4.2 发布纪律扎实，但安全闸门在热路径（SEC-02）、日志可伪造（SEC-03）、注册表命令可被数据根投毒（SEC-01）、无 pin 放行（SEC-05）、回调 pending 单槽（SEC-07）上未闭合；MANUAL_TEST_PLAN/Doctor/ARCHITECTURE 仍超前或过时。
+**Verification** — 审计：源码交叉核对 PASS；`hub.ps1 test` 曾因 NuGet path1 失败。修复后：`dotnet build --no-restore` + 58/58 tests PASS。无 Antigravity 运行时验收。
 
-**Verification** — 源码交叉核对 PASS；`./hub.ps1 test` 在本机 FAIL（NuGet `path1` null，环境问题，PRE-EXISTING）；无 Antigravity 运行时验收。
-
-**Journey log** — 1) worktree 创建被沙箱拦截，用户批准 master 只读+落盘 docs；2) 三路并行深读 + 主线亲核高风险路径；3) 自研测试套件本机不可复跑，验证诚实降级；4) Review 零 critical，仅 SEC-03 行号 span 微调；5) 文档债（CHANGELOG “load as Sandboxie” vs C# 默认 ProcessLocal）确认为真实性问题而非代码 bug。
+**Journey log** — 1) worktree 被拦 → master 只读审计；2) 三路深读+亲核；3) 修复分支逐 commit 可回退；4) 热路径 attestation / pin / RouterCommand 重建落地；5) 待 E2E 并发登录与发布。
 
 ## [S1] Problem
 
