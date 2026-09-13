@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.4] - 2026-09-13
+
+Release packaging fix on top of 0.4.3 product code (no behavior change vs `bacc9a9` / 0.4.3 intent).
+
+### Fixed
+
+- **Self-contained publish failed in CI with NU1004**: `dotnet restore -r win-x64 --locked-mode` rejected because `packages.lock.json` only pins the TFM graph, not RIDs. The RID restore in `Publish.ps1` no longer uses lock-file mode and disables lock-file rewriting so the release dirty-tree gate still holds. Solution-level locked restore is unchanged.
+
 ## [0.4.3] - 2026-09-13
 
 Security and truthfulness remediation from the 0.4.2 full audit (`docs/compose/spec/audit-042-report.md`). **59 automated checks pass.** Manual acceptance on Desktop 2.12.2 completed 2026-09-13 (see `MANUAL_TEST_PLAN.md`).
