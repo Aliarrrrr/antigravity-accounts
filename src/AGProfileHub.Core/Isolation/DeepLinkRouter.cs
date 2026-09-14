@@ -2,13 +2,24 @@ using Microsoft.Win32;
 
 namespace AGProfileHub.Core;
 
-/// <summary>Describes the Profile that is currently allowed to receive a deep-link callback.</summary>
+/// <summary>Describes one Profile that is currently allowed to receive a deep-link callback.</summary>
 public sealed record PendingCallback
 {
     public int SchemaVersion { get; init; } = SchemaVersions.Current;
     public Guid ProfileId { get; init; }
     public string UserDataPath { get; init; } = string.Empty;
     public DateTimeOffset CreatedUtc { get; init; }
+    public string? ExpectedState { get; init; }
+}
+
+/// <summary>
+/// Multi-slot pending map. An older single-callback document (profileId at the
+/// root) is migrated into a one-entry map on first write.
+/// </summary>
+public sealed record PendingCallbackMap
+{
+    public int SchemaVersion { get; init; } = SchemaVersions.Current;
+    public Dictionary<Guid, PendingCallback> Entries { get; init; } = [];
 }
 
 /// <summary>
@@ -48,6 +59,9 @@ public static class DeepLinkRouter
     /// </summary>
     public static readonly TimeSpan MaxPendingAge = TimeSpan.FromMinutes(30);
 
+    /// <summary>How many Profiles may wait for a callback at once.</summary>
+    public const int MaxPendingEntries = 4;
+
     /// <summary>The registered command that routes a callback to the waiting Profile.</summary>
     public static string RouterCommand(string cliExecutable, string dataRoot) =>
         $"\"{cliExecutable}\" --data-root \"{dataRoot}\" callback \"%1\"";
@@ -55,48 +69,187 @@ public static class DeepLinkRouter
     public static string PendingPath(HubPaths paths) =>
         Path.Combine(paths.DataRoot, "runtime", "deeplink-pending.json");
 
+    /// <summary>Live (non-expired) pending entries, oldest-expired dropped and rewritten.</summary>
+    public static async Task<IReadOnlyList<PendingCallback>> ReadLivePendingAsync(HubPaths paths, CancellationToken cancellationToken = default)
+    {
+        var map = await ReadMapAsync(paths, cancellationToken).ConfigureAwait(false);
+        var now = DateTimeOffset.UtcNow;
+        var live = map.Values
+            .Where(p => p.CreatedUtc != default && now - p.CreatedUtc <= MaxPendingAge)
+            .OrderBy(p => p.CreatedUtc)
+            .ToList();
+        if (live.Count != map.Count)
+            await WriteMapAsync(paths, ToMap(live), cancellationToken).ConfigureAwait(false);
+        return live;
+    }
+
+    /// <summary>The single waiter, or null when none. Prefer the multi-slot readers for routing.</summary>
     public static async Task<PendingCallback?> ReadPendingAsync(HubPaths paths, CancellationToken cancellationToken = default)
     {
-        var pending = await ReadPendingCoreAsync(paths, cancellationToken).ConfigureAwait(false);
-        if (pending is null) return null;
-        // A pending that predates this window is stale: route nothing to it.
-        if (pending.CreatedUtc == default || DateTimeOffset.UtcNow - pending.CreatedUtc > MaxPendingAge)
-        {
-            ClearPending(paths);
-            return null;
-        }
-        return pending;
+        var live = await ReadLivePendingAsync(paths, cancellationToken).ConfigureAwait(false);
+        return live.Count == 1 ? live[0] : null;
     }
 
-    /// <summary>
-    /// The raw pending record regardless of age, for ownership decisions such
-    /// as "may stopping this profile delete it". Routing must use
-    /// <see cref="ReadPendingAsync"/>, which enforces the expiry.
-    /// </summary>
-    public static Task<PendingCallback?> ReadPendingWithoutExpiryAsync(HubPaths paths, CancellationToken cancellationToken = default) =>
-        ReadPendingCoreAsync(paths, cancellationToken);
+    /// <summary>Raw map regardless of age, for ownership decisions such as "may stopping this profile delete it".</summary>
+    public static async Task<IReadOnlyDictionary<Guid, PendingCallback>> ReadPendingWithoutExpiryAsync(HubPaths paths, CancellationToken cancellationToken = default) =>
+        await ReadMapAsync(paths, cancellationToken).ConfigureAwait(false);
 
-    private static async Task<PendingCallback?> ReadPendingCoreAsync(HubPaths paths, CancellationToken cancellationToken)
+    public static async Task WritePendingAsync(HubPaths paths, Guid profileId, string userDataPath,
+        CancellationToken cancellationToken = default, string? expectedState = null)
+    {
+        if (profileId == Guid.Empty) throw new ConfigurationException("Pending callback profile id cannot be empty.", "deeplink_pending_invalid");
+        if (string.IsNullOrWhiteSpace(userDataPath)) throw new ConfigurationException("Pending callback user-data path cannot be empty.", "deeplink_pending_invalid");
+        var map = await ReadMapAsync(paths, cancellationToken).ConfigureAwait(false);
+        map[profileId] = new PendingCallback
+        {
+            ProfileId = profileId,
+            UserDataPath = userDataPath,
+            CreatedUtc = DateTimeOffset.UtcNow,
+            ExpectedState = expectedState
+        };
+        if (map.Count > MaxPendingEntries)
+            throw new HubException($"At most {MaxPendingEntries} profiles may wait for a deep-link callback.", "deeplink_pending_full");
+        await WriteMapAsync(paths, map, cancellationToken).ConfigureAwait(false);
+    }
+
+    public static void ClearPending(HubPaths paths, Guid profileId)
     {
         var path = PendingPath(paths);
-        if (!File.Exists(path)) return null;
-        var pending = await new AtomicJsonStore(paths.DataRoot)
-            .ReadAsync(path, HubJsonContext.Default.PendingCallback,
-                () => null!, cancellationToken).ConfigureAwait(false);
-        return pending is null || pending.ProfileId == Guid.Empty || string.IsNullOrWhiteSpace(pending.UserDataPath)
-            ? null
-            : pending;
+        if (!File.Exists(path)) return;
+        try
+        {
+            var map = ReadMapAsync(paths, CancellationToken.None).ConfigureAwait(false).GetAwaiter().GetResult();
+            if (!map.Remove(profileId)) return;
+            if (map.Count == 0)
+            {
+                File.Delete(path);
+                return;
+            }
+            WriteMapAsync(paths, map, CancellationToken.None).ConfigureAwait(false).GetAwaiter().GetResult();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Fail closed on the next read; do not delete another profile's slot.
+        }
     }
 
-    public static Task WritePendingAsync(HubPaths paths, Guid profileId, string userDataPath, CancellationToken cancellationToken = default) =>
-        new AtomicJsonStore(paths.DataRoot).WriteAsync(PendingPath(paths),
-            new PendingCallback { ProfileId = profileId, UserDataPath = userDataPath, CreatedUtc = DateTimeOffset.UtcNow },
-            HubJsonContext.Default.PendingCallback, cancellationToken);
-
+    /// <summary>Clears every waiter. Only used when retiring the whole pending file.</summary>
     public static void ClearPending(HubPaths paths)
     {
         var path = PendingPath(paths);
         if (File.Exists(path)) File.Delete(path);
+    }
+
+    private static PendingCallbackMap ToMap(IEnumerable<PendingCallback> entries)
+    {
+        var map = new PendingCallbackMap();
+        foreach (var entry in entries) map.Entries[entry.ProfileId] = entry;
+        return map;
+    }
+
+    private static async Task<Dictionary<Guid, PendingCallback>> ReadMapAsync(HubPaths paths, CancellationToken cancellationToken)
+    {
+        var path = PendingPath(paths);
+        if (!File.Exists(path)) return [];
+        // Peek the shape first: older builds wrote a single PendingCallback at the root.
+        using (var stream = File.OpenRead(path))
+        using (var document = await System.Text.Json.JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false))
+        {
+            if (document.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty("schemaVersion", out var schemaElement) ||
+                schemaElement.ValueKind != System.Text.Json.JsonValueKind.Number ||
+                !schemaElement.TryGetInt32(out var schema))
+                throw new ConfigurationException($"Configuration '{path}' has no valid schemaVersion.", "schema_missing");
+            if (schema > SchemaVersions.Current)
+                throw new ConfigurationException($"Configuration schema {schema} is newer than supported schema {SchemaVersions.Current}.", "future_schema");
+            var hasEntries = document.RootElement.TryGetProperty("entries", out _);
+            var hasLegacyProfile = document.RootElement.TryGetProperty("profileId", out _);
+            if (!hasEntries && hasLegacyProfile)
+            {
+                var legacy = System.Text.Json.JsonSerializer.Deserialize(document.RootElement, HubJsonContext.Default.PendingCallback);
+                if (legacy is null || legacy.ProfileId == Guid.Empty || string.IsNullOrWhiteSpace(legacy.UserDataPath)) return [];
+                return new Dictionary<Guid, PendingCallback> { [legacy.ProfileId] = legacy };
+            }
+        }
+
+        var map = await new AtomicJsonStore(paths.DataRoot)
+            .ReadAsync(path, HubJsonContext.Default.PendingCallbackMap,
+                () => new PendingCallbackMap(), cancellationToken).ConfigureAwait(false);
+        return map.Entries
+            .Where(kv => kv.Key != Guid.Empty && !string.IsNullOrWhiteSpace(kv.Value.UserDataPath))
+            .ToDictionary(kv => kv.Key, kv => kv.Value);
+    }
+
+    private static Task WriteMapAsync(HubPaths paths, Dictionary<Guid, PendingCallback> entries, CancellationToken cancellationToken) =>
+        WriteMapAsync(paths, ToMap(entries.Values), cancellationToken);
+
+    private static async Task WriteMapAsync(HubPaths paths, PendingCallbackMap map, CancellationToken cancellationToken)
+    {
+        var path = PendingPath(paths);
+        if (map.Entries.Count == 0)
+        {
+            if (File.Exists(path)) File.Delete(path);
+            return;
+        }
+        await new AtomicJsonStore(paths.DataRoot).WriteAsync(path, map,
+            HubJsonContext.Default.PendingCallbackMap, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Picks the waiter for a callback. One live waiter always wins; two or more
+    /// require a matching recorded OAuth state, otherwise fail closed.
+    /// </summary>
+    public static PendingCallback SelectPending(IReadOnlyList<PendingCallback> live, string uri)
+    {
+        if (live.Count == 0) throw new HubException("No profile is waiting for a deep-link callback.", "deeplink_pending_missing");
+        if (live.Count == 1) return live[0];
+        var state = TryExtractState(uri);
+        if (state is not null)
+        {
+            var matched = live.Where(p => p.ExpectedState is not null &&
+                string.Equals(p.ExpectedState, state, StringComparison.Ordinal)).ToList();
+            if (matched.Count == 1) return matched[0];
+        }
+        throw new HubException(
+            $"{live.Count} profiles are waiting for a deep-link callback and the URI cannot be attributed. Finish one sign-in before starting the next.",
+            "deeplink_pending_ambiguous");
+    }
+
+    /// <summary>Extracts the OAuth <c>state</c> query/fragment parameter without logging the URI.</summary>
+    public static string? TryExtractState(string uri)
+    {
+        try
+        {
+            var question = uri.IndexOf('?');
+            var hash = uri.IndexOf('#');
+            var queryStart = question >= 0 ? question + 1 : -1;
+            var queryEnd = hash > question ? hash : uri.Length;
+            if (queryStart >= 0 && queryStart < queryEnd)
+            {
+                var state = FindParam(uri[queryStart..queryEnd], "state");
+                if (state is not null) return state;
+            }
+            if (hash >= 0 && hash + 1 < uri.Length)
+                return FindParam(uri[(hash + 1)..], "state");
+            return null;
+        }
+        catch (Exception ex) when (ex is ArgumentException or ArgumentOutOfRangeException)
+        {
+            return null;
+        }
+    }
+
+    private static string? FindParam(string segment, string name)
+    {
+        foreach (var part in segment.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var eq = part.IndexOf('=');
+            if (eq <= 0) continue;
+            if (!part[..eq].Equals(name, StringComparison.OrdinalIgnoreCase)) continue;
+            var value = part[(eq + 1)..];
+            return Uri.UnescapeDataString(value);
+        }
+        return null;
     }
 
     /// <summary>
@@ -145,8 +298,9 @@ public static class DeepLinkRouter
     /// </summary>
     public static System.Diagnostics.ProcessStartInfo? BuildHandoff(HubPaths paths, string uri)
     {
-        var pending = ReadPendingAsync(paths).ConfigureAwait(false).GetAwaiter().GetResult();
-        if (pending is null) return null;
+        var live = ReadLivePendingAsync(paths).ConfigureAwait(false).GetAwaiter().GetResult();
+        if (live.Count == 0) return null;
+        var pending = SelectPending(live, uri);
         var executable = ResolveHandoffExecutable(paths);
         // The ProfileId selects the waiter; the path is always the managed
         // user-data directory for that id. A tampered pending cannot point the

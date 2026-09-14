@@ -132,7 +132,17 @@ public sealed class HubService
     {
         var profile = await _profiles.GetAsync(id, cancellationToken).ConfigureAwait(false);
         if (_setup is null) throw new UnsupportedCapabilityException("Isolation setup is not available in this environment.");
-        return await _setup.EnsureReadyAsync(id, profile.Backend, allowFreshBox, profile.WorkspacePath, cancellationToken).ConfigureAwait(false);
+        var report = await _setup.EnsureReadyAsync(id, profile.Backend, allowFreshBox, profile.WorkspacePath, cancellationToken).ConfigureAwait(false);
+        if (report.Ready)
+        {
+            var settings = await _repository.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+            if (settings.ToolchainBridge.Enabled)
+            {
+                try { await ToolchainBridge.PrepareAsync(_paths, id, settings.ToolchainBridge, cancellationToken).ConfigureAwait(false); }
+                catch (HubException ex) { report = report with { Steps = [.. report.Steps, new SetupStep(IsolationStage.Ready, false, $"[{ex.Code}] {ex.Message}")] }; }
+            }
+        }
+        return report;
     }
 
     public async Task<IsolationStage> DetectIsolationStageAsync(Guid id, CancellationToken cancellationToken = default)
@@ -143,7 +153,72 @@ public sealed class HubService
     }
 
     public Task LaunchWithWorkspaceAsync(Guid id, string workspacePath, CancellationToken cancellationToken = default) =>
-        throw new UnsupportedCapabilityException("Workspace forwarding is not supported by the verified Antigravity Desktop 2.12.2 launch contract. The workspace remains profile metadata only.");
+        throw new UnsupportedCapabilityException("Workspace forwarding is not supported by the verified Antigravity Desktop 2.12.2 launch contract. The workspace remains profile metadata only. Use 'open-workspace' to reveal the folder in Explorer.");
+
+    /// <summary>
+    /// Desktop 2.12.2 has no verified launch-time folder contract, so the
+    /// native-feeling path is: launch the profile, then reveal its workspace
+    /// path in Explorer for a manual Open Folder inside the app.
+    /// </summary>
+    public async Task<string> OpenWorkspaceAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var profile = await _profiles.GetAsync(id, cancellationToken).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(profile.WorkspacePath))
+            throw new HubException("This profile has no workspace metadata. Set one with 'workspace <id> <path>'.", "workspace_not_set");
+        if (!Directory.Exists(profile.WorkspacePath))
+            throw new HubException($"Workspace directory does not exist: {profile.WorkspacePath}", "workspace_not_found");
+        OpenFolder(profile.WorkspacePath);
+        return profile.WorkspacePath;
+    }
+
+    public async Task<ToolchainBridgeStatus> PrepareToolchainBridgeAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        await _profiles.GetAsync(id, cancellationToken).ConfigureAwait(false);
+        var settings = await _repository.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+        var status = await _processes.GetStatusAsync(id, cancellationToken).ConfigureAwait(false);
+        if (status.State == RuntimeState.Running)
+            throw new HubException("Stop the profile before changing its toolchain bridge.", "profile_not_stopped");
+        return await ToolchainBridge.PrepareAsync(_paths, id, settings.ToolchainBridge, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<ToolchainBridgeStatus> GetToolchainBridgeStatusAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        await _profiles.GetAsync(id, cancellationToken).ConfigureAwait(false);
+        var settings = await _repository.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+        return await ToolchainBridge.StatusAsync(_paths, id, settings.ToolchainBridge, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task RemoveToolchainBridgeAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        await _profiles.GetAsync(id, cancellationToken).ConfigureAwait(false);
+        var status = await _processes.GetStatusAsync(id, cancellationToken).ConfigureAwait(false);
+        if (status.State == RuntimeState.Running)
+            throw new HubException("Stop the profile before changing its toolchain bridge.", "profile_not_stopped");
+        await ToolchainBridge.RemoveAsync(_paths, id, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<ConversationImportPlan> PlanConversationImportAsync(Guid id, string? sourceDir = null,
+        CancellationToken cancellationToken = default)
+    {
+        await _profiles.GetAsync(id, cancellationToken).ConfigureAwait(false);
+        return ConversationStore.PlanImport(_paths, id, sourceDir ?? ConversationStore.DefaultSourceDir());
+    }
+
+    public async Task<ConversationImportResult> ImportConversationsAsync(Guid id, string? sourceDir = null, bool force = false,
+        CancellationToken cancellationToken = default)
+    {
+        await _profiles.GetAsync(id, cancellationToken).ConfigureAwait(false);
+        var status = await _processes.GetStatusAsync(id, cancellationToken).ConfigureAwait(false);
+        if (status.State != RuntimeState.Stopped)
+            throw new HubException("Stop the profile before importing conversations.", "profile_not_stopped");
+        return ConversationStore.Import(_paths, id, sourceDir ?? ConversationStore.DefaultSourceDir(), force);
+    }
+
+    public async Task<IReadOnlyList<ConversationListItem>> ListConversationsAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        await _profiles.GetAsync(id, cancellationToken).ConfigureAwait(false);
+        return ConversationStore.List(_paths, id);
+    }
 
     public async Task<ProfileRegistration> RemoveProfileAsync(Guid id, CancellationToken cancellationToken = default)
     {
@@ -220,9 +295,11 @@ public sealed class HubService
             new("executableDiscovery", installation is null ? CapabilityState.Unknown : CapabilityState.Verified, installation is null ? "Executable was not found." : "Executable and file version were read without launching."),
             new("desktopRuntimeIsolation", installation?.IsKnownCompatible == true ? CapabilityState.Verified : CapabilityState.Unknown, "Independent user-data and per-instance process homes were observed locally for Desktop 2.12.2."),
             new("visibleConcurrentWindows", preparedReady ? CapabilityState.Verified : CapabilityState.ManualVerificationRequired, "Already-signed-in concurrent windows were manually accepted on Desktop 2.12.2."),
-            new("concurrentSignInRouting", preparedReady ? CapabilityState.Verified : CapabilityState.ManualVerificationRequired, "End-to-end sign-in with deep-link routing registered was manually accepted on 2026-09-13 (2.12.2): two profiles, callbacks landed in the waiting window, no third root, restart kept both accounts. Pending grants remain a single last-writer slot."),
+            new("concurrentSignInRouting", preparedReady ? CapabilityState.Verified : CapabilityState.ManualVerificationRequired, "End-to-end sign-in with deep-link routing registered was manually accepted on 2026-09-13 (2.12.2). Pending grants are multi-slot (max 4); two waiters without an attributable state fail closed."),
             new("googleAccountIsolation", preparedReady ? CapabilityState.Verified : CapabilityState.ManualVerificationRequired, "Each prepared instance keeps its OAuth token in a per-profile file; concurrent accounts, sign-in routing, and restart persistence passed manual acceptance on Desktop 2.12.2. Not a security boundary between Windows users."),
-            new("workspaceForwarding", CapabilityState.Unsupported, "Workspace is metadata; no supported Desktop forwarding contract was found."),
+            new("workspaceForwarding", CapabilityState.Unsupported, "Desktop 2.12.2 has no verified launch-time folder contract (probe 2026-09-13). Workspace stays metadata; use open-workspace to reveal the folder."),
+            new("toolchainBridge", CapabilityState.Experimental, "Profile homes can junction to the Windows user's .ssh/.gitconfig so Agent tools see the same config as native Antigravity."),
+            new("conversationImport", CapabilityState.Experimental, "Copy-only import of conversation SQLite databases and brain folders; never tokens."),
             new("credentialIsolation", preparedReady ? CapabilityState.Observed : CapabilityState.Experimental, "A cold launch is trusted only after the language server reports its per-profile file token store; warm scopes require a Hub-written attestation. The Windows user's shared credential entry is never read, copied, or written.")
         };
         return new DoctorReport(DateTimeOffset.UtcNow, _paths.DataRoot, installation?.ExecutablePath, installation?.Version,

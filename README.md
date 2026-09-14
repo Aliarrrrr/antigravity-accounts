@@ -27,22 +27,24 @@ Antigravity Profile Hub 让多个**官方** Antigravity Desktop 窗口在同一 
 
 ---
 
-## 能力状态（0.4.3）
+## 能力状态（0.4.5-dev）
 
 | 能力 | 状态 |
 |---|---|
 | 两个不同 Google 账号窗口**并发保持登录** | ✅ 已人工验收（2.12.2） |
-| 登录过程中 `antigravity://` 回调路由 | ✅ 已人工验收（2026-09-13）：双窗登录、回调入等待窗、无第三根进程、restart 不丢号 |
+| 登录过程中 `antigravity://` 回调路由 | ✅ 已人工验收（2026-09-13）；pending 改为**多槽**（最多 4），多等待且无法归属时 fail-closed |
 | 启动 / 停止 / 重启 / 桌面快捷方式 | ✅ |
 | 隔离自动配置与自愈（`new` / `fix`，无提权） | ✅ |
 | 按显示名 / 唯一前缀 / UUID 操作 | ✅ |
 | GUI + CLI | ✅ |
 | 官方 Google 登录 | ✅ 必须用户在官方窗口手动完成 |
 | 自动填账号密码 / 授权码 | ❌ 不会做 |
-| 启动时自动打开 Workspace | ❌ Workspace 仅是元数据 |
-| Profile 导入 / 导出 / 彻底删除数据 | ❌ 暂不支持 |
+| 启动时自动打开 Workspace | ❌ 2.12.2 无已验证契约；用 `open-workspace` 在资源管理器中打开 |
+| 工具链桥接（宿主 `.ssh` / `.gitconfig`） | ⚠️ 实验：`iso-bridge` junction 进 Profile home |
+| 原版对话 copy-only 导入 | ⚠️ 实验：`conversations import`（不碰 token） |
+| Profile 内对话清单 | ⚠️ 实验：`conversations ls` |
+| Profile 导入 / 导出 / 彻底删除数据 | ❌ 仍不支持身份导入/导出/删除 |
 | 跨 Windows 用户 / 系统级安全隔离 | ❌ 不提供 |
-| 同一瞬时双 OAuth pending | ⚠️ **单槽**：先完成一侧再点另一侧 |
 
 ---
 
@@ -144,6 +146,9 @@ $Hub = "$env:LOCALAPPDATA\Programs\AntigravityProfileHub\agprofile.cmd"  # 安�
 | `open` / `close [--force]` | 启动 / 停止 |
 | `fix` | 自检修复隔离 |
 | `ls` / `status [名字]` | 列表 / 状态 |
+| `open-workspace <名字>` | 在资源管理器中打开 Workspace 元数据路径（不自动进项目） |
+| `iso-bridge prepare\|status\|remove` | 把宿主 `.ssh`/`.gitconfig` junction 进 Profile home |
+| `conversations ls\|plan\|import` | 列出或 copy-only 导入对话库 |
 
 高级：`launch`、`stop`、`restart`、`launch-all`、`stop-all`、`rename`、`remove`、`workspace`、`show`、`iso-*`、`open-data`、`open-logs`、`configure-executable`、`configure-isolation`、`configure-deeplink`、`shortcut`、`agent-probe`。
 

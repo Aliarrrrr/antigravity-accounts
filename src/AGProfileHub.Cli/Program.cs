@@ -222,6 +222,78 @@ internal static class CliApplication
                 var updated = await hub.SetWorkspaceAsync(await ResolveIdAsync(hub, tail[0]), workspace).ConfigureAwait(false);
                 if (!json) Console.WriteLine(updated.WorkspacePath is null ? "Workspace metadata cleared." : $"Workspace metadata: {updated.WorkspacePath}");
                 return updated;
+            case "open-workspace":
+                RequireCount(tail, 1, "open-workspace <id>");
+                var workspaceOpened = await hub.OpenWorkspaceAsync(await ResolveIdAsync(hub, tail[0])).ConfigureAwait(false);
+                if (!json) Console.WriteLine($"Opened workspace folder {workspaceOpened}. Desktop 2.12.2 does not auto-open it; use File → Open Folder inside Antigravity.");
+                return new { opened = workspaceOpened };
+            case "iso-bridge":
+                if (tail.Count < 1) throw new UsageException("Usage: iso-bridge <prepare|status|remove> <id>");
+                var bridgeAction = tail[0].ToLowerInvariant();
+                RequireCount(tail, 2, "iso-bridge <prepare|status|remove> <id>");
+                var bridgeId = await ResolveIdAsync(hub, tail[1]).ConfigureAwait(false);
+                switch (bridgeAction)
+                {
+                    case "prepare":
+                        var preparedBridge = await hub.PrepareToolchainBridgeAsync(bridgeId).ConfigureAwait(false);
+                        if (!json) PrintBridge(preparedBridge);
+                        return preparedBridge;
+                    case "status":
+                        var bridgeStatus = await hub.GetToolchainBridgeStatusAsync(bridgeId).ConfigureAwait(false);
+                        if (!json) PrintBridge(bridgeStatus);
+                        return bridgeStatus;
+                    case "remove":
+                        await hub.RemoveToolchainBridgeAsync(bridgeId).ConfigureAwait(false);
+                        if (!json) Console.WriteLine("Toolchain bridge removed (host paths were not deleted).");
+                        return new { removed = true };
+                    default:
+                        throw new UsageException("iso-bridge expects prepare, status, or remove.");
+                }
+            case "conversations":
+                if (tail.Count < 1) throw new UsageException("Usage: conversations <ls|import|plan> <id> ...");
+                var convAction = tail[0].ToLowerInvariant();
+                switch (convAction)
+                {
+                    case "ls":
+                        RequireCount(tail, 2, "conversations ls <id>");
+                        var items = await hub.ListConversationsAsync(await ResolveIdAsync(hub, tail[1])).ConfigureAwait(false);
+                        if (!json)
+                            foreach (var item in items)
+                                Console.WriteLine($"{item.Id}  {item.SizeBytes} bytes  {item.LastWriteUtc:u}  {item.Title ?? ""}");
+                        return items;
+                    case "plan":
+                        var planFrom = TakeOption(tail, "--from");
+                        RequireCount(tail, 2, "conversations plan <id> [--from <dir>]");
+                        var plan = await hub.PlanConversationImportAsync(await ResolveIdAsync(hub, tail[1]), planFrom).ConfigureAwait(false);
+                        if (!json)
+                        {
+                            Console.WriteLine($"Would import {plan.FileCount} file(s), {plan.TotalBytes} bytes.");
+                            if (plan.DestinationNotEmpty) Console.WriteLine("Destination already has conversations; import will require --force.");
+                            foreach (var file in plan.Files) Console.WriteLine($"  {file}");
+                        }
+                        return plan;
+                    case "import":
+                        var importFrom = TakeOption(tail, "--from");
+                        var importForce = TakeFlag(tail, "--force");
+                        var importDry = TakeFlag(tail, "--dry-run");
+                        RequireCount(tail, 2, "conversations import <id> [--from <dir>] [--force] [--dry-run]");
+                        var importId = await ResolveIdAsync(hub, tail[1]).ConfigureAwait(false);
+                        if (importDry)
+                        {
+                            var dry = await hub.PlanConversationImportAsync(importId, importFrom).ConfigureAwait(false);
+                            if (!json) Console.WriteLine($"Dry-run: {dry.FileCount} file(s), {dry.TotalBytes} bytes; destinationNotEmpty={dry.DestinationNotEmpty}");
+                            return dry;
+                        }
+                        var imported = await hub.ImportConversationsAsync(importId, importFrom, importForce).ConfigureAwait(false);
+                        if (!json)
+                        {
+                            Console.WriteLine($"Imported {imported.ImportedCount} conversation database(s), {imported.TotalBytes} bytes.");
+                            if (imported.BackupDirectory is not null) Console.WriteLine($"Previous conversations backed up to {imported.BackupDirectory}");
+                        }
+                        return imported;
+                    default:
+                        throw new UsageException("conversations expects ls, plan, or import.");
+                }
             case "launch":
                 var launchWorkspace = TakeOption(tail, "--workspace");
                 RequireCount(tail, 1, "launch <id> [--workspace <path>]");
@@ -437,6 +509,13 @@ internal static class CliApplication
         foreach (var warning in report.Warnings) Console.WriteLine($"WARNING: {warning}");
     }
 
+    private static void PrintBridge(ToolchainBridgeStatus status)
+    {
+        Console.WriteLine($"Toolchain bridge enabled={status.Enabled}");
+        foreach (var entry in status.Entries)
+            Console.WriteLine($"  {entry.Name,-16} {entry.State,-12} {entry.Kind,-8} {entry.TargetPath ?? "—"}");
+    }
+
     private static void PrintHelp()
     {
         Console.WriteLine(HelpText());
@@ -462,6 +541,11 @@ internal static class CliApplication
           launch <name-or-id> | stop <name-or-id> [--force] | restart <name-or-id> [--force] | launch-all | stop-all [--force]
           create <name> [--workspace <path>]    Alias of new (always prepared isolation since 0.4.2)
           rename <name-or-id> <new-name> | remove <name-or-id> | workspace <name-or-id> <path|none>
+          open-workspace <name-or-id>            Reveal the workspace folder in Explorer (no auto-open contract)
+          iso-bridge <prepare|status|remove> <name-or-id>
+                                                Link host .ssh/.gitconfig into the profile home
+          conversations <ls|plan|import> <name-or-id> [--from <dir>] [--force] [--dry-run]
+                                                List or copy-only import vendor conversation databases
           iso-prepare <name-or-id> [--box <name>] [--fresh]
                                                 Prepare a dedicated scope; --fresh acknowledges a takeover
           iso-launch <name-or-id>               Launch the unmodified desktop inside the profile's scope

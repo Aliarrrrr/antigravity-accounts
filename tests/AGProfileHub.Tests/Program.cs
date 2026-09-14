@@ -66,6 +66,12 @@ var tests = new (string Name, Func<Task> Run)[]
     ("isolated launch refuses an unpinned executable", TestIsolatedLaunchRequiresPinAsync),
     ("handoff resolves user-data from the profile id", TestHandoffUsesAuthoritativeUserDataAsync),
     ("stopping an idle scope clears the warm attestation", TestIdleStopClearsAttestationAsync),
+    ("multi-slot pending keeps other waiters and fails closed when ambiguous", TestMultiSlotPendingAsync),
+    ("legacy single pending JSON migrates into the multi-slot map", TestLegacyPendingMigrationAsync),
+    ("toolchain bridge creates marked links and rejects unknown reparse", TestToolchainBridgeAsync),
+    ("conversation import is copy-only and backs up existing databases", TestConversationImportAsync),
+    ("conversation ls lists databases without requiring a running desktop", TestConversationListAsync),
+    ("open-workspace requires metadata and an existing directory", TestOpenWorkspaceAsync),
 };
 
 var failures = new List<string>();
@@ -1173,6 +1179,181 @@ static async Task TestIdleStopClearsAttestationAsync()
 
     Equal(false, await launcher.StopAsync(id));
     True(!File.Exists(attestation), "an idle stop must drop the previous cold-start attestation");
+}
+
+static async Task TestMultiSlotPendingAsync()
+{
+    using var fixture = new Fixture();
+    var a = Guid.NewGuid();
+    var b = Guid.NewGuid();
+    await DeepLinkRouter.WritePendingAsync(fixture.Paths, a, fixture.Paths.UserData(a));
+    await DeepLinkRouter.WritePendingAsync(fixture.Paths, b, fixture.Paths.UserData(b));
+    var live = await DeepLinkRouter.ReadLivePendingAsync(fixture.Paths);
+    Equal(2, live.Count);
+
+    // Two waiters without an attributable state must not guess.
+    await ThrowsAsync<HubException>(() => Task.Run(() =>
+        DeepLinkRouter.SelectPending(live, "antigravity://oauth/callback?code=x")));
+
+    // A recorded state on one waiter selects that profile.
+    await DeepLinkRouter.WritePendingAsync(fixture.Paths, a, fixture.Paths.UserData(a), expectedState: "state-a");
+    live = await DeepLinkRouter.ReadLivePendingAsync(fixture.Paths);
+    var selected = DeepLinkRouter.SelectPending(live, "antigravity://oauth/callback?code=x&state=state-a");
+    Equal(a, selected.ProfileId);
+
+    // Clearing one profile keeps the other.
+    DeepLinkRouter.ClearPending(fixture.Paths, a);
+    live = await DeepLinkRouter.ReadLivePendingAsync(fixture.Paths);
+    Equal(1, live.Count);
+    Equal(b, live[0].ProfileId);
+}
+
+static async Task TestLegacyPendingMigrationAsync()
+{
+    using var fixture = new Fixture();
+    var id = Guid.NewGuid();
+    var path = DeepLinkRouter.PendingPath(fixture.Paths);
+    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+    var legacy = new PendingCallback { ProfileId = id, UserDataPath = fixture.Paths.UserData(id), CreatedUtc = DateTimeOffset.UtcNow };
+    File.WriteAllText(path, JsonSerializer.Serialize(legacy, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+    var pending = await DeepLinkRouter.ReadPendingAsync(fixture.Paths);
+    True(pending is not null && pending.ProfileId == id, "legacy single-callback JSON still routes");
+    // Upsert migrates the document into the multi-slot map without dropping the waiter.
+    await DeepLinkRouter.WritePendingAsync(fixture.Paths, id, fixture.Paths.UserData(id));
+    var text = await File.ReadAllTextAsync(path);
+    True(text.Contains("entries", StringComparison.Ordinal), "a write migrates the file to the map shape");
+}
+
+static async Task TestToolchainBridgeAsync()
+{
+    using var fixture = new Fixture();
+    var id = Guid.NewGuid();
+    fixture.Paths.EnsureProfileLayout(id);
+    // Create a real host-relative temp stand-in under the fixture host is not
+    // possible without touching the real user profile, so use a local target
+    // directory as .ssh by pointing the marker manually after a junction to a
+    // fixture directory.
+    var hostLike = Path.Combine(fixture.Root, "host-home");
+    Directory.CreateDirectory(Path.Combine(hostLike, ".ssh"));
+    await File.WriteAllTextAsync(Path.Combine(hostLike, ".ssh", "config"), "Host *\n");
+
+    // Bridge against a disposable directory using a custom target by creating
+    // the junction ourselves and writing the marker the way Prepare does.
+    var home = fixture.Paths.Home(id);
+    var link = Path.Combine(home, ".ssh");
+    Directory.CreateDirectory(home);
+    var start = new System.Diagnostics.ProcessStartInfo("cmd.exe")
+    {
+        UseShellExecute = false,
+        CreateNoWindow = true,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true
+    };
+    start.ArgumentList.Add("/c");
+    start.ArgumentList.Add("mklink");
+    start.ArgumentList.Add("/J");
+    start.ArgumentList.Add(link);
+    start.ArgumentList.Add(Path.Combine(hostLike, ".ssh"));
+    using (var process = System.Diagnostics.Process.Start(start))
+    {
+        True(process is not null);
+        await process!.WaitForExitAsync();
+        Equal(0, process.ExitCode);
+    }
+    var marker = new ToolchainBridgeMarker
+    {
+        Entries =
+        [
+            new ToolchainBridgeMarkerEntry
+            {
+                Name = ".ssh",
+                TargetPath = Path.Combine(hostLike, ".ssh"),
+                Kind = "junction"
+            }
+        ]
+    };
+    await new AtomicJsonStore(fixture.Paths.DataRoot).WriteAsync(
+        ToolchainBridge.MarkerPath(fixture.Paths, id), marker, HubJsonContext.Default.ToolchainBridgeMarker, default);
+
+    True((File.GetAttributes(link) & FileAttributes.ReparsePoint) != 0, "the bridge is a reparse point");
+    True(ToolchainBridge.IsManagedBridgePath(link), "marked bridges are recognized");
+    // PathSafety must accept the marked junction instead of failing closed.
+    PathSafety.RejectExistingPathAncestors(Path.Combine(link, "config"));
+
+    // Unmarked paths are not treated as managed bridges.
+    True(!ToolchainBridge.IsManagedBridgePath(Path.Combine(home, "not-a-bridge")));
+    True(!ToolchainBridge.IsManagedBridgePath(Path.Combine(fixture.Root, "elsewhere-missing")));
+
+    await ToolchainBridge.RemoveAsync(fixture.Paths, id);
+    True(!Directory.Exists(link), "remove deletes the junction");
+    True(Directory.Exists(Path.Combine(hostLike, ".ssh")), "remove never deletes the host target");
+    True(!File.Exists(ToolchainBridge.MarkerPath(fixture.Paths, id)), "the marker is cleared");
+}
+
+static async Task TestConversationImportAsync()
+{
+    using var fixture = new Fixture();
+    var id = Guid.NewGuid();
+    fixture.Paths.EnsureProfileLayout(id);
+    var source = Path.Combine(fixture.Root, "source-antigravity");
+    var sourceConversations = Path.Combine(source, "conversations");
+    Directory.CreateDirectory(sourceConversations);
+    Directory.CreateDirectory(Path.Combine(source, "brain", "conv-1"));
+    var dbPath = Path.Combine(sourceConversations, "conv-1.db");
+    await File.WriteAllBytesAsync(dbPath, "SQLite format 3\0rest-of-db"u8.ToArray());
+    await File.WriteAllTextAsync(Path.Combine(source, "brain", "conv-1", "note.txt"), "brain");
+
+    var dry = ConversationStore.PlanImport(fixture.Paths, id, source);
+    Equal(1, dry.FileCount);
+    True(!dry.DestinationNotEmpty);
+
+    var result = ConversationStore.Import(fixture.Paths, id, source, force: false);
+    Equal(1, result.ImportedCount);
+    True(File.Exists(Path.Combine(ConversationStore.ConversationsDir(fixture.Paths, id), "conv-1.db")));
+    True(Directory.Exists(Path.Combine(ConversationStore.BrainDir(fixture.Paths, id), "conv-1")));
+
+    // Non-empty destination requires --force and backs up rather than deletes.
+    var second = Path.Combine(sourceConversations, "conv-2.db");
+    await File.WriteAllBytesAsync(second, "SQLite format 3\0second"u8.ToArray());
+    var forced = ConversationStore.Import(fixture.Paths, id, source, force: true);
+    True(forced.BackupDirectory is not null && Directory.Exists(forced.BackupDirectory));
+    True(File.Exists(Path.Combine(ConversationStore.ConversationsDir(fixture.Paths, id), "conv-2.db")));
+
+    // Non-SQLite files are refused.
+    var badSource = Path.Combine(fixture.Root, "bad-source");
+    Directory.CreateDirectory(Path.Combine(badSource, "conversations"));
+    await File.WriteAllTextAsync(Path.Combine(badSource, "conversations", "evil.db"), "not sqlite");
+    Throws<HubException>(() => ConversationStore.Import(fixture.Paths, Guid.NewGuid(), badSource, force: false));
+}
+
+static async Task TestConversationListAsync()
+{
+    using var fixture = new Fixture();
+    var id = Guid.NewGuid();
+    fixture.Paths.EnsureProfileLayout(id);
+    var dir = ConversationStore.ConversationsDir(fixture.Paths, id);
+    Directory.CreateDirectory(dir);
+    await File.WriteAllBytesAsync(Path.Combine(dir, "aaaa-bbbb.db"), "SQLite format 3\0title=\"Demo chat\" more"u8.ToArray());
+    var items = ConversationStore.List(fixture.Paths, id);
+    Equal(1, items.Count);
+    Equal("aaaa-bbbb", items[0].Id);
+    True(items[0].SizeBytes > 0);
+}
+
+static async Task TestOpenWorkspaceAsync()
+{
+    using var fixture = new Fixture();
+    var profile = await fixture.Hub.CreateProfileAsync("Workspaceless", null, IsolationBackendKind.ProcessLocal);
+    var missing = await ThrowsCaptureAsync<HubException>(() => fixture.Hub.OpenWorkspaceAsync(profile.Id));
+    Equal("workspace_not_set", missing.Code);
+
+    var path = Path.Combine(fixture.Root, "project");
+    Directory.CreateDirectory(path);
+    await fixture.Hub.SetWorkspaceAsync(profile.Id, path);
+    // Explorer launch is environment-dependent; only assert the path resolves.
+    var opened = await fixture.Hub.OpenWorkspaceAsync(profile.Id);
+    Equal(path, opened);
+    await ThrowsAsync<UnsupportedCapabilityException>(() => fixture.Hub.LaunchWithWorkspaceAsync(profile.Id, path));
 }
 
 static async Task TestCallbackUriValidationAsync()

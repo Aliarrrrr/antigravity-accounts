@@ -55,6 +55,24 @@ public sealed record HubSettings
     /// still resolve to the same process-local scope at launch.
     /// </summary>
     public IsolationBackendKind DefaultBackend { get; init; } = IsolationBackendKind.ProcessLocal;
+
+    /// <summary>
+    /// Host tool-config bridge into each Profile home. Absent means enabled
+    /// with the default allowlist (additive field, not a schema bump).
+    /// </summary>
+    public ToolchainBridgeSettings ToolchainBridge { get; init; } = new();
+}
+
+/// <summary>Which host paths are linked into a Profile home so tools behave like native Antigravity.</summary>
+public sealed record ToolchainBridgeSettings
+{
+    public bool Enabled { get; init; } = true;
+
+    /// <summary>
+    /// Relative names under the Windows user profile (for example <c>.ssh</c>).
+    /// Empty uses <see cref="ToolchainBridge.DefaultEntries"/>.
+    /// </summary>
+    public List<string> Entries { get; init; } = [];
 }
 
 public enum RuntimeState { Stopped, Running, Unknown }
@@ -121,6 +139,7 @@ public sealed class LaunchStateUncertainException(string message, Exception? inn
 [JsonSourceGenerationOptions(WriteIndented = true, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(ProfilesDocument))]
 [JsonSerializable(typeof(HubSettings))]
+[JsonSerializable(typeof(ToolchainBridgeSettings))]
 [JsonSerializable(typeof(RuntimeRecord))]
 [JsonSerializable(typeof(LaunchBarrierRecord))]
 [JsonSerializable(typeof(ProfileRegistration))]
@@ -132,6 +151,13 @@ public sealed class LaunchStateUncertainException(string message, Exception? inn
 [JsonSerializable(typeof(IsolationStateDocument))]
 [JsonSerializable(typeof(IsolationScopeMarker))]
 [JsonSerializable(typeof(PendingCallback))]
+[JsonSerializable(typeof(PendingCallbackMap))]
 [JsonSerializable(typeof(DeepLinkRegistration))]
 [JsonSerializable(typeof(ScopeAttestation))]
+[JsonSerializable(typeof(ToolchainBridgeMarker))]
+[JsonSerializable(typeof(ToolchainBridgeStatus))]
+[JsonSerializable(typeof(List<ToolchainBridgeEntryStatus>))]
+[JsonSerializable(typeof(ConversationImportPlan))]
+[JsonSerializable(typeof(ConversationImportResult))]
+[JsonSerializable(typeof(List<ConversationListItem>))]
 public partial class HubJsonContext : JsonSerializerContext;

@@ -21,7 +21,10 @@ public static class PathSafety
         {
             // File.GetAttributes also identifies file links and dangling links; Exists may hide them.
             if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+            {
+                if (ToolchainBridge.IsManagedBridgePath(path)) return;
                 throw new ConfigurationException($"Managed path contains a reparse point: {path}", "reparse_point_rejected");
+            }
         }
         catch (FileNotFoundException) { }
         catch (DirectoryNotFoundException) { }

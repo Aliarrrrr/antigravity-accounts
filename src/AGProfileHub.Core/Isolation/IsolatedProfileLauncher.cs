@@ -223,8 +223,8 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
         {
             // A failed launch must not leave a live "waiting" grant behind: the
             // next antigravity:// callback would otherwise be handed to a
-            // profile that never came up.
-            DeepLinkRouter.ClearPending(_paths);
+            // profile that never came up. Other profiles keep their own slots.
+            DeepLinkRouter.ClearPending(_paths, profileId);
             throw;
         }
     }
@@ -385,9 +385,7 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
         // A stopped Profile cannot receive a callback, so it stops advertising
         // itself — but only itself: another profile may still be waiting for
         // its own sign-in.
-        var pending = await DeepLinkRouter.ReadPendingWithoutExpiryAsync(_paths, cancellationToken).ConfigureAwait(false);
-        if (pending is not null && pending.ProfileId == profileId)
-            DeepLinkRouter.ClearPending(_paths);
+        DeepLinkRouter.ClearPending(_paths, profileId);
         if (backend.ListPids(record.BoxName).Count == 0)
         {
             // An idle scope must not keep a previous cold-start attestation:

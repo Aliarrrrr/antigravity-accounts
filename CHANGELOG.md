@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+Native-parity slice for multi-account same-project work (see `docs/compose/spec/native-parity.md`). **65/65 automated checks pass.** Desktop 2.12.2 workspace auto-open remains unsupported after a read-only asar/argv probe.
+
+### Added
+
+- **Multi-slot deep-link pending** (max 4). Launch upserts one profile's grant without clobbering others; stop/failed launch clear only that profile. Two live waiters without an attributable `state` fail closed (`deeplink_pending_ambiguous`). Legacy single-callback JSON migrates on read/write.
+- **Toolchain bridge** (`iso-bridge prepare|status|remove`): junctions the Windows user's `.ssh` and hardlink/copies `.gitconfig` into each Profile home, marked by `.agph-bridge.json`. `PathSafety` allows only those marked reparse points. Removal deletes the link, never the host target. Auto-prepared on `fix`/`new` when enabled in settings (default on).
+- **Conversation import** (`conversations import|plan`, `--dry-run`/`--force`/`--from`): copy-only import of `conversations/*.db` + `brain/<id>/` into a stopped Profile. Non-SQLite files refused; non-empty destination requires `--force` and backs up first; staging then atomic move.
+- **Conversation listing** (`conversations ls`): read-only id/size/mtime/title best-effort scan; no agentapi, no writes.
+- **`open-workspace`**: reveals the Profile workspace path in Explorer. Launch-time folder open remains unsupported (no verified 2.12.2 contract).
+
+### Notes
+
+- Security red lines unchanged: no token/Cookie/Credential Manager reads; no unverified vendor launch arguments; bridge is discoverability, not a cross-user boundary.
+
 ## [0.4.4] - 2026-09-13
 
 Release packaging fix on top of 0.4.3 product code (no behavior change vs `bacc9a9` / 0.4.3 intent).
