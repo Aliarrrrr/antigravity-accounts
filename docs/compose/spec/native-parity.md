@@ -3,7 +3,7 @@ feature: native-parity
 status: delivered
 updated: 2026-09-14
 branch: feature/native-parity
-commits: 8f177fe..5b8529a
+commits: 8f177fe..08b4573
 ---
 
 # Native Parity — 多账号体验对齐原生 Antigravity
