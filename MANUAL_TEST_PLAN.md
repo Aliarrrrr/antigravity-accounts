@@ -1,4 +1,4 @@
-# Manual verification — process-local multi-account (0.4.3)
+# Manual verification — process-local multi-account (0.4.3+)
 
 Real Google authentication is never automated. Do not send credentials, OAuth codes, token/cookie exports, account identifiers, or screenshots containing private account information. Record only pass/fail and non-sensitive behavior.
 
@@ -16,7 +16,7 @@ Real Google authentication is never automated. Do not send credentials, OAuth co
 
 Deep-link registration was restored to the vendor handler after B (`configure-deeplink restore`).
 
-Pending grants are still a single last-writer slot (audit SEC-07 deferred): finish one sign-in before starting the next if both Profiles are mid-OAuth at the same instant.
+Pending grants are multi-slot from the native-parity branch (max 4): two mid-OAuth waiters without an attributable `state` fail closed (`deeplink_pending_ambiguous`) instead of last-writer steal.
 
 ## Gate before any run
 
@@ -46,7 +46,7 @@ With deep-link routing registered:
 5. Confirm no third Antigravity window appears that is not A or B.
 6. `configure-deeplink restore` when finished, and confirm `antigravity://` returns to the previous handler if the vendor owns it.
 
-Pass criteria: both profiles end signed in to the intended accounts; Hub does not drop handoffs. **Single-slot pending remains a known limit for simultaneous mid-OAuth starts.**
+Pass criteria: both profiles end signed in to the intended accounts; Hub does not drop handoffs. Multi-slot pending keeps both waiters; if the callback cannot be attributed, Hub reports `deeplink_pending_ambiguous` and does not guess a window.
 
 ## C. Isolation proof and warm path (accepted 2026-09-13)
 
@@ -63,3 +63,47 @@ Pass criteria: both profiles end signed in to the intended accounts; Hub does no
 ## E. Update revalidation
 
 After Antigravity changes version, repeat A–C before treating multi-account isolation as supported. Unknown Antigravity versions remain blocked by the driver (`version_unverified`).
+
+## F. Native-parity extras (pending desktop acceptance)
+
+Record pass/fail only. Do not copy conversation contents or key material into notes.
+
+### F1. Toolchain bridge
+
+1. With a prepared Profile A **stopped**: `iso-bridge status A` → `.ssh`/`.gitconfig` Ready (or Absent if the host has no such files).
+2. `iso-bridge prepare A` is idempotent; `home/.ssh` is a junction to `%USERPROFILE%\.ssh`; `home/.agph-bridge.json` lists the entry.
+3. Open A through the Hub; inside a workspace run `git config --global --list` and confirm host `.gitconfig` is visible; `ssh -G example.com` (or equivalent) resolves the host `.ssh` config. **Do not print private keys.**
+4. Create a harmless file from the Agent in the workspace; confirm it appears on the host path immediately (process-local, no sandbox).
+5. Stop A; `iso-bridge remove A` deletes the junction; `%USERPROFILE%\.ssh` still exists and is intact.
+6. Repeat `fix A` / `new C` with bridge enabled in settings: prepare still yields Ready without elevation.
+
+Pass criteria: Agent tooling sees host SSH/Git config; host paths survive remove.
+
+### F2. Conversation import and list
+
+1. Identify a **disposable** source under `%USERPROFILE%\.gemini\antigravity` (or a copy). Prefer a scratch copy for the first run.
+2. `conversations plan A --from <source>` lists `*.db` counts/sizes; no files are written.
+3. `conversations import A --from <source> --dry-run` matches the plan.
+4. With A stopped and destination empty: `conversations import A --from <source>` copies databases + `brain/<id>/`.
+5. `conversations ls A` shows ids/sizes/mtimes; titles may be empty.
+6. Open A through the Hub; confirm the vendor UI lists the imported conversations (or none if the vendor rejects foreign DBs — record which).
+7. Import again without `--force` → `import_destination_not_empty`. With `--force` → prior DBs land under `conversations-backup-*`.
+8. Confirm no token/Cookie files were copied (source `installation_id` / credential paths absent from the Profile).
+
+Pass criteria: copy-only import works or fails closed; host token store untouched.
+
+### F3. Workspace open fallback
+
+1. `workspace A <existing folder>`; `open-workspace A` opens that folder in Explorer.
+2. `launch A --workspace <path>` still returns `workspace_forwarding_unsupported` / equivalent — Desktop 2.12.2 has no auto-open contract.
+3. Inside the opened Antigravity window, manually Open Folder once; conversation remains associated by the vendor, not by Hub.
+
+Pass criteria: no fake launch argument; Explorer open works.
+
+### F4. Multi-slot OAuth (optional, slow)
+
+1. Register deeplink; stop A and B; open both; start Google sign-in in both before completing either.
+2. Complete A, then B. Both end signed in; no third root.
+3. If the Hub reports `deeplink_pending_ambiguous`, finish one side first and retry — that is a pass for fail-closed behavior, not a regression.
+
+Pass criteria: no cross-window steal; ambiguous case fails closed.
