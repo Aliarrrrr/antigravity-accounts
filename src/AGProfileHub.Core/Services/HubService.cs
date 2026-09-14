@@ -110,7 +110,17 @@ public sealed class HubService
     {
         await _profiles.GetAsync(id, cancellationToken).ConfigureAwait(false);
         if (_isolation is null) throw new UnsupportedCapabilityException("No isolation backend is configured.");
-        return await _isolation.PrepareAsync(id, boxName, claimExistingFreshBox, cancellationToken).ConfigureAwait(false);
+        var result = await _isolation.PrepareAsync(id, boxName, claimExistingFreshBox, cancellationToken).ConfigureAwait(false);
+        var settings = await _repository.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+        if (settings.ToolchainBridge.Enabled)
+        {
+            try { await ToolchainBridge.PrepareAsync(_paths, id, settings.ToolchainBridge, cancellationToken).ConfigureAwait(false); }
+            catch (Exception ex) when (ex is HubException or IOException or UnauthorizedAccessException)
+            {
+                // Isolation itself succeeded; bridge readiness is reported by iso-bridge status.
+            }
+        }
+        return result;
     }
 
     public async Task<IsolationRuntimeStatus?> GetIsolationStatusAsync(Guid id, CancellationToken cancellationToken = default)
@@ -139,7 +149,11 @@ public sealed class HubService
             if (settings.ToolchainBridge.Enabled)
             {
                 try { await ToolchainBridge.PrepareAsync(_paths, id, settings.ToolchainBridge, cancellationToken).ConfigureAwait(false); }
-                catch (HubException ex) { report = report with { Steps = [.. report.Steps, new SetupStep(IsolationStage.Ready, false, $"[{ex.Code}] {ex.Message}")] }; }
+                catch (Exception ex) when (ex is HubException or IOException or UnauthorizedAccessException)
+                {
+                    var message = ex is HubException hubEx ? $"[{hubEx.Code}] {hubEx.Message}" : ex.Message;
+                    report = report with { Steps = [.. report.Steps, new SetupStep(IsolationStage.Ready, false, $"toolchain bridge skipped: {message}")] };
+                }
             }
         }
         return report;
@@ -287,6 +301,10 @@ public sealed class HubService
             warnings.Add("At least one registered isolation mapping is not launch-ready; inspect iso-status before launch.");
         if (statuses.Any(status => status.IsolationBoxName is null))
             warnings.Add("Profiles without a prepared isolation scope use the legacy serial path and share the Windows user's host credential entry.");
+        var livePending = await DeepLinkRouter.ReadLivePendingAsync(_paths, cancellationToken).ConfigureAwait(false);
+        if (livePending.Count > 1)
+            warnings.Add($"{livePending.Count} profiles are waiting for a deep-link callback; ambiguous callbacks fail closed until one finishes.");
+
 
         var preparedReady = isolationStatuses.Count > 0 && isolationStatuses.All(status => status.BackendAvailable && status.BoxExists);
 

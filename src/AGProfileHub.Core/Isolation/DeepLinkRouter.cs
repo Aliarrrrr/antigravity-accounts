@@ -127,7 +127,7 @@ public static class DeepLinkRouter
             }
             WriteMapAsync(paths, map, CancellationToken.None).ConfigureAwait(false).GetAwaiter().GetResult();
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ConfigurationException)
         {
             // Fail closed on the next read; do not delete another profile's slot.
         }

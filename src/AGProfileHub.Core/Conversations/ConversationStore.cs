@@ -119,6 +119,26 @@ public static class ConversationStore
         {
             try { if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            // After --force emptied the destination, a failed staging must not
+            // leave the profile without conversations: put the backup back.
+            if (backupDir is not null)
+            {
+                try
+                {
+                    foreach (var file in Directory.EnumerateFiles(backupDir, "*.db"))
+                        File.Move(file, Path.Combine(conversations, Path.GetFileName(file)), overwrite: true);
+                    foreach (var dir in Directory.EnumerateDirectories(backupDir, "brain-*"))
+                    {
+                        var id = Path.GetFileName(dir)["brain-".Length..];
+                        var destBrain = Path.Combine(brain, id);
+                        if (Directory.Exists(destBrain)) Directory.Delete(destBrain, recursive: true);
+                        Directory.Move(dir, destBrain);
+                    }
+                    Directory.Delete(backupDir, recursive: true);
+                    backupDir = null;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            }
             throw;
         }
         finally

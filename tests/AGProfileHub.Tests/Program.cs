@@ -1268,7 +1268,8 @@ static async Task TestToolchainBridgeAsync()
             {
                 Name = ".ssh",
                 TargetPath = Path.Combine(hostLike, ".ssh"),
-                Kind = "junction"
+                Kind = "junction",
+                CreatedUtc = DateTimeOffset.UtcNow
             }
         ]
     };
@@ -1421,7 +1422,14 @@ sealed class Fixture : IDisposable
         Executable = Path.Combine(Root, "fake-antigravity.exe");
         File.WriteAllBytes(Executable, []);
         var sha256 = ExecutableAttestation.ComputeSha256Async(Executable).GetAwaiter().GetResult();
-        Repository.WriteSettingsAsync(new HubSettings { AntigravityExecutablePath = Executable, ExecutableSha256 = sha256 }).GetAwaiter().GetResult();
+        // Tests must never junction the real user profile into a disposable
+        // fixture root: recursive cleanup would follow the link into the host.
+        Repository.WriteSettingsAsync(new HubSettings
+        {
+            AntigravityExecutablePath = Executable,
+            ExecutableSha256 = sha256,
+            ToolchainBridge = new ToolchainBridgeSettings { Enabled = false }
+        }).GetAwaiter().GetResult();
         World = new FakeProcessWorld(Paths, Executable);
         Hub = HubBootstrap.CreateForTesting(Paths, Repository, Profiles, new FakeDriver(Paths, Executable), World, World, World,
             launchVerificationAttempts: launchVerificationAttempts, launchVerificationDelay: launchVerificationDelay, isolation: isolation);

@@ -15,6 +15,7 @@ public sealed record ToolchainBridgeMarkerEntry
     public string Name { get; init; } = string.Empty;
     public string TargetPath { get; init; } = string.Empty;
     public string Kind { get; init; } = "junction";
+    public DateTimeOffset CreatedUtc { get; init; }
 }
 
 public enum ToolchainBridgeEntryState { Ready, HostMissing, Broken, Absent }
@@ -98,24 +99,42 @@ public static class ToolchainBridge
             cancellationToken.ThrowIfCancellationRequested();
             var link = Path.Combine(home, name);
             var target = Path.Combine(hostHome, name);
-            if (!Directory.Exists(target) && !File.Exists(target))
+            bool targetExists;
+            try
+            {
+                targetExists = Directory.Exists(target) || File.Exists(target);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                byName.Remove(name);
+                continue;
+            }
+            if (!targetExists)
             {
                 byName.Remove(name);
                 continue;
             }
             if (File.Exists(link) || Directory.Exists(link))
             {
-                if (IsReparse(link) || IsBridgeHardlink(link, target))
+                // Only adopt a pre-existing link when the marker already claims
+                // it AND it still points at the host path. An unmarked reparse
+                // must never be trusted as ours — that would let PathSafety
+                // treat a foreign junction as a managed bridge.
+                if (byName.TryGetValue(name, out var existing) &&
+                    string.Equals(existing.TargetPath, target, StringComparison.OrdinalIgnoreCase) &&
+                    (IsReparse(link) || IsBridgeHardlink(link, target)))
                 {
-                    byName[name] = new ToolchainBridgeMarkerEntry
+                    byName[name] = existing with
                     {
-                        Name = name,
-                        TargetPath = target,
-                        Kind = Directory.Exists(target) ? "junction" : "hardlink"
+                        Kind = existing.Kind,
+                        CreatedUtc = existing.CreatedUtc == default ? DateTimeOffset.UtcNow : existing.CreatedUtc
                     };
                     continue;
                 }
-                throw new HubException($"Cannot bridge '{name}': a non-link item already exists at {link}.", "toolchain_bridge_conflict");
+                if (IsReparse(link))
+                    throw new HubException($"Cannot bridge '{name}': an unmarked reparse point already exists at {link}.", "toolchain_bridge_conflict");
+                if (File.Exists(link) || Directory.Exists(link))
+                    throw new HubException($"Cannot bridge '{name}': a non-link item already exists at {link}.", "toolchain_bridge_conflict");
             }
 
             if (Directory.Exists(target))
@@ -137,7 +156,7 @@ public static class ToolchainBridge
                 await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
                 if (process.ExitCode != 0 || !Directory.Exists(link))
                     throw new HubException($"mklink /J failed for '{name}' (exit {process.ExitCode}).", "toolchain_bridge_failed");
-                byName[name] = new ToolchainBridgeMarkerEntry { Name = name, TargetPath = target, Kind = "junction" };
+                byName[name] = new ToolchainBridgeMarkerEntry { Name = name, TargetPath = target, Kind = "junction", CreatedUtc = DateTimeOffset.UtcNow };
             }
             else
             {
@@ -145,11 +164,11 @@ public static class ToolchainBridge
                 // acceptable fallback for .gitconfig-sized files and keeps the
                 // link removable without touching the host target.
                 if (TryCreateHardLink(link, target))
-                    byName[name] = new ToolchainBridgeMarkerEntry { Name = name, TargetPath = target, Kind = "hardlink" };
+                    byName[name] = new ToolchainBridgeMarkerEntry { Name = name, TargetPath = target, Kind = "hardlink", CreatedUtc = DateTimeOffset.UtcNow };
                 else
                 {
                     File.Copy(target, link, overwrite: false);
-                    byName[name] = new ToolchainBridgeMarkerEntry { Name = name, TargetPath = target, Kind = "copy" };
+                    byName[name] = new ToolchainBridgeMarkerEntry { Name = name, TargetPath = target, Kind = "copy", CreatedUtc = DateTimeOffset.UtcNow };
                 }
             }
         }
