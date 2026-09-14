@@ -1,18 +1,20 @@
 ---
 feature: native-parity
-status: in-progress
+status: delivered
 updated: 2026-09-14
 branch: feature/native-parity
-commits: # filled at delivery
+commits: 8f177fe..5b8529a
 ---
 
 # Native Parity — 多账号体验对齐原生 Antigravity
 
 ## Report
 
-**T1 probe (2026-09-14).** Read-only inspection of Desktop 2.12.2 `app.asar` (4.5MB) and main argv handling found: `extractPathFromArgs` only parses `--user-data-dir=`; deep links come from `antigravity://` argv; workspace open is IPC `dialog:open-workspace` only. **No verified launch-time folder contract.** Fallback shipped: `open-workspace` reveals the path in Explorer; `LaunchWithWorkspaceAsync` stays Unsupported.
+**What was built** — 本分支在 0.4.4 之上交付多账号「像原生」体验切片：(1) Workspace 自动打开经只读探测确认 **无** 2.12.2 契约，改为 `open-workspace` 资源管理器打开 + 明确 Unsupported；(2) `iso-bridge` 把宿主 `.ssh`/`.gitconfig` junction/hardlink 进 Profile home，仅允许 `.agph-bridge.json` 标记的 reparse；(3) `conversations import|plan|ls` copy-only 导入/列出对话库；(4) deep-link pending 升为多槽 map（最多 4，无法归属 fail-closed）；(5) doctor/README/SECURITY/CLI 对齐。Project 实体仍属阶段二。
 
-Implementation on this branch adds multi-slot pending, toolchain bridge, conversation import/list, and open-workspace. Automated suite: 65/65 PASS (`dotnet run --project tests/AGProfileHub.Tests -c Release --no-build`). Desktop E2E for bridge/import still needs manual acceptance.
+**Verification** — `dotnet build AGProfileHub.slnx -c Release --no-restore`：0 warning / 0 error。`dotnet run --project tests/AGProfileHub.Tests -c Release --no-build --no-restore`：**65/65 PASS**。评审发现 critical（未标记 reparse 被误采纳为 bridge）已修复并复审 PASS。`hub.ps1 restore` 在本机存在 PRE-EXISTING NuGet `path1` null（master 同样），构建用 `--no-restore` + 既有 assets。桌面 E2E（真 bridge/导入）仍需人工验收。
+
+**Journey log** — 1) asar/argv 探测无开目录契约，不硬猜；2) PathSafety 白名单只认 marker；3) 测试夹具默认关 bridge，避免递归清理跟 junction 删宿主 `~/.ssh`；4) force 导入失败回滚 backup；5) worktree `git worktree add` 被沙箱拦，用户手动创建后继续。
 
 ## [S1] Problem
 

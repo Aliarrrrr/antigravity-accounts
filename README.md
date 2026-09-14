@@ -168,7 +168,7 @@ $Hub = "$env:LOCALAPPDATA\Programs\AntigravityProfileHub\agprofile.cmd"  # 安�
 | `deeplink_callback_invalid` | 非法 `antigravity://` URI |
 | `deeplink_pending_full` / `deeplink_pending_ambiguous` | 等待回调的 Profile 超过 4 / 多等待且无法归属 |
 | `workspace_not_set` / `workspace_not_found` / `workspace_forwarding_unsupported` | 无 workspace 元数据 / 路径不存在 / 不支持启动自动打开 |
-| `toolchain_bridge_conflict` / `toolchain_bridge_failed` | 桥接路径被占用 / mklink 失败 |
+| `toolchain_bridge_conflict` / `toolchain_bridge_failed` / `toolchain_bridge_entry_invalid` | 桥接路径被占用 / mklink 失败 / 白名单外条目 |
 | `import_source_empty` / `import_source_missing` / `import_not_sqlite` / `import_destination_not_empty` | 导入源为空/不存在/非 SQLite/目标非空（需 `--force`） |
 | `graceful_close_pending` | 普通关闭未完成；确认后 `close --force` |
 | `profile_name_conflict` / `profile_name_ambiguous` | 重名 / 多匹配 |
