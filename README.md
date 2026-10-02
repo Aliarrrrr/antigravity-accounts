@@ -2,11 +2,11 @@
 
 在 Windows 上管理多个 Antigravity Profile。每个 Profile 使用独立的 home、user-data 和文件令牌存储；用户在官方 Antigravity / Google 窗口手动登录，已登录的实例可以并行运行。
 
-当前版本为 **0.5.0-next.1 实验版**，交付 .NET 10 / WPF GUI 与 `agprofile-next` CLI。2026-10-02 在 Antigravity 2.19.1 上完成了部分人工验证：A/B 分别登录、A 重启后保留登录且 B 不受影响、两个 Workspace 手动打开均正常，C 也登录成功。**日常 Chrome 的真实登录回调端到端尚未确认，SSH 实际连接已跳过，完整人工验收保持 `manualAcceptance=false`。** 详见 [验证记录](docs/VALIDATION.md)。
+当前版本为 **0.5.0-next.2 实验版**，交付 .NET 10 / WPF GUI 与 `agprofile-next` CLI。2026-10-02 在 Antigravity 2.19.1 上完成了部分人工验证：A/B 分别登录、A 重启后保留登录且 B 不受影响、两个 Workspace 手动打开均正常，C 也登录成功。**日常 Chrome 的真实登录回调端到端尚未确认，SSH 实际连接已跳过，完整人工验收保持 `manualAcceptance=false`。** 详见 [验证记录](docs/VALIDATION.md)。
 
 ## 安装与首次使用
 
-从 [v0.5.0-next.1 下载页](https://github.com/Aliarrrrr/antigravity-profile-hub/releases/tag/v0.5.0-next.1) 下载 Windows x64 安装器或便携 ZIP。发行包包含 .NET 运行时，无需另装 SDK。
+从 [v0.5.0-next.2 下载页](https://github.com/Aliarrrrr/antigravity-profile-hub/releases/tag/v0.5.0-next.2) 下载 Windows x64 安装器或便携 ZIP。发行包包含 .NET 运行时，无需另装 SDK。
 
 - 安装器默认位置：`%LOCALAPPDATA%/Programs/AntigravityProfileHubNext`。
 - 便携版：解压完整 `AGProfileHubNext` 目录，双击 `Start Next.cmd`。保留其中的 `hub` 与 `cli` 目录。
@@ -100,7 +100,7 @@ cd antigravity-profile-hub
 ./scripts/Publish-Next.ps1 -Installer
 ```
 
-产物位于 `artifacts/next/0.5.0-next.1/<时间戳>`，包含自包含 GUI / CLI、逐文件校验清单、ZIP、安装器及 SHA-256。对完整便携目录运行 `Test-NextPackage.ps1 -PackageRoot <目录>` 可检查文件校验、CLI、GUI 和快捷方式；在没有真实 Profile 的干净 Windows 环境运行 `Test-NextInstaller.ps1 -InstallerPath <文件>` 验证安装 / 卸载。
+产物位于 `artifacts/next/0.5.0-next.2/<时间戳>`，包含自包含 GUI / CLI、逐文件校验清单、ZIP、安装器及 SHA-256。对完整便携目录运行 `Test-NextPackage.ps1 -PackageRoot <目录>` 可检查文件校验、CLI、GUI 和快捷方式；在没有真实 Profile 的干净 Windows 环境运行 `Test-NextInstaller.ps1 -Installer <文件>` 验证安装 / 卸载。
 
 | 保留的开发入口 | 用途 |
 | --- | --- |

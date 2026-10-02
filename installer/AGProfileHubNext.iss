@@ -25,7 +25,7 @@ RestartApplications=no
 ChangesAssociations=no
 ChangesEnvironment=no
 UninstallDisplayIcon={app}\hub\AGProfileHubNext.Gui.exe
-VersionInfoVersion=0.5.0.1
+VersionInfoVersion=0.5.0.2
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a Next desktop shortcut"; Flags: unchecked
