@@ -1,0 +1,38 @@
+**/bin/
+**/obj/
+.tools/
+artifacts/
+.playwright-cli/
+scripts/__pycache__/
+TestResults/
+*.user
+*.suo
+.vs/
+capability-report.json
+Antigravity Profile Hub — Codex Master Prompt.md
+
+# Machine-specific reverse-engineering helpers and raw evidence. These files
+# may contain local paths, process metadata, network observations or hashes;
+# keep them outside the versioned product unless generalized first.
+FORENSICS_REPORT.md
+CORE_FUNCTION_RECOVERY_PLAN.md
+CORE_RUNTIME_REPORT.md
+GITHUB_SOLUTION_RESEARCH.md
+scripts/Apply-WriteThrough.py
+scripts/Diag-SbieQuery.py
+scripts/Edit-SandboxieIni.py
+scripts/Probe-CredentialVisibility.py
+scripts/Probe-DualInstanceIsolation.ps1
+scripts/Restart-SbieService.py
+scripts/Check-KeyringScope.py
+scripts/Collect-AntigravityStaticEvidence.py
+scripts/Inspect-CredentialTargets.py
+scripts/Inspect-GoFunctionMap.py
+scripts/Search-BinaryStrings.py
+scripts/Test-AntigravityAgentApi.ps1
+scripts/Test-GoFunctionMap.py
+scripts/Test-OriginalDesktopEndpoint.ps1
+scripts/Test-SandboxAntigravity.ps1
+scripts/Test-SandboxCredentialIsolation.ps1
+scripts/Trace-SandboxAntigravity.ps1
+scripts/Write-ProbeFile.py

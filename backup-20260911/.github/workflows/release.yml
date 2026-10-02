@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: Publish portable package
+        shell: pwsh
+        run: ./scripts/Publish.ps1
+      - name: Validate tag and locate package
+        shell: pwsh
+        run: |
+          $release = Get-ChildItem artifacts/package -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $package = Join-Path $release.FullName 'AGProfileHub'
+          $manifest = Get-Content (Join-Path $package 'package-manifest.json') -Raw | ConvertFrom-Json
+          if ($env:GITHUB_REF_NAME -ne "v$($manifest.hubVersion)") { throw "Tag $env:GITHUB_REF_NAME does not match package v$($manifest.hubVersion)." }
+          "PACKAGE_ROOT=$package" | Out-File $env:GITHUB_ENV -Append
+          "RELEASE_ROOT=$($release.FullName)" | Out-File $env:GITHUB_ENV -Append
+      - name: Test package structure
+        shell: pwsh
+        run: ./scripts/Test-PackageStructure.ps1 -PackageRoot $env:PACKAGE_ROOT
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+      - name: Build installer
+        shell: pwsh
+        run: ./scripts/Build-Installer.ps1 -PackageRoot $env:PACKAGE_ROOT -OutputDirectory $env:RELEASE_ROOT
+      - name: Test installer lifecycle
+        shell: pwsh
+        run: ./scripts/Test-Installer.ps1 -InstallerPath (Get-ChildItem $env:RELEASE_ROOT -Filter 'AGProfileHub-Setup-*.exe' | Select-Object -First 1 -ExpandProperty FullName)
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: AGProfileHub-${{ github.ref_name }}-win-x64
+          path: |
+            artifacts/package/*/AGProfileHub-*-win-x64.zip
+            artifacts/package/*/AGProfileHub-*-win-x64.zip.sha256.json
+            artifacts/package/*/AGProfileHub-Setup-win-x64-*.exe
+            artifacts/package/*/AGProfileHub-Setup-win-x64-*.exe.sha256.json
+          if-no-files-found: error
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = Get-ChildItem $env:RELEASE_ROOT -File | Where-Object { $_.Extension -in '.zip','.exe','.json' } | ForEach-Object FullName
+          $notes = "Experimental Windows x64 release. Validated only with Antigravity Desktop 2.12.2 and Sandboxie Plus 1.18.2 / core 5.73.2. Re-run acceptance after either dependency changes. Authentication remains in official Antigravity; this project does not import passwords, OAuth tokens, or cookies."
+          gh release create $env:GITHUB_REF_NAME $assets --title "Antigravity Profile Hub $env:GITHUB_REF_NAME (experimental)" --prerelease --latest=false --verify-tag --notes $notes --generate-notes

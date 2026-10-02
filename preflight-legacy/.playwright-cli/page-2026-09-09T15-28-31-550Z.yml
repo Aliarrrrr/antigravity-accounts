@@ -1,0 +1,187 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - link "Skip to content" [ref=e4] [cursor=pointer]:
+      - /url: "#start-of-content"
+    - banner [ref=e9]:
+      - heading "Navigation Menu" [level=2] [ref=e10]
+      - generic [ref=e11]:
+        - link "Homepage" [ref=e13] [cursor=pointer]:
+          - /url: /
+        - generic [ref=e16]:
+          - navigation "Global" [ref=e17]:
+            - list [ref=e18]:
+              - listitem [ref=e19]:
+                - button "Platform" [ref=e21] [cursor=pointer]
+              - listitem [ref=e24]:
+                - button "Solutions" [ref=e26] [cursor=pointer]
+              - listitem [ref=e29]:
+                - button "Resources" [ref=e31] [cursor=pointer]
+              - listitem [ref=e34]:
+                - button "Open Source" [ref=e36] [cursor=pointer]
+              - listitem [ref=e39]:
+                - button "Enterprise" [ref=e41] [cursor=pointer]
+              - listitem [ref=e44]:
+                - link "Pricing" [ref=e45] [cursor=pointer]:
+                  - /url: https://github.com/pricing
+          - generic [ref=e46]:
+            - button "Search or jump to, type / to search" [ref=e48] [cursor=pointer]
+            - link "Sign in" [ref=e55] [cursor=pointer]:
+              - /url: /login?return_to=https%3A%2F%2Fgithub.com%2FAliarrrrr%3Ftab%3Drepositories
+            - link "Sign up" [ref=e58] [cursor=pointer]:
+              - /url: /signup?ref_cta=Sign+up&ref_loc=header+logged+out&ref_page=%2FAliarrrrr&source=header
+            - button "Appearance settings" [ref=e61] [cursor=pointer]
+  - main [ref=e67]:
+    - generic [ref=e70]:
+      - generic [ref=e71]:
+        - generic:
+          - generic:
+            - generic:
+              - img "@Aliarrrrr"
+            - generic:
+              - strong: Aliarrrrr
+              - generic:
+                - generic:
+                  - link "Follow":
+                    - /url: /login?return_to=https%3A%2F%2Fgithub.com%2FAliarrrrr%3Ftab%3Drepositories
+      - navigation "User profile" [ref=e74]:
+        - link "Overview" [ref=e75] [cursor=pointer]:
+          - /url: /Aliarrrrr
+        - link "Repositories 2" [ref=e78] [cursor=pointer]:
+          - /url: /Aliarrrrr?tab=repositories
+          - text: Repositories
+          - generic "2" [ref=e81]
+        - link "Projects" [ref=e82] [cursor=pointer]:
+          - /url: /Aliarrrrr?tab=projects
+        - link "Packages" [ref=e85] [cursor=pointer]:
+          - /url: /Aliarrrrr?tab=packages
+        - link "Stars 13" [ref=e88] [cursor=pointer]:
+          - /url: /Aliarrrrr?tab=stars
+          - text: Stars
+          - generic "13" [ref=e91]
+    - generic [ref=e93]:
+      - generic [ref=e95]:
+        - generic:
+          - generic:
+            - generic:
+              - img "@Aliarrrrr"
+            - generic:
+              - generic:
+                - strong: Aliarrrrr
+            - generic:
+              - generic:
+                - generic:
+                  - link "Follow":
+                    - /url: /login?return_to=https%3A%2F%2Fgithub.com%2FAliarrrrr%3Ftab%3Drepositories
+        - generic [ref=e96]:
+          - generic [ref=e97]:
+            - link [ref=e99] [cursor=pointer]:
+              - /url: https://avatars.githubusercontent.com/u/219403269?v=4
+              - img "View Aliarrrrr's full-sized avatar" [ref=e100]
+            - heading "aliarrrrr Aliarrrrr" [level=1] [ref=e102]:
+              - generic [ref=e103]: aliarrrrr
+              - generic [ref=e104]: Aliarrrrr
+          - generic [ref=e105]:
+            - link "Follow" [ref=e112] [cursor=pointer]:
+              - /url: /login?return_to=https%3A%2F%2Fgithub.com%2FAliarrrrr%3Ftab%3Drepositories
+            - generic [ref=e113]:
+              - generic [ref=e115]:
+                - link "0 followers" [ref=e116] [cursor=pointer]:
+                  - /url: https://github.com/Aliarrrrr?tab=followers
+                - text: ·
+                - link "1 following" [ref=e119] [cursor=pointer]:
+                  - /url: https://github.com/Aliarrrrr?tab=following
+              - list [ref=e120]:
+                - 'listitem "Home location: China" [ref=e121]':
+                  - generic [ref=e124]: China
+                - listitem [ref=e125]:
+                  - generic [ref=e128]: 03:28 (UTC -12:00)
+          - generic [ref=e129]:
+            - heading "Highlights" [level=2] [ref=e130]
+            - list [ref=e131]:
+              - listitem [ref=e132]:
+                - 'generic "Label: Pro" [ref=e135]': Pro
+          - button "Block or report user" [ref=e137] [cursor=pointer]
+      - generic [ref=e142]:
+        - search "Repositories" [ref=e145]:
+          - generic [ref=e146]:
+            - searchbox "Find a repository…" [ref=e148]
+            - generic [ref=e149]:
+              - group [ref=e150]:
+                - button "Type" [ref=e151] [cursor=pointer]
+              - group [ref=e153]:
+                - button "Language" [ref=e154] [cursor=pointer]
+              - group [ref=e156]:
+                - button "Sort" [ref=e157] [cursor=pointer]
+        - list [ref=e160]:
+          - listitem [ref=e161]:
+            - generic [ref=e162]:
+              - heading "dsh-desktop Public" [level=3] [ref=e164]:
+                - link "dsh-desktop" [ref=e165] [cursor=pointer]:
+                  - /url: /Aliarrrrr/dsh-desktop
+                - generic [ref=e166]: Public
+              - paragraph [ref=e168]: "DeepSeek Harness desktop app: ChatGPT-style lightweight window over the dsh web UI with custom background images."
+              - generic [ref=e169]:
+                - link "electron" [ref=e170] [cursor=pointer]:
+                  - /url: /topics/electron
+                - link "desktop-app" [ref=e171] [cursor=pointer]:
+                  - /url: /topics/desktop-app
+                - link "windows" [ref=e172] [cursor=pointer]:
+                  - /url: /topics/windows
+                - link "background-image" [ref=e173] [cursor=pointer]:
+                  - /url: /topics/background-image
+                - link "dsh" [ref=e174] [cursor=pointer]:
+                  - /url: /topics/dsh
+                - link "ai-assistant" [ref=e175] [cursor=pointer]:
+                  - /url: /topics/ai-assistant
+                - link "chatgpt" [ref=e176] [cursor=pointer]:
+                  - /url: /topics/chatgpt
+              - generic [ref=e177]:
+                - generic [ref=e178]: JavaScript
+                - link [ref=e180] [cursor=pointer]:
+                  - /url: /Aliarrrrr/dsh-desktop/stargazers
+                  - img "star" [ref=e181]
+                  - text: "1"
+                - generic [ref=e183]: MIT License
+                - text: Updated Aug 14, 2026last month
+          - listitem [ref=e187]:
+            - generic [ref=e188]:
+              - heading "aisec-project Public" [level=3] [ref=e190]:
+                - link "aisec-project" [ref=e191] [cursor=pointer]:
+                  - /url: /Aliarrrrr/aisec-project
+                - generic [ref=e192]: Public
+              - generic [ref=e193]: Updated Jul 6, 2026on Jul 6
+  - contentinfo [ref=e195]:
+    - heading "Footer" [level=2] [ref=e196]
+    - generic [ref=e197]:
+      - generic [ref=e198]:
+        - link "GitHub Homepage" [ref=e199] [cursor=pointer]:
+          - /url: https://github.com
+        - generic [ref=e202]: © 2026 GitHub, Inc.
+      - navigation "Footer" [ref=e203]:
+        - heading "Footer navigation" [level=3] [ref=e204]
+        - list "Footer navigation" [ref=e205]:
+          - listitem [ref=e206]:
+            - link "Terms" [ref=e207] [cursor=pointer]:
+              - /url: https://docs.github.com/site-policy/github-terms/github-terms-of-service
+          - listitem [ref=e208]:
+            - link "Privacy" [ref=e209] [cursor=pointer]:
+              - /url: https://docs.github.com/site-policy/privacy-policies/github-privacy-statement
+          - listitem [ref=e210]:
+            - link "Security" [ref=e211] [cursor=pointer]:
+              - /url: https://github.com/security
+          - listitem [ref=e212]:
+            - link "Status" [ref=e213] [cursor=pointer]:
+              - /url: https://www.githubstatus.com/
+          - listitem [ref=e214]:
+            - link "Community" [ref=e215] [cursor=pointer]:
+              - /url: https://github.community/
+          - listitem [ref=e216]:
+            - link "Docs" [ref=e217] [cursor=pointer]:
+              - /url: https://docs.github.com/
+          - listitem [ref=e218]:
+            - link "Contact" [ref=e219] [cursor=pointer]:
+              - /url: https://support.github.com?tags=dotcom-footer
+          - listitem [ref=e220]:
+            - button "Manage cookies" [ref=e222] [cursor=pointer]
+          - listitem [ref=e223]:
+            - button "Do not share my personal information" [ref=e225] [cursor=pointer]
