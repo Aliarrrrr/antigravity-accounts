@@ -1,17 +1,45 @@
-# Security model
+# Next 安全与隐私边界
 
-Hub manages local app processes, paths and isolation-box configuration; the official app/OAuth flow performs login. Never read/copy/export tokens, cookies, passwords, auth databases, Credential Manager secret contents, or browser session data. Never patch binaries or quotas, proxy authentication, or impersonate Google identities.
+Next 分离 Antigravity 的应用状态，不提供操作系统沙箱。同一 Windows 用户的进程仍可访问其他可读文件。默认 Git / SSH 桥接还会共享宿主配置及密钥目录；需要收紧共享范围时，在创建向导关闭桥接，或执行 `bridge <profile> off`。
 
-Profiles are not security boundaries against the same Windows user. The shipped mechanism keeps each instance's OAuth token in a per-Profile file. A cold launch is trusted only after the language server's own log proves the switch; a warm scope is trusted only when a Hub-written `scope-attestation.json` exists for that Profile (so an instance started outside the Hub is not reported as a healthy isolated session). Concurrent already-signed-in instances and sign-in with registered callback routing passed manual acceptance on Desktop 2.12.2 (2026-09-13). The mechanism does not isolate Windows users, the network identity, installed binaries, or every possible OS resource. Revalidate after Antigravity changes version.
+## 登录与敏感数据
 
-The Hub never reads, copies, writes, or deletes the Windows user's credential entry. Instead of claiming the vendor target, each instance is steered to its own file token store, and a launch that cannot prove the switch is stopped. Existing unregistered scopes require explicit fresh-scope acknowledgement, and missing scopes fail closed.
+登录由用户在官方 Antigravity / Google 窗口完成。管理器不读取认证 token、Cookie、密码、认证数据库、浏览器会话、SSH 私钥内容或 Windows Credential Manager 秘密。账号标签手填。
 
-Use immutable UUIDs for directory names. Canonicalize managed paths; reject traversal and reparse components before writes. Isolation box names accept only bounded ASCII letters/digits/underscore and are unique per Profile. Workspace is external metadata, never a cleanup target. Remove only unregisters. Atomic writes, backups and file locks protect config and isolation mappings. No profile export/import or sandbox deletion in this release.
+Next 的结构化诊断记录生命周期结果、回调接收阶段和固定故障码。完整回调 URI、子进程 argv 和厂商原始输出不持久化到 Hub 日志。管理器会在内存中解析进程命令行以检查归属，并只从本次启动的日志中识别固定的文件令牌存储标记。
 
-Direct stop validates live process ownership and birth timestamp. Never kill by name or trust persisted PID. Isolated stop targets only the Profile's uniquely bound box and verifies it reaches zero processes. It is a terminating operation rather than a graceful document-save protocol; users must save work first. Scope attribution parses process command lines with real argv rules and compares `--user-data-dir` as a full path, so a look-alike path that merely embeds the expected one is never attributed to a scope, and a child joins a scope only when it was created no earlier than its in-scope parent (a reused parent PID cannot smuggle an unrelated process in). When the process list itself cannot be read, the Hub refuses to start or stop anything and status reports liveness as unknown; it never treats an unreadable list as an idle scope. Probe cleans only its random owned temporary root after stopping owned children; retain data if cleanup safety checks fail.
+提交问题时只提供版本、操作步骤、通过 / 失败结果和非敏感故障码。不要上传完整数据根目录、回调链接、认证文件、原始语言服务器日志、密钥或浏览器资料。
 
-The Antigravity executable the Hub launches and relaunches is pinned by the SHA-256 recorded when it was configured. Launch and the callback handoff refuse an unpinned install (`executable_not_pinned`) and refuse a binary that no longer matches (`executable_attestation_changed`). Doctor may still inspect an unpinned path to help the user configure it. Pinning starts at configuration time — it cannot retroactively judge what the user chose to configure. The callback router accepts only `antigravity://` URIs of bounded length without control characters before anything reaches `Process.Start`; the OS handler quotes `%1`, so a webpage cannot inject a second argument into the relaunched desktop. A pending callback grant expires after 30 minutes, is cleared by every failed launch, belongs only to the profile that is launching, and is deleted by that profile's own stop — never by another profile's. A pending older than its lifetime is dropped, not honored.
+## 兼容与进程控制
 
-The only machine setting the Hub can change is the per-user `antigravity://` registration, and only on explicit request: registering keeps the previous handler for restore, deletes its ownership record if the registry write fails (so a half-applied registration is never self-healed later), and the installer restores the previous handler on uninstall. Re-assertion rebuilds the command from a CLI-shaped executable path plus this data root — a tampered registration file cannot point the scheme at an arbitrary program. The registration record is validated before a launch starts anything, so a corrupt record cannot let an instance outlive the verification gate. Routing exists so concurrent sign-ins reach the waiting Profile; the handoff relaunches the vendor desktop with the waiting Profile's **managed** user-data directory (derived from ProfileId, not a free-form path in the pending file). Pending grants are a single last-writer slot: two Profiles signing in at the same instant can steal each other's callback until multi-slot routing exists — complete one sign-in before starting the next, and finish MANUAL_TEST_PLAN section B before relying on concurrent sign-in. Probe writes stay under its own random directory inside the managed root and are retained for local inspection; nothing else on the system is modified.
+自动探测证明绑定安装版本、运行组件摘要和探测策略修订号；应用更新后必须重新探测。通过探测仅允许实验启动。人工验收单独记录，不由自动测试、安装或目录创建推断。
 
-Hub logs only allowlisted operation metadata. Vendor stdout/stderr is drained and discarded; vendor logs stay within its own profile data and are never copied into Hub logs. Child command lines may contain CSRF/bridge tokens; inspect only in memory where required and never persist them. Disallow arbitrary arguments that could alter isolation or introduce credentials.
+每次冷启动都检查本次日志标记、受管根进程与语言服务器子进程。启动证明缺失时，只停止本次能够确认归属的进程。进程列表不可用时保持未知，并拒绝破坏性操作。
+
+进程归属联合检查精确参数路径、可执行镜像、创建时间及父子关系。Next 入口没有按进程名称批量关闭、仅凭 PID 关闭或普通关闭失败后自动强杀的路径。普通关闭和显式强停分开；强停前应保存工作。
+
+## 路径与桥接
+
+受管路径检查目录穿越及重解析祖先。独立 home 中允许的受管目录链接只有明确记录的 SSH 桥接。撤销时核对所有权，删除链接自身，保留宿主目标；被用户替换的项目保留并报告冲突。
+
+Git 桥接使用受管 include 文件。宿主 `.gitconfig` 引用的其他配置与整个 `.ssh` 目录都可能扩大共享范围，因此桥接是便利功能，不构成安全边界。`.gemini` 不共享。
+
+## 配置继承与迁移
+
+配置继承采用有限的语义允许项。未知设置、任意 keybindings 参数和 snippets 正文被跳过，不提供原样复制回退。JSONC 解析失败保留源和目的文件；冲突值保留目的版本。允许的写入使用备份、锁和原子替换。
+
+迁移只读取 Profile 元数据和允许的编辑器配置路径。应用前要求同一源注册文件的预览收据；不会初始化或修改源目录，不复制认证数据、运行记录或人工验收证明。
+
+## 回调所有权
+
+没有可靠的厂商关联证据时，一次只允许一个有效授权等待槽。多个候选、过期或未来时间的等待记录不能路由。交接检查协议仍属于 Next、安装证明有效、目标 Profile 进程仍存在。真实 Chrome 回调链尚未完成验证，当前发布保持完整人工验收未通过。
+
+协议注册保存原处理器命令，还原只在当前命令仍属于 Next 时执行。其他管理器的回调不会自动接管。搬迁或删除旧包前，应从保留的新包重新注册，避免处理器指向已删除的 CLI。
+
+## 打包、卸载与本地清理
+
+发行包只收集明确选择的程序和文档，不包含本机 Profile 数据、登录信息、探测证明或诊断输出。Next 使用独立安装 ID 和目录。
+
+卸载先请求普通回滚；无法关闭受管窗口时中止，要求用户保存工作并处理窗口。卸载保留 Profile 数据。清理构建目录或探针临时目录时，必须先确认目标路径和链接边界；已登录的真实 Profile、宿主 `.gitconfig` / `.ssh` 和正在使用的 Workspace 应保留。
+
+安全问题可通过仓库提供的私密漏洞报告入口报告；若该入口不可用，请勿在公开 issue 中附加秘密或可用于登录的材料。

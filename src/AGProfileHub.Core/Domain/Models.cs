@@ -57,7 +57,7 @@ public sealed record HubSettings
     public IsolationBackendKind DefaultBackend { get; init; } = IsolationBackendKind.ProcessLocal;
 }
 
-public enum RuntimeState { Stopped, Running, Unknown }
+public enum RuntimeState { Stopped, Running, Unknown, Starting, Stopping, Failed }
 
 public sealed record ProcessIdentity(int ProcessId, DateTimeOffset StartTimeUtc, string ExecutablePath, string UserDataPath);
 
@@ -129,8 +129,6 @@ public sealed class LaunchStateUncertainException(string message, Exception? inn
 [JsonSerializable(typeof(StopResult))]
 [JsonSerializable(typeof(DoctorReport))]
 [JsonSerializable(typeof(List<ProfileStatus>))]
-[JsonSerializable(typeof(IsolationStateDocument))]
-[JsonSerializable(typeof(IsolationScopeMarker))]
 [JsonSerializable(typeof(PendingCallback))]
 [JsonSerializable(typeof(DeepLinkRegistration))]
 [JsonSerializable(typeof(ScopeAttestation))]

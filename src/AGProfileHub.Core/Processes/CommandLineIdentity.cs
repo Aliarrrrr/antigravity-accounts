@@ -20,6 +20,7 @@ public static class CommandLineIdentity
 
     private static string? Normalize(string candidate)
     {
+        if (!Path.IsPathFullyQualified(candidate)) return null;
         try { return Path.GetFullPath(candidate); }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return null; }
     }

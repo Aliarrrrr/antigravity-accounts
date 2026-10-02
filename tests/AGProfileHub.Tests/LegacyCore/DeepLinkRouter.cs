@@ -2,15 +2,6 @@ using Microsoft.Win32;
 
 namespace AGProfileHub.Core;
 
-/// <summary>Describes the Profile that is currently allowed to receive a deep-link callback.</summary>
-public sealed record PendingCallback
-{
-    public int SchemaVersion { get; init; } = SchemaVersions.Current;
-    public Guid ProfileId { get; init; }
-    public string UserDataPath { get; init; } = string.Empty;
-    public DateTimeOffset CreatedUtc { get; init; }
-}
-
 /// <summary>
 /// Routes the vendor's <c>antigravity://</c> callback to the Profile that asked for it.
 /// </summary>
@@ -213,7 +204,8 @@ public static class DeepLinkRouter
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Deep-link registration requires Windows.");
         // Re-registering must not forget the handler that was there before us,
         // otherwise a second register would make restore a no-op.
-        var previous = TryReadRegistration(paths)?.PreviousCommand ?? ReadRegisteredCommand();
+        var existingRecord = TryReadRegistration(paths);
+        var previous = existingRecord is null ? ReadRegisteredCommand() : existingRecord.PreviousCommand;
         var record = new DeepLinkRegistration
         {
             PreviousCommand = previous,
@@ -231,7 +223,9 @@ public static class DeepLinkRouter
             // A record that claims ownership while the scheme was never
             // switched would let EnsureRegistered flip the scheme later as if
             // the registration had succeeded. Remove the record instead.
-            File.Delete(RegistrationPath(paths));
+            if (existingRecord is null) File.Delete(RegistrationPath(paths));
+            else new AtomicJsonStore(paths.DataRoot).WriteAsync(RegistrationPath(paths), existingRecord,
+                HubJsonContext.Default.DeepLinkRegistration, CancellationToken.None).ConfigureAwait(false).GetAwaiter().GetResult();
             throw;
         }
     }
@@ -277,7 +271,8 @@ public static class DeepLinkRouter
                 "deeplink_registration_invalid");
         var fileName = Path.GetFileName(cli);
         if (!fileName.Equals("AGProfileHub.Cli.exe", StringComparison.OrdinalIgnoreCase) &&
-            !fileName.Equals("AGProfileHub.Cli", StringComparison.OrdinalIgnoreCase))
+            !fileName.Equals("AGProfileHub.Cli", StringComparison.OrdinalIgnoreCase) &&
+            !fileName.Equals("agprofile-next.exe", StringComparison.OrdinalIgnoreCase))
             throw new HubException(
                 "The deep-link registration record does not name this Hub CLI; re-run configure-deeplink register.",
                 "deeplink_registration_invalid");
@@ -350,10 +345,3 @@ public static class DeepLinkRouter
     }
 }
 
-public sealed record DeepLinkRegistration
-{
-    public int SchemaVersion { get; init; } = SchemaVersions.Current;
-    public string? PreviousCommand { get; init; }
-    public string RouterCommand { get; init; } = string.Empty;
-    public DateTimeOffset RegisteredUtc { get; init; }
-}

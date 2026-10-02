@@ -6,7 +6,7 @@ namespace AGProfileHub.Core;
 /// <remarks>
 /// The Hub launches and deep-link-relaunches one vendor binary, so that binary
 /// is pinned the same way the language server is pinned by
-/// <see cref="AgentRuntimeProbe"/>: the digest is recorded when the executable
+/// Runtime probes: the digest is recorded when the executable
 /// is configured and verified before every use. A silently swapped binary is
 /// refused instead of launched. Pinning begins at the moment of configuration;
 /// it cannot retroactively judge what the user chose to configure.

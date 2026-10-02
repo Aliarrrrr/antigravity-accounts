@@ -23,3 +23,7 @@ Antigravity Profile Hub — Codex Master Prompt.md
 *.binlog
 .dotnet-home/
 .nuget/
+
+# Parallel Rust GUI development outputs
+**/target/
+.worktrees/

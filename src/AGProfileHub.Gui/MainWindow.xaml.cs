@@ -1,473 +1,66 @@
-using System.Collections.ObjectModel;
-using System.Text;
+using System.Diagnostics;
+using System.IO;
+using System.Text.Json;
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Input;
-using System.Windows.Media;
 using AGProfileHub.Core;
 using AGProfileHub.Gui.Views;
 
 namespace AGProfileHub.Gui;
-
 public partial class MainWindow : Window
 {
-    private readonly HubService _service;
-    private readonly ObservableCollection<ProfileRow> _rows = [];
-    private bool _busy;
-
-    public MainWindow() : this(null) { }
-
-    public MainWindow(string? dataRoot)
+    private readonly NextHubService _hub;
+    public bool InitialLoadComplete { get; private set; }
+    public MainWindow(string? dataRoot = null)
     {
-        _service = HubBootstrap.CreateDefault(dataRoot);
-        // The version is part of the window identity: the product refuses to run
-        // against unverified Antigravity versions, so reports must name it.
-        Title = $"Antigravity Profile Hub {HubVersion.InformationalVersion}";
-        InitializeComponent();
-        ProfilesGrid.ItemsSource = _rows;
-        DataRootText.Text = _service.DataRoot;
-        Loaded += async (_, _) => await RefreshAsync();
+        InitializeComponent(); _hub = new NextHubService(dataRoot);
+        Loaded += async (_, _) => { await RunAsync(RefreshAsync); InitialLoadComplete = true; };
     }
-
-    private async Task RefreshAsync()
+    private Guid Selected => ProfilesGrid.SelectedItem is ProfileStatus row ? row.ProfileId : throw new HubException("请先选择 Profile。", "profile_required");
+    private async Task RefreshAsync() { ProfilesGrid.ItemsSource = await _hub.StatusAllAsync(); }
+    private async Task RunAsync(Func<Task> action)
     {
-        try
-        {
-            var profiles = await _service.ListProfilesAsync().ConfigureAwait(true);
-            var tasks = profiles.Select(async profile =>
-            {
-                try
-                {
-                    return ProfileRow.FromStatus(await _service.GetStatusAsync(profile.Id).ConfigureAwait(true));
-                }
-                catch (Exception ex)
-                {
-                    return ProfileRow.FromStatus(new ProfileStatus(profile.Id, profile.Name, RuntimeState.Unknown, null,
-                        FormatException(ex), profile.WorkspacePath));
-                }
-            });
-            var rows = await Task.WhenAll(tasks).ConfigureAwait(true);
-            _rows.Clear();
-            foreach (var row in rows) _rows.Add(row);
-            UpdateChrome();
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = FormatException(ex);
-        }
+        Toolbar.IsEnabled = Actions.IsEnabled = false;
+        try { await action(); }
+        catch (Exception ex) { Output.Text = ex is HubException ? ex.Message : "操作未完成：" + ex.GetType().Name + "。文件已保留，请检查诊断。"; }
+        finally { Toolbar.IsEnabled = Actions.IsEnabled = true; }
     }
-
-    private void UpdateChrome()
-    {
-        var allIsolated = _rows.All(row => row.IsolationBoxName is not null);
-        LaunchAllButton.IsEnabled = _rows.Count <= 1 || allIsolated;
-        LaunchAllButton.ToolTip = LaunchAllButton.IsEnabled ? null :
-            "Launch all requires every Profile to have a prepared isolation scope.";
-        EmptyState.Visibility = _rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        ProfilesGrid.Visibility = _rows.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-
-        var needsFixIds = new HashSet<Guid>(_rows.Where(row => row.NeedsFix).Select(row => row.ProfileId));
-        var deeplinkHintDue = needsFixIds.Count == 0 && _rows.Count >= 2 &&
-            !_deeplinkHintDismissed && !_service.IsDeepLinkRegistered;
-        // A dismissal only sticks while the situation it described is unchanged:
-        // a different set of profiles needing fix, or a second profile joining
-        // without callback routing, must surface the bar again.
-        var fixSetChanged = needsFixIds.Count > 0 &&
-            (_dismissedNeedsFix is null || !needsFixIds.SetEquals(_dismissedNeedsFix));
-        if (needsFixIds.Count > 0 && (!_infoBarDismissed || fixSetChanged))
-        {
-            InfoText.Text = needsFixIds.Count == 1
-                ? "1 profile has incomplete isolation. Use ⋯ → Fix isolation to repair it with one click."
-                : $"{needsFixIds.Count} profiles have incomplete isolation. Use ⋯ → Fix isolation on each to repair it.";
-            InfoBar.Visibility = Visibility.Visible;
-            _infoMode = InfoMode.Fix;
-            _infoBarDismissed = false;
-            _dismissedNeedsFix = null;
-        }
-        else if (deeplinkHintDue)
-        {
-            InfoText.Text = "Two or more profiles can sign in at the same time. Register the callback routing once " +
-                "with the Callbacks button so concurrent logins reach the right window; the previous handler stays restorable.";
-            InfoBar.Visibility = Visibility.Visible;
-            _infoMode = InfoMode.Deeplink;
-        }
-        else
-        {
-            InfoBar.Visibility = Visibility.Collapsed;
-            _infoMode = InfoMode.None;
-            if (needsFixIds.Count == 0) { _infoBarDismissed = false; _dismissedNeedsFix = null; }
-        }
-        StatusText.Text = $"{_rows.Count} profile(s)";
-    }
-
-    private enum InfoMode { None, Fix, Deeplink }
-    private InfoMode _infoMode;
-    private bool _infoBarDismissed;
-    private HashSet<Guid>? _dismissedNeedsFix;
-    private bool _deeplinkHintDismissed;
-
-    private void DismissInfo_Click(object sender, RoutedEventArgs e)
-    {
-        if (_infoMode == InfoMode.Fix)
-        {
-            _infoBarDismissed = true;
-            _dismissedNeedsFix = new HashSet<Guid>(_rows.Where(row => row.NeedsFix).Select(row => row.ProfileId));
-        }
-        else if (_infoMode == InfoMode.Deeplink)
-        {
-            _deeplinkHintDismissed = true;
-        }
-        InfoBar.Visibility = Visibility.Collapsed;
-    }
-
+    private void Show(object value) => Output.Text = JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true });
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RunAsync(RefreshAsync);
-
     private async void Create_Click(object sender, RoutedEventArgs e)
     {
-        var name = InputDialog.Ask(this, "Create profile", "Profile name (1-80 printable characters). The Hub prepares its isolation automatically.");
-        if (string.IsNullOrWhiteSpace(name)) return;
-        await RunAsync(async () =>
-        {
-            var profile = await _service.CreateProfileAsync(name);
-            try
-            {
-                await _service.EnsureIsolationReadyAsync(profile.Id);
-            }
-            catch (UnsupportedCapabilityException ex)
-            {
-                StatusText.Text = $"Profile created, but isolation was not prepared: {ex.Message}";
-            }
-            await RefreshAsync();
-        });
+        var name = InputDialog.Ask(this, "创建 Profile · 1/2", "账号标签由你填写；管理器不读取登录凭据。"); if (string.IsNullOrWhiteSpace(name)) return;
+        var bridge = InputDialog.Ask(this, "创建 Profile · 2/2", "默认共享 .gitconfig（include）和 .ssh（整个目录）。输入 on 或 off；不共享 .gemini。", "on");
+        if (bridge is not "on" and not "off") return;
+        await RunAsync(async () => { var p = await _hub.Profiles.CreateAsync(name, null, IsolationBackendKind.ProcessLocal); Show(await _hub.Bridge.ApplyAsync(p.Id, bridge == "on", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))); await RefreshAsync(); });
     }
-
+    private async void Configure_Click(object sender, RoutedEventArgs e)
+    { var path = InputDialog.Ask(this, "应用路径", "已安装的官方 Antigravity.exe 路径", Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "antigravity", "Antigravity.exe")); if (path is null) return; await RunAsync(async () => { await _hub.ConfigureExecutableAsync(path); Output.Text = "路径已配置；请探测兼容性。"; }); }
+    private async void Probe_Click(object sender, RoutedEventArgs e) => await RunAsync(async () => { Output.Text = "正在独立临时 Profile 中探测，最长约两分钟；不要在探针窗口登录。"; Show(await _hub.ProbeAsync()); });
+    private async void Doctor_Click(object sender, RoutedEventArgs e) => await RunAsync(async () => Show(await _hub.CompatibilityAsync()));
+    private async void Launch_Click(object sender, RoutedEventArgs e) => await RunAsync(async () => { var id = Selected; Output.Text = "正在验证独立文件令牌存储…"; Show(await _hub.LaunchAsync(id)); await RefreshAsync(); });
+    private async void Stop_Click(object sender, RoutedEventArgs e) => await RunAsync(async () => { Show(new { stopped = await _hub.StopAsync(Selected) }); await RefreshAsync(); });
+    private async void Force_Click(object sender, RoutedEventArgs e)
+    { if (MessageBox.Show(this, "强制停止可能丢失未保存工作。继续？", "强制停止", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return; await RunAsync(async () => { Show(new { stopped = await _hub.StopAsync(Selected, true) }); await RefreshAsync(); }); }
+    private async void Login_Click(object sender, RoutedEventArgs e) => await RunAsync(async () => { _hub.RegisterProtocol(Cli()); await _hub.BeginLoginAsync(Selected); Output.Text = "此 Profile 已获得授权等待槽。现在在它的官方窗口完成登录；另一侧可保持运行，授权请依次完成。"; });
+    private async void CancelLogin_Click(object sender, RoutedEventArgs e) => await RunAsync(async () => { await _hub.EndLoginAsync(Selected); Output.Text = "已取消此 Profile 的授权等待。"; });
     private async void Rename_Click(object sender, RoutedEventArgs e)
-    {
-        if (!TryGetProfileId(sender, out var id)) return;
-        var name = InputDialog.Ask(this, "Rename profile", "New display name. The UUID is unchanged.");
-        if (string.IsNullOrWhiteSpace(name)) return;
-        await RunAsync(async () =>
-        {
-            await _service.RenameProfileAsync(id, name);
-            await RefreshAsync();
-        });
-    }
-
+    { var name = InputDialog.Ask(this, "账号标签", "手填标签，不从 token 读取账号。"); if (name is null) return; await RunAsync(async () => { await _hub.Profiles.RenameAsync(Selected, name); await RefreshAsync(); }); }
     private async void Workspace_Click(object sender, RoutedEventArgs e)
+    { var path = InputDialog.Ask(this, "Workspace", "当前仅保存路径。2.19.1 尚无验证通过的打开接口；请在官方窗口手动打开。"); if (path is null) return; await RunAsync(async () => { await _hub.Profiles.SetWorkspaceAsync(Selected, path); await RefreshAsync(); }); }
+    private async void Bridge_Click(object sender, RoutedEventArgs e)
+    { var policy = InputDialog.Ask(this, "桥接范围", "on：共享宿主 .gitconfig 与整个 .ssh；off：撤销本工具的受管项，保留宿主目标。", "on"); if (policy is not "on" and not "off") return; await RunAsync(async () => Show(await _hub.Bridge.ApplyAsync(Selected, policy == "on", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)))); }
+    private async void Inherit_Click(object sender, RoutedEventArgs e)
+    { var source = InputDialog.Ask(this, "配置继承", "源编辑器 User 目录。先预览安全允许项、冲突与跳过内容；不复制插件或任意文本。"); if (source is null) return; await RunAsync(async () =>
+        { var id = Selected; var preview = await NextConfiguration.InheritAsync(_hub.Paths, id, source, false); Show(preview);
+          if (preview.Allowed.Count > 0 && MessageBox.Show(this, "预览已显示。写入允许项并备份原文件？已有冲突值会保留。", "应用配置继承", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
+              Show(await NextConfiguration.InheritAsync(_hub.Paths, id, source, true)); }); }
+    private async void Shortcut_Click(object sender, RoutedEventArgs e) => await RunAsync(async () => Show(new { path = DesktopShortcut.Create(await _hub.Profiles.GetAsync(Selected), _hub.Paths.DataRoot, Cli(), Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)) }));
+    private async void Register_Click(object sender, RoutedEventArgs e) => await RunAsync(() => { _hub.RegisterProtocol(Cli()); Output.Text = "已注册回调；旧处理器已备份。"; return Task.CompletedTask; });
+    private async void Restore_Click(object sender, RoutedEventArgs e) => await RunAsync(() => { Show(new { restored = NextProtocol.Restore(_hub.Paths) }); return Task.CompletedTask; });
+    private void Logs_Click(object sender, RoutedEventArgs e) { var info = new ProcessStartInfo("explorer.exe") { UseShellExecute = false }; info.ArgumentList.Add(_hub.Paths.LogsRoot); Process.Start(info)?.Dispose(); }
+    private static string Cli()
     {
-        if (!TryGetProfileId(sender, out var id)) return;
-        var path = InputDialog.Ask(this, "Workspace metadata", "Workspace path (leave blank to clear). Recorded as metadata only; the desktop does not open it automatically.");
-        if (path is null) return;
-        await RunAsync(async () =>
-        {
-            await _service.SetWorkspaceAsync(id, string.IsNullOrWhiteSpace(path) ? null : path);
-            await RefreshAsync();
-        });
-    }
-
-    private async void Remove_Click(object sender, RoutedEventArgs e)
-    {
-        if (!TryGetProfileId(sender, out var id)) return;
-        if (MessageBox.Show("Remove registration? Profile data and its isolation scope are kept.", "Remove profile",
-                MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
-            return;
-        await RunAsync(async () =>
-        {
-            await _service.RemoveProfileAsync(id);
-            await RefreshAsync();
-        });
-    }
-
-    private async void PrimaryAction_Click(object sender, RoutedEventArgs e)
-    {
-        if (!TryGetProfileId(sender, out var id)) return;
-        var row = _rows.FirstOrDefault(r => r.ProfileId == id);
-        var running = row?.IsRunning == true;
-        var displayName = row?.Name ?? "profile";
-        await RunAsync(async () =>
-        {
-            if (running)
-            {
-                await _service.StopAsync(id);
-            }
-            else
-            {
-                StatusText.Text = $"Opening {displayName}… cold start can take 1–2 minutes; do not kill the window.";
-                await EnsureIsolationThenLaunchAsync(id);
-            }
-            await RefreshAsync();
-        }, running ? "Stopping…" : null);
-    }
-
-    private void Menu_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not Button button || button.ContextMenu is null) return;
-        button.ContextMenu.PlacementTarget = button;
-        button.ContextMenu.IsOpen = true;
-    }
-
-    private async Task EnsureIsolationThenLaunchAsync(Guid id)
-    {
-        try
-        {
-            if (await _service.DetectIsolationStageAsync(id) != IsolationStage.NotStarted)
-            {
-                var ready = await _service.EnsureIsolationReadyAsync(id);
-                if (!ready.Ready) throw new HubException($"Isolation is not ready: {ready.Stage}.", "isolation_not_ready");
-            }
-        }
-        catch (UnsupportedCapabilityException) { }
-        await _service.LaunchAsync(id);
-    }
-
-    private async void Launch_Click(object sender, RoutedEventArgs e)
-    {
-        if (TryGetProfileId(sender, out var id))
-            await RunAsync(async () => { await EnsureIsolationThenLaunchAsync(id); await RefreshAsync(); });
-    }
-
-    private async void Stop_Click(object sender, RoutedEventArgs e)
-    {
-        if (TryGetProfileId(sender, out var id))
-            await RunAsync(async () => { var result = await _service.StopAsync(id); await RefreshAsync(); EnsureStopped(result); });
-    }
-
-    private async void ForceStop_Click(object sender, RoutedEventArgs e)
-    {
-        if (!TryGetProfileId(sender, out var id)) return;
-        if (!ConfirmDestructive("Force stop this profile?", "Unsaved work in its Antigravity window may be lost.")) return;
-        await RunAsync(async () => { await _service.StopAsync(id, force: true); await RefreshAsync(); }, "Force stopping…");
-    }
-
-    private async void Restart_Click(object sender, RoutedEventArgs e)
-    {
-        if (TryGetProfileId(sender, out var id))
-            await RunAsync(async () => { await _service.RestartAsync(id); await RefreshAsync(); }, "Restarting…");
-    }
-
-    private async void ForceRestart_Click(object sender, RoutedEventArgs e)
-    {
-        if (!TryGetProfileId(sender, out var id)) return;
-        if (!ConfirmDestructive("Force restart this profile?", "Unsaved work in its Antigravity window may be lost.")) return;
-        await RunAsync(async () => { await _service.RestartAsync(id, force: true); await RefreshAsync(); }, "Force restarting…");
-    }
-
-    private bool ConfirmDestructive(string title, string detail) =>
-        MessageBox.Show(this, detail, title, MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
-
-    private async void Fix_Click(object sender, RoutedEventArgs e)
-    {
-        if (!TryGetProfileId(sender, out var id)) return;
-        await RunAsync(async () =>
-        {
-            var report = await _service.EnsureIsolationReadyAsync(id);
-            StatusText.Text = report.Ready ? "Isolation is ready." : $"Isolation stage: {report.Stage}.";
-            await RefreshAsync();
-        });
-    }
-
-    private async void PrepareIsolation_Click(object sender, RoutedEventArgs e)
-    {
-        if (!TryGetProfileId(sender, out var id)) return;
-        await RunAsync(async () =>
-        {
-            var result = await _service.PrepareIsolationAsync(id);
-            StatusText.Text = $"Isolation ready: {result.BoxName}.";
-            await RefreshAsync();
-        });
-    }
-
-    private async void LaunchAll_Click(object sender, RoutedEventArgs e)
-    {
-        await RunAsync(async () =>
-        {
-            await _service.LaunchAllAsync();
-            await RefreshAsync();
-        });
-    }
-
-    private async void StopAll_Click(object sender, RoutedEventArgs e)
-    {
-        if (!ConfirmDestructive("Stop all profiles?", "Unsaved work in any Antigravity window may be lost.")) return;
-        await RunAsync(async () =>
-        {
-            var results = new List<StopResult>();
-            foreach (var profile in await _service.ListProfilesAsync()) results.Add(await _service.StopAsync(profile.Id));
-            await RefreshAsync();
-            foreach (var result in results) EnsureStopped(result);
-        }, "Stopping all profiles…");
-    }
-
-    private async void Doctor_Click(object sender, RoutedEventArgs e)
-    {
-        await RunAsync(async () =>
-        {
-            var report = await _service.DoctorAsync();
-            var text = new StringBuilder()
-                .AppendLine($"Executable: {(report.ExecutableFound ? report.ExecutablePath : "not found")}")
-                .AppendLine($"Version: {report.ExecutableVersion ?? "unknown"}")
-                .AppendLine($"Experimental launch: {report.CompatibleForExperimentalLaunch}");
-            foreach (var capability in report.Capabilities)
-                text.AppendLine($"{capability.Name}: {capability.State} — {capability.Detail}");
-            foreach (var warning in report.Warnings)
-                text.AppendLine($"Warning: {warning}");
-            MessageBox.Show(text.ToString(), "Doctor", MessageBoxButton.OK, MessageBoxImage.Information);
-        });
-    }
-
-    private void OpenData_Click(object sender, RoutedEventArgs e) => OpenFolderSafely(() => _service.OpenDataFolder());
-
-    private async void DeepLink_Click(object sender, RoutedEventArgs e)
-    {
-        await RunAsync(() =>
-        {
-            if (_service.IsDeepLinkRegistered)
-            {
-                var answer = MessageBox.Show(this,
-                    "Sign-in callbacks are currently routed through this Hub.\n\nRestore the previous antigravity:// handler?",
-                    "Deep-link routing", MessageBoxButton.YesNo, MessageBoxImage.Question);
-                if (answer == MessageBoxResult.Yes)
-                    StatusText.Text = _service.RestoreDeepLink()
-                        ? "The previous antigravity:// handler was restored."
-                        : "Nothing was restored: this Hub no longer owns the registration.";
-            }
-            else
-            {
-                var answer = MessageBox.Show(this,
-                    "Route antigravity:// sign-in callbacks through this Hub, so concurrent logins reach the right window?\n\nThe previous handler is backed up and can be restored here or with 'agprofile configure-deeplink restore'.",
-                    "Deep-link routing", MessageBoxButton.YesNo, MessageBoxImage.Question);
-                if (answer == MessageBoxResult.Yes)
-                {
-                    _service.RegisterDeepLink(DesktopShortcut.FindCliExecutable(AppContext.BaseDirectory));
-                    StatusText.Text = "Sign-in callbacks now route through this Hub.";
-                }
-            }
-            return Task.CompletedTask;
-        });
-    }
-    private async void Settings_Click(object sender, RoutedEventArgs e)
-    {
-        var picker = new Microsoft.Win32.OpenFileDialog { Title = "Select Antigravity executable", Filter = "Antigravity executable (*.exe)|*.exe", CheckFileExists = true };
-        if (picker.ShowDialog(this) != true) return;
-        await RunAsync(async () => { await _service.ConfigureExecutableAsync(picker.FileName); await RefreshAsync(); });
-    }
-
-    private async void Shortcut_Click(object sender, RoutedEventArgs e)
-    {
-        if (!TryGetProfileId(sender, out var id)) return;
-        await RunAsync(async () =>
-        {
-            var path = await _service.CreateShortcutAsync(id, DesktopShortcut.FindCliExecutable(AppContext.BaseDirectory));
-            StatusText.Text = $"Shortcut created: {path}";
-        });
-    }
-
-    private static void EnsureStopped(StopResult result)
-    {
-        if (result.Status.State != RuntimeState.Stopped)
-            throw new HubException(result.Status.Detail ?? "The profile is still running.", "graceful_close_pending");
-    }
-    private void OpenLogs_Click(object sender, RoutedEventArgs e) => OpenFolderSafely(_service.OpenLogsFolder);
-
-    private void Data_Click(object sender, RoutedEventArgs e)
-    {
-        if (TryGetProfileId(sender, out var id)) OpenFolderSafely(() => _service.OpenDataFolder(id));
-    }
-
-    private async Task RunAsync(Func<Task> action, string? busyStatus = null)
-    {
-        if (_busy)
-        {
-            // A click during a long launch must not vanish silently.
-            StatusText.Text = "An operation is already in progress; wait for it to finish…";
-            return;
-        }
-        _busy = true;
-        Mouse.OverrideCursor = Cursors.Wait;
-        if (!string.IsNullOrWhiteSpace(busyStatus)) StatusText.Text = busyStatus;
-        try { await action(); }
-        catch (Exception ex)
-        {
-            var openLogs = MessageBox.Show(FormatException(ex) + "\n\nOpen the log folder?",
-                "Operation failed", MessageBoxButton.YesNo, MessageBoxImage.Error) == MessageBoxResult.Yes;
-            if (openLogs) OpenFolderSafely(_service.OpenLogsFolder);
-            await RefreshAsync();
-        }
-        finally
-        {
-            _busy = false;
-            Mouse.OverrideCursor = null;
-        }
-    }
-
-    private static void OpenFolderSafely(Action action)
-    {
-        try { action(); }
-        catch (Exception ex) { MessageBox.Show(FormatException(ex), "Open folder failed", MessageBoxButton.OK, MessageBoxImage.Error); }
-    }
-
-    private static bool TryGetProfileId(object sender, out Guid id) =>
-        Guid.TryParse((sender as FrameworkElement)?.Tag?.ToString(), out id) && id != Guid.Empty;
-
-    private static string FormatException(Exception ex) =>
-        ex is HubException hub ? $"[{hub.Code}] {hub.Message}" : $"Unexpected error: {ex.Message}";
-
-    private static Brush Res(string key) => (Brush)Application.Current.Resources[key];
-
-    private sealed class ProfileRow
-    {
-        public required Guid ProfileId { get; init; }
-        public required string Name { get; init; }
-        public required string StateText { get; init; }
-        public required Brush StateBg { get; init; }
-        public required Brush StateFg { get; init; }
-        public string? Detail { get; init; }
-        public int? RootProcessId { get; init; }
-        public string? WorkspacePath { get; init; }
-        public string Isolation { get; init; } = "";
-        public string? IsolationBoxName { get; init; }
-        public bool IsRunning { get; init; }
-        public Brush IsolationBg { get; init; } = Brushes.Transparent;
-        public Brush IsolationFg { get; init; } = Brushes.Transparent;
-
-        public string PrimaryActionText => IsRunning ? "Close" : "Open";
-        public string PidText => RootProcessId?.ToString() ?? "—";
-        public string WorkspaceText => string.IsNullOrWhiteSpace(WorkspacePath) ? "—" : WorkspacePath!;
-        public bool NeedsFix => Isolation != "Ready" && Isolation != "Direct / serial";
-
-        public static ProfileRow FromStatus(ProfileStatus status)
-        {
-            var (text, bg, fg) = status.State switch
-            {
-                RuntimeState.Running => ("Running", "Brush.SuccessBg", "Brush.Success"),
-                RuntimeState.Stopped => ("Stopped", "Brush.SurfaceAlt", "Brush.TextSecondary"),
-                _ => ("Unknown", "Brush.WarningBg", "Brush.Warning")
-            };
-            var isolation = status.IsolationBoxName is null
-                ? "Direct / serial"
-                : status.IsolationReady == true ? "Ready" : "Needs fix";
-            var (isoBg, isoFg) = isolation switch
-            {
-                "Ready" => (Res("Brush.SuccessBg"), Res("Brush.Success")),
-                "Needs fix" => (Res("Brush.DangerBg"), Res("Brush.Danger")),
-                _ => (Res("Brush.WarningBg"), Res("Brush.Warning"))
-            };
-            return new ProfileRow
-            {
-                ProfileId = status.ProfileId,
-                Name = status.Name,
-                StateText = text,
-                StateBg = Res(bg),
-                StateFg = Res(fg),
-                Detail = status.Detail,
-                RootProcessId = status.Root?.ProcessId,
-                WorkspacePath = status.WorkspacePath,
-                Isolation = isolation,
-                IsolationBoxName = status.IsolationBoxName,
-                IsolationBg = isoBg,
-                IsolationFg = isoFg,
-                IsRunning = status.State == RuntimeState.Running
-            };
-        }
+        foreach (var path in new[] { Path.Combine(AppContext.BaseDirectory, "..", "cli", "agprofile-next.exe"), Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "AGProfileHub.Cli", "bin", "Release", "net10.0", "agprofile-next.exe") }) if (File.Exists(path)) return Path.GetFullPath(path);
+        throw new HubException("找不到 Next CLI；请保留包中的 hub 和 cli 目录。", "cli_not_found");
     }
 }

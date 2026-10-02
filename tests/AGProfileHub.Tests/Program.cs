@@ -7,6 +7,17 @@ _ = Array.Exists(args, a => a == "--include-system");
 
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("Next desktop adapter executes a default-root isolated wrapper", NextTests.DesktopLaunchAsync),
+    ("Next component/version/strategy changes invalidate proof", NextTests.UpgradeAsync),
+    ("Next ownership excludes reused PIDs, similar paths and foreign images", NextTests.OwnershipAsync),
+    ("Next JSONC inheritance retains comments/conflicts and skips unknown secrets", NextTests.JsoncAsync),
+    ("Next locked atomic writes preserve original", NextTests.LockedWriteAsync),
+    ("Next bridge revocation preserves host targets and recovers interruption", NextTests.BridgeAsync),
+    ("Next migration requires preview and preserves IDs/source/credentials boundary", NextTests.MigrationAsync),
+    ("Next enumeration failure and callback ambiguity fail closed", NextTests.EnumerationAsync),
+    ("Next callbacks never guess among multiple, expired or future waiters", NextTests.CallbackAsync),
+    ("Next callback diagnostics record receipt/stage/fault without URI", NextTests.CallbackDiagnosticsAsync),
+    ("Next stop retries an unknown exit snapshot without implicit success", NextTests.ExitRaceAsync),
     ("agent envelope errors never imply readiness or expose secrets", AgentProbeTests.ClassifierAsync),
     ("isolation preparation fails closed and keeps unique scope ownership", TestIsolationPreparationAsync),
     ("isolation state rejects corrupt duplicate mappings", TestIsolationStateValidationAsync),
@@ -1192,6 +1203,9 @@ static async Task TestCallbackUriValidationAsync()
 static async Task TestExecutableDigestPinningAsync()
 {
     using var fixture = new Fixture();
+    Directory.CreateDirectory(Path.Combine(Path.GetDirectoryName(fixture.Executable)!, "resources", "bin"));
+    File.WriteAllText(Path.Combine(Path.GetDirectoryName(fixture.Executable)!, "resources", "app.asar"), "mock package");
+    File.WriteAllText(Path.Combine(Path.GetDirectoryName(fixture.Executable)!, "resources", "bin", "language_server.exe"), "mock server");
     var driver = new AntigravityDriver(fixture.Paths, fixture.Repository);
 
     // A legacy configuration without a pin keeps working unchanged.

@@ -16,7 +16,7 @@ public sealed record IsolationSetupReport(Guid ProfileId, IsolationStage Stage, 
 /// one, instead of choreographing iso-prepare by hand. Every step is a no-op
 /// when it is already done, so the machine is safe to run on every launch.
 /// </summary>
-public sealed class IsolationSetup
+internal sealed class IsolationSetup
 {
     private readonly IProfileIsolation _isolation;
     private readonly Func<IsolationBackendKind, IIsolationBackend?> _backendFactory;

@@ -14,7 +14,7 @@ public sealed record IsolationLaunchResult(Guid ProfileId, string BoxName, IRead
 public sealed record IsolationRuntimeStatus(Guid ProfileId, string BoxName, bool BackendAvailable, bool BoxExists,
     int ProcessCount);
 
-public interface IProfileIsolation
+internal interface IProfileIsolation
 {
     Task<IsolationBoxRecord?> FindAsync(Guid profileId, CancellationToken cancellationToken = default);
     Task<IsolationPrepareResult> PrepareAsync(Guid profileId, string? explicitBoxName = null,
@@ -33,7 +33,7 @@ public interface IProfileIsolation
 /// token in the profile's own file, never in the Windows user's shared
 /// credential entry.
 /// </summary>
-public sealed class IsolatedProfileLauncher : IProfileIsolation
+internal sealed class IsolatedProfileLauncher : IProfileIsolation
 {
     private static readonly TimeSpan LockTimeout = TimeSpan.FromSeconds(10);
     // Launch holds the global launch lock through discovery (60 s) and scope
@@ -456,7 +456,7 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
 
     private async Task<IsolationStateDocument> ReadUnlockedAsync(CancellationToken cancellationToken)
     {
-        var document = await _json.ReadAsync(_paths.IsolationStateFile, HubJsonContext.Default.IsolationStateDocument,
+        var document = await _json.ReadAsync(_paths.IsolationStateFile, LegacyIsolationJsonContext.Default.IsolationStateDocument,
             () => new IsolationStateDocument(), cancellationToken).ConfigureAwait(false);
         Validate(document);
         return document;
@@ -465,7 +465,7 @@ public sealed class IsolatedProfileLauncher : IProfileIsolation
     private Task WriteUnlockedAsync(IsolationStateDocument document, CancellationToken cancellationToken)
     {
         Validate(document);
-        return _json.WriteAsync(_paths.IsolationStateFile, document, HubJsonContext.Default.IsolationStateDocument, cancellationToken);
+        return _json.WriteAsync(_paths.IsolationStateFile, document, LegacyIsolationJsonContext.Default.IsolationStateDocument, cancellationToken);
     }
 
     private static void Validate(IsolationStateDocument document)

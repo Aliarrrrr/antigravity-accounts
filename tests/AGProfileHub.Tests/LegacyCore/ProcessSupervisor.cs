@@ -1,6 +1,6 @@
 namespace AGProfileHub.Core;
 
-public sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repository, ProfileManager profiles,
+internal sealed class ProcessSupervisor(HubPaths paths, ConfigRepository repository, ProfileManager profiles,
     IAntigravityDriver driver, IProcessCatalog catalog, IProcessLauncher launcher, IProcessController controller, IHubLogger logger,
     int launchVerificationAttempts = 20, TimeSpan? launchVerificationDelay = null)
 {

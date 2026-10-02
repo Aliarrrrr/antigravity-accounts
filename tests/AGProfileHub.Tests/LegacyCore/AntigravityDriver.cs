@@ -42,11 +42,13 @@ public sealed class AntigravityDriver(HubPaths paths, ConfigRepository repositor
         var info = FileVersionInfo.GetVersionInfo(executable);
         var version = info.ProductVersion ?? info.FileVersion ?? "unknown";
         var normalized = NormalizeVersion(version);
-        var compatible = normalized == "2.12.2";
+        var fingerprint = await NextCompatibility.FingerprintAsync(executable, cancellationToken).ConfigureAwait(false);
+        var proof = await new AtomicJsonStore(paths.DataRoot).ReadAsync(Path.Combine(paths.DataRoot, "compatibility.json"),
+            NextJsonContext.Default.CompatibilityProof, () => null!, cancellationToken).ConfigureAwait(false);
+        var compatible = NextCompatibility.PermitsLaunch(proof, fingerprint);
         return new AntigravityInstallation(executable, normalized, compatible,
-            compatible ? "Desktop 2.12.2 matches the locally observed experimental launch strategy." :
-            $"Version {normalized} has not been probed; only Desktop 2.12.2 is verified. " +
-            "Refusing to guess the isolation contract. Run 'doctor' for details, and re-run the acceptance flow after any Antigravity update.");
+            compatible ? "Installation matches a current experimental isolation proof; manual acceptance remains separate." :
+            $"Version {normalized} or its components have no current proof. Run probe and repeat acceptance after updates.");
     }
 
     /// <summary>The configured path first, then the standard install locations, in probe order.</summary>

@@ -2,7 +2,7 @@ using System.Diagnostics;
 
 namespace AGProfileHub.Core;
 
-public sealed class HubService
+internal sealed class HubService
 {
     private readonly HubPaths _paths;
     private readonly ConfigRepository _repository;
@@ -274,7 +274,7 @@ public sealed class HubService
     }
 }
 
-public static class HubBootstrap
+internal static class HubBootstrap
 {
     public static HubService CreateDefault(string? dataRoot = null)
     {

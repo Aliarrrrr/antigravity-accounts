@@ -1,0 +1,163 @@
+/* =========================================================================
+   Liquid Glass & Modern Software Aesthetics
+   Antigravity Profile Hub Next - Rust GUI Edition
+   ========================================================================= */
+
+:root {
+  --glass-blur: 24px;
+  --glass-opacity: 0.08;
+  --glass-border: rgba(255, 255, 255, 0.22);
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background-color: #090D16;
+  color: #f1f5f9;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  overflow-x: hidden;
+}
+
+/* --- 核心流体动效与光斑缓动 --- */
+@keyframes floatOrb1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(70px, 50px) scale(1.15); }
+}
+@keyframes floatOrb2 {
+  0%, 100% { transform: translate(0, 0) scale(1.1); }
+  50% { transform: translate(-60px, -60px) scale(0.95); }
+}
+@keyframes floatOrb3 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(50px, -45px) scale(1.2); }
+}
+@keyframes subtlePulse {
+  0%, 100% { opacity: 0.65; }
+  50% { opacity: 0.95; }
+}
+
+.orb-1 { animation: floatOrb1 20s ease-in-out infinite; }
+.orb-2 { animation: floatOrb2 24s ease-in-out infinite; }
+.orb-3 { animation: floatOrb3 18s ease-in-out infinite; }
+
+/* --- 液态玻璃模式激活 (Active) --- */
+.liquid-glass-active .glass-panel {
+  background: rgba(255, 255, 255, var(--glass-opacity));
+  backdrop-filter: blur(var(--glass-blur)) saturate(190%) contrast(95%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(190%) contrast(95%);
+  border: 1px solid var(--glass-border);
+  box-shadow: 
+    0 20px 40px -15px rgba(0, 0, 0, 0.35),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.4),
+    inset 0 -1px 2px 0 rgba(0, 0, 0, 0.2);
+}
+
+.liquid-glass-active .glass-card {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.03) 100%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(175%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(175%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 
+    0 10px 30px -10px rgba(0, 0, 0, 0.25),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.35);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.liquid-glass-active .glass-card:hover {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0.06) 100%);
+  border-color: rgba(255, 255, 255, 0.38);
+  box-shadow: 
+    0 20px 45px -10px rgba(0, 110, 255, 0.25),
+    inset 0 1px 2px 0 rgba(255, 255, 255, 0.6);
+  transform: translateY(-2px);
+}
+
+.liquid-glass-active .glass-button-primary {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.85) 0%, rgba(37, 99, 235, 0.95) 100%);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(147, 197, 253, 0.5);
+  box-shadow: 0 8px 20px -4px rgba(37, 99, 235, 0.45), inset 0 1px 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+.liquid-glass-active .glass-button-secondary {
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15), inset 0 1px 0.5px rgba(255, 255, 255, 0.3);
+}
+
+.liquid-glass-active .glass-button-secondary:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.32);
+}
+
+/* --- 液态玻璃关闭模式 (现代纯净扁平 Solid Clean) --- */
+.liquid-glass-inactive .glass-panel {
+  background: #111827;
+  border: 1px solid #1F2937;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.liquid-glass-inactive .glass-card {
+  background: #1E293B;
+  border: 1px solid #334155;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease-out;
+}
+
+.liquid-glass-inactive .glass-card:hover {
+  background: #253347;
+  border-color: #3B82F6;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+  transform: translateY(-2px);
+}
+
+.liquid-glass-inactive .glass-button-primary {
+  background: #2563EB;
+  border: 1px solid #3B82F6;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+}
+
+.liquid-glass-inactive .glass-button-secondary {
+  background: #334155;
+  border: 1px solid #475569;
+}
+
+.liquid-glass-inactive .glass-button-secondary:hover {
+  background: #3E4E68;
+}
+
+.liquid-glass-inactive #ambientBackground {
+  opacity: 0 !important;
+}
+
+/* --- 浅色模式适配 --- */
+.light.liquid-glass-active .glass-panel {
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  box-shadow: 0 20px 40px -15px rgba(100, 116, 139, 0.18), inset 0 1px 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.light.liquid-glass-active .glass-card {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.7) 0%, rgba(255, 255, 255, 0.38) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 0 10px 25px -8px rgba(100, 116, 139, 0.12), inset 0 1px 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.light.liquid-glass-inactive .glass-panel {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+}
+
+.light.liquid-glass-inactive .glass-card {
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+}
+
+/* --- 滚动条美化 --- */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.25); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, 0.5); }

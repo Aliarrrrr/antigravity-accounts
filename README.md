@@ -1,237 +1,115 @@
-# Antigravity Profile Hub 0.4.4 — 实验版
+# Antigravity Profile Hub Next
 
-> **English (summary).** A native Windows manager that runs multiple official Antigravity Desktop windows under one Windows user, each signed in to a different Google account. Isolation is per-profile home + file-based token store with fail-closed launch proof — no sandbox product, no administrator rights. Login always happens in official Antigravity/Google pages; the Hub never reads passwords, OAuth tokens, or cookies. Only **Windows x64 + Antigravity Desktop 2.12.2** are verified. Full docs are in Chinese below.
+在 Windows 上管理多个 Antigravity Profile。每个 Profile 使用独立的 home、user-data 和文件令牌存储；用户在官方 Antigravity / Google 窗口手动登录，已登录的实例可以并行运行。
 
-Antigravity Profile Hub 让多个**官方** Antigravity Desktop 窗口在同一 Windows 用户下，各自保持**不同的 Google 账号**登录。
+当前版本为 **0.5.0-next.1 实验版**，交付 .NET 10 / WPF GUI 与 `agprofile-next` CLI。2026-10-02 在 Antigravity 2.19.1 上完成了部分人工验证：A/B 分别登录、A 重启后保留登录且 B 不受影响、两个 Workspace 手动打开均正常，C 也登录成功。**日常 Chrome 的真实登录回调端到端尚未确认，SSH 实际连接已跳过，完整人工验收保持 `manualAcceptance=false`。** 详见 [验证记录](docs/VALIDATION.md)。
 
-- **不需要 Sandboxie / 任何沙盒，全程无需管理员权限**（0.4.0+）
-- 登录只在官方 Antigravity / Google 页面完成；Hub **不接收密码**，不读取、复制或导出 OAuth token、Cookie、Credential Manager 内容
-- 每个 Profile：独立 home / user-data、独立文件令牌存储、启动自证（证明不过就终止）
-- 0.4.3 起：未钉扎哈希的可执行文件**拒绝启动**；外启实例没有 Hub 自证时**拒绝当作健康隔离会话**
+## 安装与首次使用
 
-> [!WARNING]
-> 仅在 **Windows x64 + Antigravity Desktop 2.12.2** 上完成验收。未知版本会 `version_unverified` 拒绝启动。升级 Antigravity 后请重跑 `doctor` 并按 [MANUAL_TEST_PLAN.md](MANUAL_TEST_PLAN.md) 重做验收。
+从 [v0.5.0-next.1 下载页](https://github.com/Aliarrrrr/antigravity-profile-hub/releases/tag/v0.5.0-next.1) 下载 Windows x64 安装器或便携 ZIP。发行包包含 .NET 运行时，无需另装 SDK。
 
----
+- 安装器默认位置：`%LOCALAPPDATA%/Programs/AntigravityProfileHubNext`。
+- 便携版：解压完整 `AGProfileHubNext` 目录，双击 `Start Next.cmd`。保留其中的 `hub` 与 `cli` 目录。
+- Profile 数据位置：`%LOCALAPPDATA%/AntigravityProfileHubNext`。更新程序时保留此目录。
+- CLI 入口：包根的 `agprofile-next.cmd`；安装版可直接运行 `cli/agprofile-next.exe`。
 
-## 它解决什么
+先安装官方 Antigravity，再按以下顺序操作：
 
-| 你想要 | Hub 做什么 |
-|---|---|
-| 同一台机器同时用两个 Google 账号开 Antigravity | 每个 Profile 独立 user-data + 文件令牌，互不顶号 |
-| 登录时回调别串窗 | `configure-deeplink register` 把 `antigravity://` 转给正在等待的 Profile（可还原） |
-| 不想装沙盒、不想给管理员权限 | process-local 作用域，普通目录即可 |
-| 脚本化管理 | CLI 全动词 + `--json` + 明确退出码 |
+1. 打开 Next，点击“应用路径”，选择官方 `Antigravity.exe`。
+2. 点击“探测兼容性”，等待无登录临时窗口完成检查；不要在探针窗口登录。
+3. 创建 Profile，填写便于识别的账号标签，并选择 Git / SSH 桥接范围。
+4. 点击“注册回调”，选中 Profile 并点击“启动”。登录前点击“准备登录”，然后在该 Profile 的官方窗口完成登录。
+5. 先完成或取消当前 Profile 的授权等待，再准备下一个 Profile 的登录。已登录的窗口可以保持运行。
 
-**不是**安全沙箱：不隔离其他 Windows 用户、网络身份或已安装二进制。同一账号下任何进程仍可读 Profile 目录。
+若官方窗口已登录，而 Next 仍保留等待状态，可选中对应 Profile 点击“取消等待”，再继续下一次登录。这只清除管理器的等待槽。浏览器回调仍属于待验证能力，不能据此认定整条回调链已经通过。
 
----
+Next 仅保存 Workspace 路径；请在对应官方窗口手动打开项目。当前没有验证通过的自动 Workspace 转发接口。账号标签也由用户填写，管理器不读取登录账号或自动执行 Google 登录。
 
-## 能力状态（0.4.3）
+## CLI 常用操作
 
-| 能力 | 状态 |
-|---|---|
-| 两个不同 Google 账号窗口**并发保持登录** | ✅ 已人工验收（2.12.2） |
-| 登录过程中 `antigravity://` 回调路由 | ✅ 已人工验收（2026-09-13）：双窗登录、回调入等待窗、无第三根进程、restart 不丢号 |
-| 启动 / 停止 / 重启 / 桌面快捷方式 | ✅ |
-| 隔离自动配置与自愈（`new` / `fix`，无提权） | ✅ |
-| 按显示名 / 唯一前缀 / UUID 操作 | ✅ |
-| GUI + CLI | ✅ |
-| 官方 Google 登录 | ✅ 必须用户在官方窗口手动完成 |
-| 自动填账号密码 / 授权码 | ❌ 不会做 |
-| 启动时自动打开 Workspace | ❌ Workspace 仅是元数据 |
-| Profile 导入 / 导出 / 彻底删除数据 | ❌ 暂不支持 |
-| 跨 Windows 用户 / 系统级安全隔离 | ❌ 不提供 |
-| 同一瞬时双 OAuth pending | ⚠️ **单槽**：先完成一侧再点另一侧 |
-
----
-
-## 安装
-
-**前置：** Windows 10/11 x64 · 官方 Antigravity Desktop **2.12.2**
-
-从 [Releases](https://github.com/Aliarrrrr/antigravity-profile-hub/releases) 下载 `v0.4.4`（或最新）：
-
-| 文件 | 适合 |
-|---|---|
-| `AGProfileHub-Setup-win-x64-*.exe` | 按当前用户安装（推荐） |
-| `AGProfileHub-*-win-x64.zip` | 免安装 / 便携 |
+在解压后的包目录打开 PowerShell，运行：
 
 ```powershell
-$File = ".\AGProfileHub-Setup-win-x64-0.4.4.exe"
-$Expected = (Get-Content "$File.sha256.json" -Raw | ConvertFrom-Json).hash
-if ((Get-FileHash $File -Algorithm SHA256).Hash -ne $Expected) { throw "SHA-256 不匹配" }
-"校验通过"
+./agprofile-next.cmd configure-executable "$env:LOCALAPPDATA/Programs/antigravity/Antigravity.exe"
+./agprofile-next.cmd probe
+./agprofile-next.cmd compatibility --json
+./agprofile-next.cmd new 工作A
+./agprofile-next.cmd open 工作A
+./agprofile-next.cmd configure-deeplink register
+./agprofile-next.cmd begin-login 工作A
+# 在工作A的官方窗口手动完成登录。
+./agprofile-next.cmd ls --json
+./agprofile-next.cmd cancel-login 工作A
 ```
 
-- 安装器：`%LOCALAPPDATA%\Programs\AntigravityProfileHub`，**不改 PATH**
-- 便携包：解压到稳定路径后运行 `Start Hub.cmd`；**不要只拷走 `hub\Gui.exe`**（快捷方式与回调需要包内 `cli`）
-- 未做代码签名，SmartScreen 可能拦：先核 SHA-256 再运行
-- Hub **不捆绑、不下载** Antigravity Desktop
+| 操作 | 命令 |
+| --- | --- |
+| 查看状态 | `ls` 或 `status <profile>` |
+| 启动、普通关闭、重启 | `open <profile>`、`close <profile>`、`restart <profile>` |
+| 显式强制停止 | `close <profile> --force` |
+| 修改账号标签 | `rename <profile> <name>` |
+| 保存已有 Workspace 目录 | `workspace <profile> <path>` |
+| 查看或调整桥接 | `bridge <profile>`、`bridge <profile> on/off` |
+| 创建快捷方式 | `shortcut <profile> [directory]` |
+| 打开数据或日志目录 | `open-data [profile]`、`open-logs` |
+| 查看或还原回调注册 | `configure-deeplink status/restore` |
+| 移除已停止的 Profile 注册 | `remove <profile>`，保留其磁盘数据 |
+| 查看完整命令 | `help` |
 
----
+`<profile>` 可使用完整名称、UUID 或唯一前缀。`--data-root` 可指定绝对数据目录，`--json` 便于脚本处理。普通关闭失败时不会自动强停；请先保存工作，再自行选择强制操作。
 
-## 首次运行（必做）
+## 兼容性与回调
+
+每台机器首次使用和官方应用升级后，都要重新执行 `probe`。证明绑定应用版本、可执行文件及运行组件的 SHA-256，以及探测策略修订号。通过探测允许实验启动；每次冷启动仍检查独立文件令牌存储和实际进程归属。指纹改变后旧证明失效。
+
+Next 为 `antigravity://` 注册当前用户的回调处理器，并保存此前命令；还原只在 Next 仍拥有协议时执行。旧管理器拥有回调时，应先用旧管理器还原。注册后不要移动或删除对应程序目录，应先从新位置重新注册。授权等待槽一次只允许一个 Profile，过期或归属不明确的回调会被拒绝。
+
+人工验收与自动探测分开记录。当前未设置人工通过标记；后续完整执行 [人工验收计划](NEXT_MANUAL_TEST_PLAN.md) 并核对所有适用项目后，才可使用 `compatibility accept --manual-passed`。自动测试、安装和迁移不会替用户设置此标记。
+
+## 桥接、配置继承与旧版迁移
+
+新 Profile 默认桥接宿主 `.gitconfig` 和 `.ssh`；创建向导可关闭，CLI 可用 `bridge <profile> off` 撤销。Git 使用受管 include，SSH 使用整个目录的链接，所以相关配置及密钥可以供官方工具使用。撤销只删除本工具拥有的 include / 链接，保留宿主目标；被用户替换的项目会保留并报告冲突。`.gemini` 不共享。
+
+`inherit-config <profile> <源User目录>` 默认只预览，增加 `--apply` 后写入有限的安全允许项。支持 JSONC 注释和尾逗号；已有冲突值与注释保留，写入前备份。任意扩展设置、keybindings 参数、snippets 正文、MCP 和插件不会自动复制。
+
+旧版迁移先预览，再应用：
 
 ```powershell
-$Hub = "$env:LOCALAPPDATA\Programs\AntigravityProfileHub\agprofile.cmd"  # 安装版
-# 便携：$Hub = "D:\Apps\AGProfileHub\agprofile.cmd"
-
-& $Hub doctor
-& $Hub configure-executable "C:\Users\你\AppData\Local\Programs\antigravity\Antigravity.exe"
+./agprofile-next.cmd migrate "$env:LOCALAPPDATA/AntigravityProfileHub" --dry-run
+./agprofile-next.cmd migrate "$env:LOCALAPPDATA/AntigravityProfileHub" --apply
 ```
 
-确认：
+迁移保留 Profile UUID、标签和 Workspace 元数据，并尝试继承允许的配置。源注册文件改变后必须重新预览。源数据保持原样；登录凭据、Cookie、认证数据库、运行记录和兼容证明不复制，迁移后需要在官方窗口重新登录。
 
-1. `executableDiscovery = Verified`，版本 **2.12.2**
-2. 已执行一次 **`configure-executable`**（0.4.3 起：**未钉扎哈希则拒绝 launch / 回调**，错误码 `executable_not_pinned`）
-3. 需要双账号并发登录时：`& $Hub configure-deeplink register`（随时 `restore`）
+## 更新、回滚与卸载
 
----
+更新时保存工作，关闭 Next 管理器，替换或安装新程序，保留数据目录；重新注册回调，并检查兼容性是否要求重探测。
 
-## 五分钟上手
+`rollback` 请求普通关闭 Next 的 Profile，并还原仍由 Next 拥有的协议。窗口无法关闭时操作会失败；保存工作后可手动关闭，或明确使用 `rollback --force`。安装器卸载同样先尝试普通回滚，失败就中止，Profile 数据保留。旧程序对 Antigravity 2.19.1 的兼容性没有保证。
 
-```powershell
-& $Hub new "工作A"     # 创建 + 自动准备隔离
-& $Hub open "工作A"    # 窗口出现后在官方页登录账号 #1
+## 开发与交付
 
-& $Hub new "工作B"
-& $Hub open "工作B"    # 登录账号 #2
-```
-
-- 冷启动 **1–2 分钟**正常（语言服务首次拉组件）
-- 日常：`ls` → `open` → `close`（先保存工作）
-- 名字支持显示名 / 唯一前缀 / UUID；多匹配会报错列出候选，**不猜**
-
-### 并发登录（可选）
-
-```powershell
-& $Hub configure-deeplink register   # 一次即可，备份原注册
-# 两边都进 Google 登录页后：先完成一侧，再完成另一侧（单槽 pending）
-& $Hub configure-deeplink restore    # 用完还原
-```
-
-验收过的标准：双窗不同账号 · 回调进等待窗 · 无第三个根进程 · `restart A` 不丢号且 B 不受影响。
-
----
-
-## GUI
-
-开始菜单 / 桌面快捷方式 / `Start Hub.cmd`。
-
-| 区域 | 内容 |
-|---|---|
-| 工具栏 | + New profile · Open all · Stop all · Refresh · Doctor · Callbacks · Settings · Data · Logs |
-| 每行 | 主按钮 Open/Close；`⋯` 菜单：Launch/Stop/**Force stop（需确认）**/Restart/**Force restart（需确认）**/Fix isolation/Prepare isolation/Workspace/Rename/Open data/Create shortcut/Remove |
-| Isolation 列 | 语义色 badge：`Ready` 绿 · `Needs fix` 红 · `Direct / serial` 黄 |
-| 冷启动 | 状态栏提示 1–2 分钟，勿强杀窗口 |
-| Stop all | 危险样式 + 确认 |
-
-两个及以上 Profile 未注册回调时，顶部会提示 **Callbacks**。
-
----
-
-## CLI
-
-```powershell
-& $Hub help          # 全部命令；均支持 --json
-```
-
-| 日常 | 作用 |
-|---|---|
-| `setup` / `doctor` | 检查环境；可执行文件失败退出码 1 |
-| `new <名字>`（别名 `create`） | 创建并自动准备隔离 |
-| `open` / `close [--force]` | 启动 / 停止 |
-| `fix` | 自检修复隔离 |
-| `ls` / `status [名字]` | 列表 / 状态 |
-
-高级：`launch`、`stop`、`restart`、`launch-all`、`stop-all`、`rename`、`remove`、`workspace`、`show`、`iso-*`、`open-data`、`open-logs`、`configure-executable`、`configure-isolation`、`configure-deeplink`、`shortcut`、`agent-probe`。
-
-- `--direct`：跳过隔离的旧串行路径（多实例会抢共享凭据，仅特殊场景）
-- 停止隔离 Profile = 终止其进程树 —— **先保存工作**
-- 源码树可用 `.\scripts\Invoke-HubCli.ps1 <args>`（走仓库自带 .NET 10）
-
-### 常用错误码
-
-| 码 | 含义 |
-|---|---|
-| `executable_not_found` / `version_unverified` | 没找到 Antigravity / 版本未验收 |
-| `executable_not_pinned` | 未钉扎哈希；`configure-executable` 后再启动 |
-| `executable_attestation_changed` | 二进制与配置时 SHA-256 不符；确认后重新 configure |
-| `isolation_scope_unverified` | 未能证明独立令牌存储（含外启无自证）；停掉后用 Hub 重开 |
-| `process_enumeration_unavailable` | 进程列表不可读 → 拒绝启停，不谎报空闲 |
-| `deeplink_callback_invalid` | 非法 `antigravity://` URI |
-| `graceful_close_pending` | 普通关闭未完成；确认后 `close --force` |
-| `profile_name_conflict` / `profile_name_ambiguous` | 重名 / 多匹配 |
-| `profile_not_stopped` | 运行中不能注销注册 |
-
----
-
-## 数据目录
-
-```text
-%LOCALAPPDATA%\AntigravityProfileHub
-├─ config\profiles.json / settings.json
-├─ profiles\<uuid>\user-data|home|...     含各 Profile 的文件令牌
-├─ profiles\<uuid>\scope-attestation.json 冷启动自证（0.4.3）
-├─ isolation\state.json
-├─ runtime\                               运行态、deeplink pending/registration
-└─ logs\
-```
-
-- **备份**：先 `stop-all`，再整目录复制；内含登录令牌，勿上传公开仓库
-- **升级**：覆盖安装即可；Antigravity 大版本变更后重跑 doctor + 人工验收
-- **卸载**：删程序与数据目录；Workspace 不受影响
-
----
-
-## 故障排查
-
-| 现象 | 处理 |
-|---|---|
-| 未钉扎拒绝启动 | `configure-executable <绝对路径>` |
-| 版本未验收 | 勿绕过；等 Hub 支持或换回 2.12.2 |
-| 冷启动很慢 | 正常，等 1–2 分钟 |
-| `isolation_scope_unverified` | 外启实例需 `close --force` 后 Hub 重开；持续失败看 doctor + Issue |
-| 并发登录回调串窗 | 确认已 register；避免两侧同时点 OAuth（单槽） |
-| Unknown / retained barrier | `fix`；勿手删 runtime 状态文件 |
-| SmartScreen | 核对 Release SHA-256 |
-
-提 Issue：只给错误码、非敏感日志、复现步骤。**不要**附密码、授权码、token、Cookie、账号截图。
-
----
-
-## 安全边界（摘要）
-
-- 登录在官方应用完成；Hub 不碰密码 / token / Cookie
-- 冷启动：语言服务日志证明切到文件令牌，否则终止
-- 热路径：必须有 Hub 写的 `scope-attestation.json`，外启不算数
-- 可执行文件：configure 时钉 SHA-256；未钉扎或哈希变化 → 拒绝 launch/handoff
-- 回调：scheme/长度/控制字符校验；handoff 用 ProfileId 推导 user-data；pending 30 分钟过期
-- `antigravity://` 注册可随时 restore；重断言会按「CLI 路径 + 本 data root」重算命令
-- 进程枚举失败 = fail-closed，不当作空闲
-
-详见 [SECURITY.md](SECURITY.md) · 验收记录 [MANUAL_TEST_PLAN.md](MANUAL_TEST_PLAN.md)
-
-**进一步阅读：** [CHANGELOG](CHANGELOG.md) · [ARCHITECTURE](ARCHITECTURE.md) · [KEYRING_ISOLATION_REPORT](KEYRING_ISOLATION_REPORT.md) · [DECISIONS](DECISIONS.md) · [PROJECT_STATE](PROJECT_STATE.md)
-
----
-
-## 从源码构建
-
-Windows x64 + .NET 10 SDK（装机包另需 Inno Setup 6）。
+开发要求 Windows x64、PowerShell 7 和稳定 .NET 10 SDK；SDK 基准为 `global.json` 的 10.0.400。构建脚本优先使用 `.tools/dotnet`，也支持环境中可用的稳定 SDK。安装器编译需要 Inno Setup 6。
 
 ```powershell
 git clone https://github.com/Aliarrrrr/antigravity-profile-hub.git
 cd antigravity-profile-hub
-pwsh -NoProfile -File .\hub.ps1 build -Test
-pwsh -NoProfile -File .\scripts\Publish.ps1
+./scripts/Build.ps1 -Test -LockedRestore
+./hub.ps1 run
+./hub.ps1 cli -CliArgs @('ls','--json')
+./scripts/Publish-Next.ps1 -Installer
 ```
 
-推送 `v*` 标签会触发 CI 构建便携包、安装器并创建 Pre-release。
+产物位于 `artifacts/next/0.5.0-next.1/<时间戳>`，包含自包含 GUI / CLI、逐文件校验清单、ZIP、安装器及 SHA-256。对完整便携目录运行 `Test-NextPackage.ps1 -PackageRoot <目录>` 可检查文件校验、CLI、GUI 和快捷方式；在没有真实 Profile 的干净 Windows 环境运行 `Test-NextInstaller.ps1 -InstallerPath <文件>` 验证安装 / 卸载。
 
----
+| 保留的开发入口 | 用途 |
+| --- | --- |
+| `hub.ps1`、`scripts/Common.ps1`、`scripts/Build.ps1` | 运行、环境准备、锁定还原、构建和测试 |
+| `scripts/Publish-Next.ps1`、`installer/AGProfileHubNext.iss` | 当前 Next 包与安装器 |
+| `scripts/Test-NextPackage.ps1`、`scripts/Test-NextInstaller.ps1` | 包和安装器烟雾验证 |
+| `scripts/Probe-NextContract.py`、`scripts/Probe-NextDesktop.ps1` | 无登录的厂商运行契约探测 |
+| `tests/AGProfileHub.Tests` | 70 项回归测试，含 `LegacyCore` 历史夹具 |
 
-## 许可证
+旧启动实现仅编译进测试夹具，Next 生产程序集使用 `NextHubService`。`src/AGProfileHub.RustGui` 是另一任务开发中的实验界面，相关源码和开发入口保留；本次发行包为 .NET WPF Next，不包含 Rust GUI。
 
-[MIT License](LICENSE)
+本版专注 Windows Profile 生命周期与应用状态分离。它不是 OS 安全沙箱；同一 Windows 用户下的进程仍可能访问其他可读文件。安全边界见 [SECURITY.md](SECURITY.md)，实现说明见 [ARCHITECTURE.md](ARCHITECTURE.md)。

@@ -21,7 +21,7 @@ public sealed record IsolationScopeMarker
 /// keeps its OAuth token in a per-user file, and the desktop already resolves
 /// that file from the process home, so pointing <c>USERPROFILE</c> at the scoped
 /// home is enough to keep instances apart - see
-/// <see cref="AntigravityDriver.BuildLaunchPlan"/>, which also asks the language
+/// The Next launch plan, which also asks the language
 /// server to prefer its file store over the shared Windows credential entry.
 /// </para>
 /// <para>
@@ -62,7 +62,7 @@ public sealed class ProcessLocalBackend(HubPaths paths) : IIsolationBackend
         Paths.EnsureProfileLayout(profileId);
         new AtomicJsonStore(Paths.DataRoot).WriteAsync(ScopeMarkerPath(Paths, profileId),
             new IsolationScopeMarker { ScopeName = scope, CreatedUtc = DateTimeOffset.UtcNow },
-            HubJsonContext.Default.IsolationScopeMarker, CancellationToken.None)
+            LegacyIsolationJsonContext.Default.IsolationScopeMarker, CancellationToken.None)
             .ConfigureAwait(false).GetAwaiter().GetResult();
         if (!BoxExists(scope)) throw new HubException("The scoped profile layout could not be created.", "isolation_scope_create_failed");
     }
