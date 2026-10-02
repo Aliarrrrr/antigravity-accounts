@@ -20,6 +20,26 @@ public sealed class HubService
     public string GetProfileDataRoot(Guid id) => _paths.ProfileRoot(id);
     public Task<IReadOnlyList<ProfileRegistration>> ListProfilesAsync(CancellationToken cancellationToken = default) => _profiles.ListAsync(cancellationToken);
     public Task<ProfileRegistration> GetProfileAsync(Guid id, CancellationToken cancellationToken = default) => _profiles.GetAsync(id, cancellationToken);
+    public Task<Guid> ResolveProfileIdAsync(string reference, CancellationToken cancellationToken = default) => _profiles.ResolveIdAsync(reference, cancellationToken);
+    public Task<HubSettings> GetSettingsAsync(CancellationToken cancellationToken = default) => _repository.ReadSettingsAsync(cancellationToken);
+
+    public async Task<HubSettings> ConfigureSandboxieAsync(string? home, CancellationToken cancellationToken = default)
+    {
+        if (!string.IsNullOrWhiteSpace(home))
+        {
+            if (!Path.IsPathFullyQualified(home))
+                throw new ConfigurationException("Sandboxie directory must be an absolute path.", "sandbox_path_invalid");
+            home = Path.GetFullPath(home);
+            PathSafety.RejectExistingPathAncestors(home);
+            if (!File.Exists(Path.Combine(home, "Start.exe")) || !File.Exists(Path.Combine(home, "SbieIni.exe")))
+                throw new ConfigurationException("Select a Sandboxie installation containing Start.exe and SbieIni.exe, or use 'auto'.", "sandbox_path_invalid");
+        }
+        else home = null;
+        var settings = await _repository.ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+        var updated = settings with { SandboxieHome = home };
+        await _repository.WriteSettingsAsync(updated, cancellationToken).ConfigureAwait(false);
+        return updated;
+    }
     public Task<ProfileRegistration> CreateProfileAsync(string name, string? workspacePath = null,
         ProfileBackend backend = ProfileBackend.Direct, string? boxId = null, CancellationToken cancellationToken = default) =>
         _profiles.CreateAsync(name, workspacePath, backend, boxId, cancellationToken);
@@ -115,8 +135,13 @@ public sealed class HubService
         warnings.Add("Sandboxie isolation is experimental and requires a local Sandboxie-Plus install. Dual-account acceptance still requires manual sign-in.");
         warnings.Add("The shared antigravity:// protocol registration can make OAuth callback routing ambiguous while multiple instances run.");
 
+        var sandboxRuntime = new WindowsSandboxieRuntime(settings.SandboxieHome);
+        var usesSandboxie = (await _profiles.ListAsync(cancellationToken).ConfigureAwait(false)).Any(profile => profile.Backend == ProfileBackend.Sandboxie);
+        if (usesSandboxie && !sandboxRuntime.IsAvailable) warnings.Add(sandboxRuntime.RuntimeDescription);
         var capabilities = new List<CapabilityFinding>
         {
+            new("directNativeRuntime", CapabilityState.Verified, "The default Direct backend starts the installed application in normal Windows; Sandboxie is not required."),
+            new("sandboxieInstallation", sandboxRuntime.IsAvailable ? CapabilityState.Observed : CapabilityState.Unknown, sandboxRuntime.RuntimeDescription),
             new("executableDiscovery", installation is null ? CapabilityState.Unknown : CapabilityState.Verified, installation is null ? "Executable was not found." : "Executable and file version were read without launching."),
             new("desktopRuntimeIsolation", installation?.IsKnownCompatible == true ? CapabilityState.Experimental : CapabilityState.Unknown, "Independent user-data and process-home roots were observed locally for Desktop 2.12.2."),
             new("visibleConcurrentWindows", CapabilityState.Unknown, "A prior disposable probe observed first-run windows; run the local probe again to attest the current installation."),
@@ -152,10 +177,12 @@ public static class HubBootstrap
         var repository = new ConfigRepository(paths);
         var profiles = new ProfileManager(repository, paths);
         var driver = new AntigravityDriver(paths, repository);
-        ISandboxRuntime sandbox;
-        try { sandbox = new WindowsSandboxieRuntime(); }
-        catch { sandbox = new UnsupportedSandboxRuntime(); }
-        var hubCli = Environment.ProcessPath;
+        // Resolve the optional backend lazily. Direct has no Sandboxie dependency,
+        // and a changed installation directory takes effect without a GUI restart.
+        ISandboxRuntime sandbox = new ConfiguredSandboxRuntime(repository);
+        string? hubCli;
+        try { hubCli = DesktopShortcut.FindCliExecutable(AppContext.BaseDirectory); }
+        catch (ConfigurationException) { hubCli = null; }
         var supervisor = new ProcessSupervisor(paths, repository, profiles, driver,
             new WindowsProcessCatalog(), new WindowsProcessLauncher(), new WindowsProcessController(), new StructuredEventLogger(paths),
             sandbox, hubCli);

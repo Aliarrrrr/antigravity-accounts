@@ -12,4 +12,7 @@ Antigravity Profile Hub — Codex Master Prompt.md
 
 .dotnet-home/
 .nuget/
+*.binlog
+
+# 依赖锁文件应纳入版本控制，不要忽略 packages.lock.json。
 
