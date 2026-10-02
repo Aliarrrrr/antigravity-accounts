@@ -12,10 +12,12 @@
 | 无登录 A/B 生命周期 | 两个独立实例启动、关闭 A、重新启动 A，B 保持运行通过 |
 | 合成无认证回调 | 系统协议交接可进入已有受管根窗口并消费等待槽；不能代替真实浏览器授权验收 |
 | 回调诊断回归 | 保存接收 / 阶段 / 故障，不保存完整 URI，通过 |
-| 包校验与 CLI / GUI / 快捷方式烟雾 | Next 包曾通过；每次新发布应对最终包重跑 |
-| 安装 / 卸载烟雾 | 先前 Next 包通过；本机已有真实 Profile，卸载测试会拒绝运行。最终包应在干净 Windows 环境验证 |
+| 包校验与 CLI / GUI / 快捷方式烟雾 | next.2 最终发行包在 GitHub Windows runner 通过；下载后的本地包再次通过 SHA-256 与烟雾验证 |
+| 安装 / 卸载烟雾 | next.2 在干净 GitHub Windows runner 通过，原协议保持不变；本机已有真实 Profile，继续拒绝运行卸载测试 |
 
 自动测试不读取真实认证内容，也不替用户设置人工验收标记。厂商版本或组件改变后，以上本机探测证明不能沿用。
+
+发布证据：[next.2 构建与回归测试](https://github.com/Aliarrrrr/antigravity-profile-hub/actions/runs/37010881277)、[完整发布流水线](https://github.com/Aliarrrrr/antigravity-profile-hub/actions/runs/37010885225)、[Windows x64 下载](https://github.com/Aliarrrrr/antigravity-profile-hub/releases/tag/v0.5.0-next.2)。旧源码和未提交工作已保存到远端 `archive/*-20261002` 分支；本地旧副本和重复产物采用 Windows 回收站清理，实际 Profile 数据及并行 Rust 开发目录保留。
 
 ## 人工验证
 
