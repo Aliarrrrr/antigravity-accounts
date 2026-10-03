@@ -85,8 +85,8 @@
 ./agprofile-next.cmd probe
 
 ./agprofile-next.cmd new 工作
-# 此示例关闭桥接；需要复用宿主 Git / SSH 时可改为 on。
-./agprofile-next.cmd bridge 工作 off
+# 新建默认关闭桥接。需要共享宿主 Git / SSH 时明确执行：
+# ./agprofile-next.cmd bridge 工作 on
 ./agprofile-next.cmd open 工作
 ./agprofile-next.cmd configure-deeplink register
 ./agprofile-next.cmd begin-login 工作
@@ -120,13 +120,15 @@ Profile 可用完整标签、UUID 或唯一前缀指定。全局参数 `--data-r
 
 ### Git / SSH 桥接
 
-新 Profile 默认开启桥接，创建时可关闭，之后也可通过 **“桥接范围”** 或 CLI 调整。
+新 Profile 默认关闭桥接；需要共享时，在创建向导明确选择 `on`，或通过 **“桥接范围”** / `bridge <profile> on` 开启。CLI 新建直接保存关闭策略，实验 Rust GUI 也默认不勾选共享，不会先开启再撤销。
 
 - `.gitconfig`：使用受管 include 读取宿主 Git 配置。
 - `.ssh`：链接整个宿主 SSH 目录，目录中的配置和密钥可供官方工具使用。
 - `.gemini`：不共享。
 
 这是共同开启或关闭的桥接范围。撤销只删除本工具拥有的 include / 链接，宿主目标保留；遇到被用户替换的项目会保留并报告冲突。桥接提供配置和目录访问，远端连接与认证仍取决于你的 SSH 配置和仓库权限；本轮验证范围见 [验证记录](docs/VALIDATION.md)。
+
+已有明确 `on` 的桥接记录继续有效，明确 `off` 保持关闭。没有桥接清单或清单缺少开启字段时按关闭处理；迁入的新 Profile 同样默认关闭。损坏或不受支持的清单拒绝处理，保留清单与现有文件以便恢复。清单缺失时无法证明旧项目归属，本工具不会自动删除未登记的文件或链接；默认关闭不等于清除未知旧链接，也不构成操作系统沙箱。
 
 ### 继承有限设置
 

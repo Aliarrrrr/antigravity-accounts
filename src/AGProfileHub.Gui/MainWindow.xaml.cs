@@ -29,7 +29,7 @@ public partial class MainWindow : Window
     private async void Create_Click(object sender, RoutedEventArgs e)
     {
         var name = InputDialog.Ask(this, "创建 Profile · 1/2", "账号标签由你填写；管理器不读取登录凭据。"); if (string.IsNullOrWhiteSpace(name)) return;
-        var bridge = InputDialog.Ask(this, "创建 Profile · 2/2", "默认共享 .gitconfig（include）和 .ssh（整个目录）。输入 on 或 off；不共享 .gemini。", "on");
+        var bridge = InputDialog.Ask(this, "创建 Profile · 2/2", "默认不共享。输入 on 以共享宿主 .gitconfig（include）和整个 .ssh 目录，或保留 off；不共享 .gemini。", "off");
         if (bridge is not "on" and not "off") return;
         await RunAsync(async () => { var p = await _hub.Profiles.CreateAsync(name, null, IsolationBackendKind.ProcessLocal); Show(await _hub.Bridge.ApplyAsync(p.Id, bridge == "on", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))); await RefreshAsync(); });
     }

@@ -130,7 +130,7 @@ fn main() {
                     "create_profile" => {
                         let name = msg.payload.get("name").and_then(|v| v.as_str()).unwrap_or("");
                         let ws = msg.payload.get("workspace").and_then(|v| v.as_str());
-                        let bridge = msg.payload.get("bridge").and_then(|v| v.as_str()).unwrap_or("on");
+                        let bridge = msg.payload.get("bridge").and_then(|v| v.as_str()).unwrap_or("off");
 
                         log_to_js(&proxy, &format!("创建 Profile: {} (bridge: {})...", name, bridge), "info");
                         match client.create_profile(name, ws, bridge) {

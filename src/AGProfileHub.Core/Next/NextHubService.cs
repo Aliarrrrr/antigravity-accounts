@@ -43,7 +43,7 @@ public sealed class NextHubService
     public async Task<ProfileRegistration> CreateAsync(string name, string? workspace = null, CancellationToken token = default)
     {
         var profile = await Profiles.CreateAsync(name, workspace, IsolationBackendKind.ProcessLocal, token);
-        await Bridge.ApplyAsync(profile.Id, true, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), token);
+        await Bridge.ApplyAsync(profile.Id, false, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), token);
         return profile;
     }
     public async Task<InstallationFingerprint> CurrentInstallationAsync(CancellationToken token = default)

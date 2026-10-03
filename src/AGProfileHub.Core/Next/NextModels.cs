@@ -31,7 +31,7 @@ public sealed record NextRuntime
 public sealed record BridgeDocument
 {
     public int SchemaVersion { get; init; } = 1;
-    public bool Enabled { get; init; } = true;
+    public bool Enabled { get; init; }
     public Dictionary<string, string> ManagedLinks { get; init; } = [];
 }
 public sealed record CallbackQueue

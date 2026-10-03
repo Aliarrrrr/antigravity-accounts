@@ -7,8 +7,14 @@ public sealed class NextBridge(HubPaths paths)
 {
     private string Manifest(Guid id) => Path.Combine(paths.ProfileRoot(id), "bridge.json");
     private AtomicJsonStore Store => new(paths.DataRoot);
-    public Task<BridgeDocument> ReadAsync(Guid id, CancellationToken token = default) =>
-        Store.ReadAsync(Manifest(id), NextJsonContext.Default.BridgeDocument, () => new BridgeDocument(), token);
+    public async Task<BridgeDocument> ReadAsync(Guid id, CancellationToken token = default)
+    {
+        var document = await Store.ReadAsync(Manifest(id), NextJsonContext.Default.BridgeDocument, () => new BridgeDocument(), token);
+        if (document.ManagedLinks is null || document.ManagedLinks.Any(item =>
+            item.Key is not ".gitconfig" and not ".ssh" || string.IsNullOrWhiteSpace(item.Value) || !Path.IsPathFullyQualified(item.Value)))
+            throw new ConfigurationException("Invalid managed bridge items; refused.");
+        return document;
+    }
 
     private static string GitInclude(string target) => "# Managed by AntigravityProfileHubNext\n[include]\n\tpath = \"" +
         target.Replace("\\", "/").Replace("\"", "\\\"") + "\"\n";
@@ -21,8 +27,6 @@ public sealed class NextBridge(HubPaths paths)
         PathSafety.RejectExistingPathAncestors(hostHome);
         paths.EnsureProfileLayout(id);
         var document = await ReadAsync(id, token);
-        if (document.ManagedLinks.Keys.Any(name => name is not ".gitconfig" and not ".ssh"))
-            throw new ConfigurationException("Unknown managed bridge item; refused.");
         var managed = new Dictionary<string, string>(document.ManagedLinks);
         var ownershipConflicts = new List<string>();
         foreach (var item in document.ManagedLinks)
