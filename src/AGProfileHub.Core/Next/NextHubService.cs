@@ -120,11 +120,12 @@ public sealed class NextHubService
         } while (changed);
         return owned.Values.ToList();
     }
-    private async Task<IReadOnlyList<ProcessSnapshot>> OwnedAsync(Guid id, string executable, DateTimeOffset? notBefore, CancellationToken token)
+    private async Task<IReadOnlyList<ProcessSnapshot>> OwnedAsync(Guid id, string executable, DateTimeOffset? notBefore, CancellationToken token,
+        Func<string, CancellationToken, Task<IReadOnlyList<ProcessSnapshot>>>? snapshotProvider = null)
     {
         try
         {
-            var snapshot = await _catalog.SnapshotAsync(executable, token);
+            var snapshot = await (snapshotProvider is null ? _catalog.SnapshotAsync(executable, token) : snapshotProvider(executable, token));
             if (snapshot.Any(row => EqualPath(CommandLineIdentity.TryGetUserDataPath(row.CommandLine), Paths.UserData(id)) &&
                 (string.IsNullOrWhiteSpace(row.ExecutablePath) || row.StartTimeUtc == default)))
                 throw new ProcessOwnershipException("A process claims this profile but its image or creation time cannot be verified.");
@@ -161,7 +162,9 @@ public sealed class NextHubService
         await WriteDiagnosticAsync(new HubLogEvent(DateTimeOffset.UtcNow, "next-lifecycle", runtime.ProfileId,
             runtime.Installation?.Version, null, runtime.Root?.ProcessId, runtime.State.ToString(), null));
     }
-    public async Task<ProfileStatus> StatusAsync(Guid id, CancellationToken token = default)
+    public Task<ProfileStatus> StatusAsync(Guid id, CancellationToken token = default) => StatusCoreAsync(id, token, null);
+    private async Task<ProfileStatus> StatusCoreAsync(Guid id, CancellationToken token,
+        Func<string, CancellationToken, Task<IReadOnlyList<ProcessSnapshot>>>? snapshotProvider)
     {
         var profile = await Profiles.GetAsync(id, token); var state = await RuntimeAsync(id, token);
         if (state.ProfileId != id) throw new ConfigurationException("Runtime identity mismatch.");
@@ -175,7 +178,7 @@ public sealed class NextHubService
                     ?? throw new HubException("Installed Desktop not found; process state is unknown.", "executable_not_found");
                 executable = PathSafety.CanonicalizeExistingFile(executable);
             }
-            var owned = await OwnedAsync(id, executable, null, token);
+            var owned = await OwnedAsync(id, executable, null, token, snapshotProvider);
             if (owned.Count == 0) return new ProfileStatus(id, profile.Name,
                 state.State is RuntimeState.Starting or RuntimeState.Stopping ? RuntimeState.Unknown : state.State == RuntimeState.Failed ? RuntimeState.Failed : RuntimeState.Stopped,
                 null, state.Detail, profile.WorkspacePath);
@@ -189,7 +192,21 @@ public sealed class NextHubService
         row.StartTimeUtc == identity.StartTimeUtc && EqualPath(row.ExecutablePath, identity.ExecutablePath);
     public async Task<IReadOnlyList<ProfileStatus>> StatusAllAsync(CancellationToken token = default)
     {
-        var result = new List<ProfileStatus>(); foreach (var p in await Profiles.ListAsync(token)) result.Add(await StatusAsync(p.Id, token)); return result;
+        var snapshots = new Dictionary<string, Task<IReadOnlyList<ProcessSnapshot>>>(StringComparer.OrdinalIgnoreCase);
+        Task<IReadOnlyList<ProcessSnapshot>> SnapshotAsync(string executable, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var key = Path.GetFullPath(executable).TrimEnd('\\', '/');
+            if (!snapshots.TryGetValue(key, out var snapshot))
+                snapshots[key] = snapshot = ReadSnapshotAsync(executable, cancellationToken);
+            return snapshot;
+        }
+        // The async boundary retains synchronous catalog faults for every profile in this refresh.
+        async Task<IReadOnlyList<ProcessSnapshot>> ReadSnapshotAsync(string executable, CancellationToken cancellationToken) =>
+            await _catalog.SnapshotAsync(executable, cancellationToken);
+        var result = new List<ProfileStatus>();
+        foreach (var p in await Profiles.ListAsync(token)) result.Add(await StatusCoreAsync(p.Id, token, SnapshotAsync));
+        return result;
     }
     public async Task<NextRuntime> LaunchAsync(Guid id, CancellationToken token = default)
     {
