@@ -87,4 +87,6 @@ Git 桥接在独立 home 中写受管 include，SSH 桥接创建指向宿主 `.s
 
 PR CI 在干净 Windows runner 执行系统测试、便携包与安装 / 卸载冒烟。发布分为只读验证 job 和写权限上传 job；后者仅下载前者的验证产物。Actions 固定完整 SHA，checkout 不保留凭据，并设置超时及并发控制。
 
+卸载器默认调用 CLI `rollback`；显式 `/HubDataRoot=<绝对盘符或UNC路径>` 经非空、重复、引号/控制字符及完整绝对路径检查后，调用 `rollback --data-root "<路径>"`。引用按 Windows argv 规则转义尾反斜线，无效参数不启动回滚或卸载。回滚继续只枚举选定 HubPaths，协议还原保留每用户共享锁和所有权核验。`tests/InstallerArguments.iss` 直接运行产品参数函数并在 InitializeSetup 结束前退出，避免安装/注册副作用。
+
 便携目录的 `hub` 与 `cli` 必须保持在同一个包根目录。GUI 注册回调和创建快捷方式时定位该包的 CLI。搬迁包后必须重新注册回调。完整人工验收状态不随发行包或迁移传播。

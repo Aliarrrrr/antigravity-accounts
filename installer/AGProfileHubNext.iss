@@ -47,13 +47,18 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\hub\AGProfileHubNext.Gui.ex
 Filename: "{app}\hub\AGProfileHubNext.Gui.exe"; Description: "Launch Next"; Flags: nowait postinstall skipifsilent
 
 [Code]
+#include "UninstallArguments.iss"
 function InitializeUninstall(): Boolean;
-var ExitCode: Integer;
+var ExitCode: Integer; Arguments: String;
 begin
-  Result := True;
+  Result := TryReadRollbackArguments(Arguments);
+  if not Result then begin
+    SuppressibleMsgBox('Invalid /HubDataRoot. Specify one absolute drive or UNC path without quotes or control characters. Uninstall was not started.', mbError, MB_OK, IDOK);
+    Exit;
+  end;
   if FileExists(ExpandConstant('{app}\cli\agprofile-next.exe')) then
   begin
-    if not Exec(ExpandConstant('{app}\cli\agprofile-next.exe'), 'rollback', ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ExitCode) then
+    if not Exec(ExpandConstant('{app}\cli\agprofile-next.exe'), Arguments, ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ExitCode) then
       Result := False
     else
       Result := ExitCode = 0;
