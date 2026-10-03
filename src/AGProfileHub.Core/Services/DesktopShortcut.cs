@@ -6,20 +6,6 @@ namespace AGProfileHub.Core;
 
 public static class DesktopShortcut
 {
-    public static string FindCliExecutable(string baseDirectory)
-    {
-        var candidates = new[]
-        {
-            Path.Combine(baseDirectory, "AGProfileHub.Cli.exe"),
-            Path.Combine(baseDirectory, "..", "cli", "AGProfileHub.Cli.exe"),
-            Path.Combine(baseDirectory, "..", "..", "..", "..", "AGProfileHub.Cli", "bin", "Release", "net10.0", "AGProfileHub.Cli.exe")
-        };
-        var found = candidates.FirstOrDefault(File.Exists);
-        return found is null
-            ? throw new ConfigurationException("CLI executable was not found. Keep the package's hub and cli folders together.", "cli_not_found")
-            : PathSafety.CanonicalizeExistingFile(found);
-    }
-
     // Windows argv quoting, including trailing backslashes before the closing quote.
     public static string QuoteArgument(string value)
     {

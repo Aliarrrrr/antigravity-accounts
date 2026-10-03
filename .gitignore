@@ -27,3 +27,4 @@ Antigravity Profile Hub — Codex Master Prompt.md
 # Parallel Rust GUI development outputs
 **/target/
 .worktrees/
+.superpowers/

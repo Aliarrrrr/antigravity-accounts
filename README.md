@@ -6,7 +6,7 @@
 
 ## 安装与首次使用
 
-从 [v0.5.0-next.2 下载页](https://github.com/Aliarrrrr/antigravity-profile-hub/releases/tag/v0.5.0-next.2) 下载 Windows x64 安装器或便携 ZIP。发行包包含 .NET 运行时，无需另装 SDK。
+从 [v0.5.0-next.2 下载页](https://github.com/Aliarrrrr/antigravity-profile-hub/releases/tag/v0.5.0-next.2) 下载 Windows x64 安装器或便携 ZIP。发行包包含 .NET 运行时，无需另装 SDK 或 PowerShell 7；桌面适配器和桥接使用 Windows 内置 PowerShell。
 
 - 安装器默认位置：`%LOCALAPPDATA%/Programs/AntigravityProfileHubNext`。
 - 便携版：解压完整 `AGProfileHubNext` 目录，双击 `Start Next.cmd`。保留其中的 `hub` 与 `cli` 目录。
@@ -62,7 +62,7 @@ Next 仅保存 Workspace 路径；请在对应官方窗口手动打开项目。�
 
 每台机器首次使用和官方应用升级后，都要重新执行 `probe`。证明绑定应用版本、可执行文件及运行组件的 SHA-256，以及探测策略修订号。通过探测允许实验启动；每次冷启动仍检查独立文件令牌存储和实际进程归属。指纹改变后旧证明失效。
 
-Next 为 `antigravity://` 注册当前用户的回调处理器，并保存此前命令；还原只在 Next 仍拥有协议时执行。旧管理器拥有回调时，应先用旧管理器还原。注册后不要移动或删除对应程序目录，应先从新位置重新注册。授权等待槽一次只允许一个 Profile，过期或归属不明确的回调会被拒绝。
+Next 为 `antigravity://` 注册当前用户的回调处理器，并保存此前命令。初次注册允许空处理器或精确匹配已配置厂商的处理器；其他处理器须先由其所属程序还原。还原前重新检查归属，第三方接管后安全跳过；真实恢复失败保留记录并阻止卸载。注册后不要移动或删除对应程序目录，应先从新位置重新注册。授权等待槽一次只允许一个 Profile，过期或归属不明确的回调会被拒绝。交接失败保留等待槽；进程身份无法确认时不会猜测 PID 并终止进程。
 
 人工验收与自动探测分开记录。当前未设置人工通过标记；后续完整执行 [人工验收计划](NEXT_MANUAL_TEST_PLAN.md) 并核对所有适用项目后，才可使用 `compatibility accept --manual-passed`。自动测试、安装和迁移不会替用户设置此标记。
 
@@ -85,22 +85,26 @@ Next 为 `antigravity://` 注册当前用户的回调处理器，并保存此前
 
 更新时保存工作，关闭 Next 管理器，替换或安装新程序，保留数据目录；重新注册回调，并检查兼容性是否要求重探测。
 
-`rollback` 请求普通关闭 Next 的 Profile，并还原仍由 Next 拥有的协议。窗口无法关闭时操作会失败；保存工作后可手动关闭，或明确使用 `rollback --force`。安装器卸载同样先尝试普通回滚，失败就中止，Profile 数据保留。旧程序对 Antigravity 2.19.1 的兼容性没有保证。
+`rollback` 请求普通关闭 Next 的 Profile，并还原仍由 Next 拥有的协议。窗口无法关闭时操作会失败并保留协议；保存工作后可手动关闭，或明确使用 `rollback --force`。若需要独立恢复协议，可使用 `configure-deeplink restore`。安装器卸载同样先尝试普通回滚，失败就中止，Profile 数据保留。旧程序对 Antigravity 2.19.1 的兼容性没有保证。
 
 ## 开发与交付
 
-开发要求 Windows x64、PowerShell 7 和稳定 .NET 10 SDK；SDK 基准为 `global.json` 的 10.0.400。构建脚本优先使用 `.tools/dotnet`，也支持环境中可用的稳定 SDK。安装器编译需要 Inno Setup 6。
+开发要求 Windows x64、PowerShell 7 和精确的 .NET SDK 10.0.400；`global.json` 关闭版本滚动。构建脚本优先使用 `.tools/dotnet`，也支持 `AGPH_DOTNET` 或环境中的同版本 SDK。安装器编译要求 Inno Setup 6.7.3。入口脚本采用 UTF-8 BOM，Windows PowerShell 5.1 会明确提示版本要求。
 
 ```powershell
 git clone https://github.com/Aliarrrrr/antigravity-profile-hub.git
 cd antigravity-profile-hub
 ./scripts/Build.ps1 -Test -LockedRestore
+./scripts/Build.ps1 -Test -LockedRestore -IncludeSystemTests
+./scripts/Test-NextBuildContract.ps1
 ./hub.ps1 run
 ./hub.ps1 cli -CliArgs @('ls','--json')
 ./scripts/Publish-Next.ps1 -Installer
 ```
 
-产物位于 `artifacts/next/0.5.0-next.2/<时间戳>`，包含自包含 GUI / CLI、逐文件校验清单、ZIP、安装器及 SHA-256。对完整便携目录运行 `Test-NextPackage.ps1 -PackageRoot <目录>` 可检查文件校验、CLI、GUI 和快捷方式；在没有真实 Profile 的干净 Windows 环境运行 `Test-NextInstaller.ps1 -Installer <文件>` 验证安装 / 卸载。
+产物位于 `artifacts/next/0.5.0-next.2/<时间戳>`，包含自包含 GUI / CLI、逐文件校验清单、ZIP、安装器及 SHA-256。Core、CLI、GUI 各保留普通锁及 win-x64 自包含发布锁；发布缺少锁或应用依赖集合、版本、NuGet 内容哈希不一致就失败。清单记录提交、SDK、六份锁文件摘要及应用、平台和运行时依赖；SDK 运行时组件以产物文件 SHA-256 校验。
+
+对完整便携目录运行 `Test-NextPackage.ps1 -PackageRoot <目录>` 可检查清单、CLI、GUI 和快捷方式；在没有真实 Profile 的干净 Windows 环境运行 `Test-NextInstaller.ps1 -Installer <文件>` 验证安装 / 卸载。PR CI 执行系统测试、完整打包与安装器冒烟；发布验证 job 只读，具备写权限的 job 仅上传已验证产物。安装器数字版本来自已发布 GUI 的 FileVersion，完整预发布版本用于显示及文件名。
 
 | 保留的开发入口 | 用途 |
 | --- | --- |
@@ -108,7 +112,9 @@ cd antigravity-profile-hub
 | `scripts/Publish-Next.ps1`、`installer/AGProfileHubNext.iss` | 当前 Next 包与安装器 |
 | `scripts/Test-NextPackage.ps1`、`scripts/Test-NextInstaller.ps1` | 包和安装器烟雾验证 |
 | `scripts/Probe-NextContract.py`、`scripts/Probe-NextDesktop.ps1` | 无登录的厂商运行契约探测 |
-| `tests/AGProfileHub.Tests` | 70 项回归测试，含 `LegacyCore` 历史夹具 |
+| `tests/AGProfileHub.Tests` | 按 Next、共享生产组件、Legacy 和 runner 输出回归结果 |
+
+默认测试跳过桌面适配器系统集成用例，`-IncludeSystemTests` 显式启用；测试器也支持 `--filter <名称子串>`。真实 junction 边界测试仍在独立临时目录默认运行。历史夹具中也使用共享生产的存储和路径组件，不能将全部 Legacy 用例视作无效覆盖。
 
 旧启动实现仅编译进测试夹具，Next 生产程序集使用 `NextHubService`。`src/AGProfileHub.RustGui` 是另一任务开发中的实验界面，相关源码和开发入口保留；本次发行包为 .NET WPF Next，不包含 Rust GUI。
 

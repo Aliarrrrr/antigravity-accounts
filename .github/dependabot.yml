@@ -5,7 +5,7 @@ updates:
     schedule:
       interval: "weekly"
     # System.Management / System.CodeDom move with the .NET 10 release train;
-    # review each bump together with packages.lock.json.
+    # Review each bump together with both the default and win-x64 locks.
     groups:
       dotnet-packages:
         patterns:

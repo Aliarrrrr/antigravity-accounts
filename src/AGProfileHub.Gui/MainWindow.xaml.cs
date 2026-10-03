@@ -41,7 +41,7 @@ public partial class MainWindow : Window
     private async void Stop_Click(object sender, RoutedEventArgs e) => await RunAsync(async () => { Show(new { stopped = await _hub.StopAsync(Selected) }); await RefreshAsync(); });
     private async void Force_Click(object sender, RoutedEventArgs e)
     { if (MessageBox.Show(this, "强制停止可能丢失未保存工作。继续？", "强制停止", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return; await RunAsync(async () => { Show(new { stopped = await _hub.StopAsync(Selected, true) }); await RefreshAsync(); }); }
-    private async void Login_Click(object sender, RoutedEventArgs e) => await RunAsync(async () => { _hub.RegisterProtocol(Cli()); await _hub.BeginLoginAsync(Selected); Output.Text = "此 Profile 已获得授权等待槽。现在在它的官方窗口完成登录；另一侧可保持运行，授权请依次完成。"; });
+    private async void Login_Click(object sender, RoutedEventArgs e) => await RunAsync(async () => { await _hub.RegisterProtocolAsync(Cli()); await _hub.BeginLoginAsync(Selected); Output.Text = "此 Profile 已获得授权等待槽。现在在它的官方窗口完成登录；另一侧可保持运行，授权请依次完成。"; });
     private async void CancelLogin_Click(object sender, RoutedEventArgs e) => await RunAsync(async () => { await _hub.EndLoginAsync(Selected); Output.Text = "已取消此 Profile 的授权等待。"; });
     private async void Rename_Click(object sender, RoutedEventArgs e)
     { var name = InputDialog.Ask(this, "账号标签", "手填标签，不从 token 读取账号。"); if (name is null) return; await RunAsync(async () => { await _hub.Profiles.RenameAsync(Selected, name); await RefreshAsync(); }); }
@@ -55,8 +55,8 @@ public partial class MainWindow : Window
           if (preview.Allowed.Count > 0 && MessageBox.Show(this, "预览已显示。写入允许项并备份原文件？已有冲突值会保留。", "应用配置继承", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
               Show(await NextConfiguration.InheritAsync(_hub.Paths, id, source, true)); }); }
     private async void Shortcut_Click(object sender, RoutedEventArgs e) => await RunAsync(async () => Show(new { path = DesktopShortcut.Create(await _hub.Profiles.GetAsync(Selected), _hub.Paths.DataRoot, Cli(), Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)) }));
-    private async void Register_Click(object sender, RoutedEventArgs e) => await RunAsync(() => { _hub.RegisterProtocol(Cli()); Output.Text = "已注册回调；旧处理器已备份。"; return Task.CompletedTask; });
-    private async void Restore_Click(object sender, RoutedEventArgs e) => await RunAsync(() => { Show(new { restored = NextProtocol.Restore(_hub.Paths) }); return Task.CompletedTask; });
+    private async void Register_Click(object sender, RoutedEventArgs e) => await RunAsync(async () => { await _hub.RegisterProtocolAsync(Cli()); Output.Text = "已注册回调；旧处理器已备份。"; });
+    private async void Restore_Click(object sender, RoutedEventArgs e) => await RunAsync(async () => { Show(new { restored = await _hub.RestoreProtocolAsync() }); });
     private void Logs_Click(object sender, RoutedEventArgs e) { var info = new ProcessStartInfo("explorer.exe") { UseShellExecute = false }; info.ArgumentList.Add(_hub.Paths.LogsRoot); Process.Start(info)?.Dispose(); }
     private static string Cli()
     {

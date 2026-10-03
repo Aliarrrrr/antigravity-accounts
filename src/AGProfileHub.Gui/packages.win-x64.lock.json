@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0-windows7.0": {
+      "System.Management": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "LE3rDZoPzulou78Tsq+3ALhUs4vatQ03v2QWbYVIenVPneUH/+LTUmHyyl098OxIFLQI6sNkZs8YHbUnT/sm3A=="
+      },
+      "agprofilehub.core": {
+        "type": "Project",
+        "dependencies": {
+          "System.Management": "[10.0.0, )"
+        }
+      }
+    },
+    "net10.0-windows7.0/win-x64": {
+      "System.Management": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "LE3rDZoPzulou78Tsq+3ALhUs4vatQ03v2QWbYVIenVPneUH/+LTUmHyyl098OxIFLQI6sNkZs8YHbUnT/sm3A=="
+      }
+    }
+  }
+}

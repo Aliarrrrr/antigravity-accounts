@@ -1,7 +1,8 @@
-#requires -Version 7.0
+﻿#requires -Version 7.0
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$PackageRoot, [switch]$Desktop)
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'BuildContract.ps1')
 $package = (Resolve-Path -LiteralPath $PackageRoot).Path
 $cli = Join-Path $package 'cli/agprofile-next.exe'
 $data = Join-Path $env:TEMP ('agprofile-next-package-test-' + [guid]::NewGuid().ToString('N'))
@@ -11,12 +12,7 @@ function Invoke-Next([string[]]$Arguments) {
     if ($LASTEXITCODE -ne 0) { throw 'Next CLI operation failed.' }
     ($output -join "`n") | ConvertFrom-Json
 }
-$manifest = Get-Content -LiteralPath (Join-Path $package 'package-manifest.json') -Raw | ConvertFrom-Json
-foreach ($file in $manifest.files) {
-    $path = [IO.Path]::GetFullPath((Join-Path $package $file.path))
-    if (-not $path.StartsWith($package + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Manifest path escaped package.' }
-    if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $file.sha256) { throw 'Package digest mismatch.' }
-}
+Assert-HubPackageManifest -PackageRoot $package
 $report.packageHashes = $true
 $null = Invoke-Next @('version')
 $a = Invoke-Next @('new','smoke-A')
@@ -29,7 +25,11 @@ $shortcut = Invoke-Next @('shortcut',$a.id,$shortcutDir)
 $report.shortcut = Test-Path -LiteralPath $shortcut.path
 $image = Join-Path $data 'gui.png'
 $gui = Start-Process (Join-Path $package 'hub/AGProfileHubNext.Gui.exe') -ArgumentList @('--data-root',('"'+$data+'"'),'--smoke-image',('"'+$image+'"')) -WindowStyle Hidden -PassThru
-if (-not $gui.WaitForExit(15000)) { throw 'Next GUI smoke timed out.' }
+if (-not $gui.WaitForExit(15000)) {
+    # Keep the handle returned by Start-Process; do not enumerate or stop by process name/PID.
+    if (-not $gui.HasExited) { $gui.Kill(); $null = $gui.WaitForExit(5000) }
+    throw 'Next GUI smoke timed out; its own process was terminated.'
+}
 $report.gui = $gui.ExitCode -eq 0 -and (Test-Path -LiteralPath $image)
 $report.guiImage = $image
 if ($Desktop) {

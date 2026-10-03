@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 7.0
 <#
 .SYNOPSIS
   Run agprofile-next from this repo's Release build using the configured .NET 10 SDK.

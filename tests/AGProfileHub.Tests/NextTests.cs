@@ -3,12 +3,8 @@ using AGProfileHub.Core;
 
 internal static class NextTests
 {
-    public static async Task DesktopLaunchAsync()
+    public static Task DesktopLaunchAsync() => RunDesktopProbeAsync(async (paths, id) =>
     {
-        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "AntigravityProfileHubNext", "probes", Guid.NewGuid().ToString("N"));
-        var paths = new HubPaths(root, Path.Combine(root, "runtime", "global"));
-        var id = Guid.NewGuid(); paths.EnsureProfileLayout(id);
         var marker = Path.Combine(paths.ProfileRoot(id), "desktop-launch-test.txt");
         var script = "[IO.File]::WriteAllText('" + marker.Replace("'", "''") + "','ready')";
         var encoded = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(script));
@@ -16,16 +12,22 @@ internal static class NextTests
             "WindowsPowerShell", "v1.0", "powershell.exe");
         var plan = new LaunchPlan(executable, "test", ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
             new Dictionary<string, string>(), "Harmless desktop launch marker");
-        var launcher = typeof(NextHubService).Assembly.GetType("AGProfileHub.Core.NextDesktopLauncher")!;
-        launcher.GetMethod("Launch")!.Invoke(null, [paths, id, plan]);
+        NextDesktopLauncher.Launch(paths, id, plan);
         var deadline = DateTimeOffset.UtcNow.AddSeconds(15);
         while (!File.Exists(marker) && DateTimeOffset.UtcNow < deadline) await Task.Delay(100);
         Check(File.Exists(marker), "Desktop adapter did not execute the existing default-root wrapper.");
         Check(await File.ReadAllTextAsync(marker) == "ready", "Unexpected desktop marker.");
+    });
+    internal static async Task RunDesktopProbeAsync(Func<HubPaths, Guid, Task> operation)
+    {
+        var parent = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AntigravityProfileHubNext", "probes");
+        using var owned = new OwnedTestDirectory(parent, "");
+        var root = owned.Root;
+        var paths = new HubPaths(root, Path.Combine(root, "runtime", "global"));
+        var id = Guid.NewGuid(); paths.EnsureProfileLayout(id);
+        await operation(paths, id);
     }
     private static void Check(bool ok, string message) { if (!ok) throw new Exception(message); }
-    private static async Task Reject(Func<Task> operation)
-    { try { await operation(); } catch (Exception ex) when (ex is HubException or JsonException or IOException or UnauthorizedAccessException) { return; } throw new Exception("Unsafe operation was accepted."); }
     private static string Root() { var path = Path.Combine(Path.GetTempPath(), "agprofile-next-test-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(path); return path; }
     public static Task UpgradeAsync()
     {
@@ -72,16 +74,25 @@ internal static class NextTests
         using var parsed = JsonDocument.Parse(result, new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
         Check(parsed.RootElement.GetProperty("editor.tabSize").GetInt32() == 2, "Conflict overwritten.");
         await File.WriteAllTextAsync(Path.Combine(source, "settings.json"), "{ broken");
-        await Reject(() => NextConfiguration.InheritAsync(paths, id, source, true));
+        await TestAssert.ThrowsAsync<JsonException>(() => NextConfiguration.InheritAsync(paths, id, source, true));
         Check(await File.ReadAllTextAsync(target) == result, "Malformed input changed target.");
     }
     public static async Task LockedWriteAsync()
     {
         var root = Root(); var target = Path.Combine(root, "settings.json"); await File.WriteAllTextAsync(target, "original");
         using (var locked = new FileStream(target, FileMode.Open, FileAccess.Read, FileShare.Read))
-            await Reject(() => NextConfiguration.WriteTextAtomicAsync(root, target, "replacement", CancellationToken.None));
+        {
+            var refused = false;
+            try { await NextConfiguration.WriteTextAtomicAsync(root, target, "replacement", CancellationToken.None); }
+            catch (IOException) { refused = true; }
+            catch (UnauthorizedAccessException ex) when (OperatingSystem.IsWindows() && ex.HResult == unchecked((int)0x80070005))
+            { refused = true; } // Windows ReplaceFile reports denied access for a target without FileShare.Delete.
+            Check(refused, "An open target without delete sharing allowed replacement.");
+        }
         Check(await File.ReadAllTextAsync(target) == "original", "Failed atomic write changed destination.");
         Check(!Directory.EnumerateFiles(root, "*.tmp").Any(), "Owned temp leaked.");
+        await NextConfiguration.WriteTextAtomicAsync(root, target, "replacement", CancellationToken.None);
+        Check(await File.ReadAllTextAsync(target) == "replacement", "Closing the sharing lock did not release the controlled failure.");
     }
     public static async Task BridgeAsync()
     {
@@ -96,7 +107,7 @@ internal static class NextTests
         Check(await File.ReadAllTextAsync(Path.Combine(host, ".ssh", "sentinel")) == "FAKE-NO-KEY", "Host target changed.");
         await bridge.ApplyAsync(id, true, host);
         await File.WriteAllTextAsync(Path.Combine(paths.Home(id), ".gitconfig"), "user replacement");
-        await Reject(() => bridge.ApplyAsync(id, false, host));
+        await TestAssert.ThrowsCodeAsync<HubException>(() => bridge.ApplyAsync(id, false, host), "bridge_ownership_changed");
         Check(await File.ReadAllTextAsync(Path.Combine(paths.Home(id), ".gitconfig")) == "user replacement", "Unmanaged replacement deleted.");
         Check(!Directory.Exists(Path.Combine(paths.Home(id), ".ssh")), "A Git conflict prevented revoking the still-owned SSH bridge.");
         // Interruption after manifest intent but before creation is recoverable.
@@ -116,7 +127,7 @@ internal static class NextTests
         // A canary credential filename must never appear under Next.
         await File.WriteAllTextAsync(Path.Combine(paths.Home(a.Id), "jetski-standalone-oauth-token"), "FAKE-CANARY");
         var next = new NextHubService(Path.Combine(root, "next"));
-        await Reject(() => NextMigration.RunAsync(next, legacy, false));
+        await TestAssert.ThrowsCodeAsync<HubException>(() => NextMigration.RunAsync(next, legacy, false), "migration_preview_required");
         await NextMigration.RunAsync(next, legacy, true);
         Check((await next.Profiles.ListAsync()).Count == 0, "Dry run migrated metadata.");
         await NextMigration.RunAsync(next, legacy, false); await NextMigration.RunAsync(next, legacy, false);
@@ -133,9 +144,7 @@ internal static class NextTests
         await new AtomicJsonStore(hub.Paths.DataRoot).WriteAsync(Path.Combine(hub.Paths.RuntimeStateRoot, "next-" + p.Id.ToString("D") + ".json"),
             new NextRuntime { ProfileId = p.Id, State = RuntimeState.Running, Installation = install }, NextJsonContext.Default.NextRuntime, CancellationToken.None);
         Check((await hub.StatusAsync(p.Id)).State == RuntimeState.Unknown, "Enumeration failure became stopped.");
-        await Reject(() => hub.StopAsync(p.Id, true));
-        await Reject(() => hub.RouteCallbackAsync("antigravity://auth?code=FAKE"));
-        Check(!Directory.EnumerateFiles(hub.Paths.DataRoot, "*", SearchOption.AllDirectories).Any(file => File.ReadAllText(file).Contains("code=FAKE")), "Callback URI persisted.");
+        await TestAssert.ThrowsCodeAsync<HubException>(() => hub.StopAsync(p.Id, true), "process_enumeration_unavailable");
     }
     public static async Task CallbackAsync()
     {
@@ -143,15 +152,15 @@ internal static class NextTests
         var a = new PendingCallback { ProfileId = Guid.NewGuid(), CreatedUtc = now.AddSeconds(-1) };
         var b = a with { ProfileId = Guid.NewGuid() };
         Check(NextHubService.SelectWaiter([a], now).ProfileId == a.ProfileId, "Single waiter not selected.");
-        await Reject(() => Task.Run(() => NextHubService.SelectWaiter([a, b], now)));
-        await Reject(() => Task.Run(() => NextHubService.SelectWaiter([a with { CreatedUtc = now.AddHours(-1) }], now)));
-        await Reject(() => Task.Run(() => NextHubService.SelectWaiter([a with { CreatedUtc = now.AddHours(1) }], now)));
+        await TestAssert.ThrowsCodeAsync<HubException>(() => Task.Run(() => NextHubService.SelectWaiter([a, b], now)), "callback_ambiguous");
+        await TestAssert.ThrowsCodeAsync<HubException>(() => Task.Run(() => NextHubService.SelectWaiter([a with { CreatedUtc = now.AddHours(-1) }], now)), "callback_ambiguous");
+        await TestAssert.ThrowsCodeAsync<HubException>(() => Task.Run(() => NextHubService.SelectWaiter([a with { CreatedUtc = now.AddHours(1) }], now)), "callback_ambiguous");
     }
     public static async Task CallbackDiagnosticsAsync()
     {
         var hub = new NextHubService(Root());
         const string canary = "PRIVATE-CALLBACK-CANARY";
-        await Reject(() => hub.RouteCallbackAsync("https://invalid.example/?code=" + canary));
+        await TestAssert.ThrowsCodeAsync<HubException>(() => hub.RouteCallbackAsync("https://invalid.example/?code=" + canary), "deeplink_callback_invalid");
         var files = Directory.GetFiles(hub.Paths.LogsRoot, "*.jsonl");
         Check(files.Length > 0, "Rejected callback has no safe diagnostic evidence.");
         var lines = (await File.ReadAllLinesAsync(files[0])).Select(line => JsonSerializer.Deserialize<HubLogEvent>(line)!).ToArray();

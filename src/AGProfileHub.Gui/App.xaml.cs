@@ -32,7 +32,7 @@ public partial class App : Application
                 timer.Tick += (_, _) =>
                 {
                     if (MainWindow is MainWindow window && !window.InitialLoadComplete)
-                    { if (++attempts < 10) return; timer.Stop(); Shutdown(1); return; }
+                    { if (++attempts < 10) return; timer.Stop(); Console.Error.WriteLine("GUI smoke failed: initial-load-timeout."); Shutdown(1); return; }
                     timer.Stop();
                     try
                     {
@@ -44,7 +44,7 @@ public partial class App : Application
                         using var stream = System.IO.File.Create(output); encoder.Save(stream);
                         Shutdown(0);
                     }
-                    catch { Shutdown(1); }
+                    catch (Exception ex) { Console.Error.WriteLine("GUI smoke failed: screenshot-" + ex.GetType().Name + "."); Shutdown(1); }
                 };
                 timer.Start();
             }
@@ -57,4 +57,3 @@ public partial class App : Application
         }
     }
 }
-
