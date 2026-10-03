@@ -2,13 +2,13 @@
 
 在 Windows 上管理多个 Antigravity Profile。每个 Profile 使用独立的 home、user-data 和文件令牌存储；用户在官方 Antigravity / Google 窗口手动登录，已登录的实例可以并行运行。
 
-当前发行版本为 **0.5.0-next.2 实验版**，交付 .NET 10 / WPF GUI 与 `agprofile-next` CLI。2026-10-03 使用审计整改便携包完成了本机真实使用验证：A/B 使用不同账号、测试项目正常，A 普通关闭并重启后登录保留且 B 不受影响；专用空白 Profile 的日常 Chrome 授权回调成功，普通重启后登录保留，Git / SSH 桥接撤销及恢复通过，A/B 继续正常。**本轮结果属于整改便携包，既有发布标签尚未更新；SSH 实际连接受主机信任配置阻塞，尚未通过，完整人工验收保持 `manualAcceptance=false`。** 详见 [验证记录](docs/VALIDATION.md)。
+当前版本为 **0.5.0-next.3 实验版**，交付 .NET 10 / WPF GUI 与 `agprofile-next` CLI，包含锁定交付、异步协议操作、登录与停止竞态及保守恢复整改。采用相同生产实现的本地整改便携包（版本号 next.2）已验证 A/B 不同账号并行使用、普通重启后登录保留、日常 Chrome 真实回调及桥接撤销恢复。**用户于 2026-10-03 选择本轮跳过 SSH 实际连接、不再继续；强停后的登录保留及文件编辑入口尚未明确确认，`manualAcceptance=false` 保持不变。** 发布门槛与验收范围见 [验证记录](docs/VALIDATION.md)。
 
 ## 安装与首次使用
 
-从 [v0.5.0-next.2 下载页](https://github.com/Aliarrrrr/antigravity-profile-hub/releases/tag/v0.5.0-next.2) 下载 Windows x64 安装器或便携 ZIP。发行包包含 .NET 运行时，无需另装 SDK 或 PowerShell 7；桌面适配器和桥接使用 Windows 内置 PowerShell。
+从 [v0.5.0-next.3 下载页](https://github.com/Aliarrrrr/antigravity-profile-hub/releases/tag/v0.5.0-next.3) 下载 Windows x64 安装器或便携 ZIP。发行包包含 .NET 运行时，无需另装 SDK 或 PowerShell 7；桌面适配器和桥接使用 Windows 内置 PowerShell。
 
-上述下载页仍为既有实验发行包。本轮审计整改和真实 Chrome 回调验收使用整改分支便携包，尚未发布新版本。
+发布流程以锁定依赖重新构建 next.3，并在产物清单中绑定发布源码、依赖和文件摘要。本机既有验收结果来自整改便携包，不代表 next.3 已重新完成本机人工验收；[next.2 历史发行](https://github.com/Aliarrrrr/antigravity-profile-hub/releases/tag/v0.5.0-next.2) 保留。
 
 - 安装器默认位置：`%LOCALAPPDATA%/Programs/AntigravityProfileHubNext`。
 - 便携版：解压完整 `AGProfileHubNext` 目录，双击 `Start Next.cmd`。保留其中的 `hub` 与 `cli` 目录。
@@ -104,7 +104,7 @@ cd antigravity-profile-hub
 ./scripts/Publish-Next.ps1 -Installer
 ```
 
-产物位于 `artifacts/next/0.5.0-next.2/<时间戳>`，包含自包含 GUI / CLI、逐文件校验清单、ZIP、安装器及 SHA-256。Core、CLI、GUI 各保留普通锁及 win-x64 自包含发布锁；发布缺少锁或应用依赖集合、版本、NuGet 内容哈希不一致就失败。清单记录提交、SDK、六份锁文件摘要及应用、平台和运行时依赖；SDK 运行时组件以产物文件 SHA-256 校验。
+产物位于 `artifacts/next/0.5.0-next.3/<时间戳>`，包含自包含 GUI / CLI、逐文件校验清单、ZIP、安装器及 SHA-256。Core、CLI、GUI 各保留普通锁及 win-x64 自包含发布锁；发布缺少锁或应用依赖集合、版本、NuGet 内容哈希不一致就失败。清单记录提交、SDK、六份锁文件摘要及应用、平台和运行时依赖；SDK 运行时组件以产物文件 SHA-256 校验。
 
 对完整便携目录运行 `Test-NextPackage.ps1 -PackageRoot <目录>` 可检查清单、CLI、GUI 和快捷方式；在没有真实 Profile 的干净 Windows 环境运行 `Test-NextInstaller.ps1 -Installer <文件>` 验证安装 / 卸载。PR CI 执行系统测试、完整打包与安装器冒烟；发布验证 job 只读，具备写权限的 job 仅上传已验证产物。安装器数字版本来自已发布 GUI 的 FileVersion，完整预发布版本用于显示及文件名。
 
