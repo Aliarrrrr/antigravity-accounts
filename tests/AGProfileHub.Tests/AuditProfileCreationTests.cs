@@ -15,7 +15,9 @@ internal static class AuditProfileCreationTests
         ("Audit profile creation reconciliation preserves registered and uncertain layouts", ReconcileAsync),
         ("Audit profile creation compensation rejects replaced junction", JunctionAsync),
         ("Audit profile creation child file blocks preparation without deleting contents", BlockedChildAsync),
-        ("Audit profile creation invalid input leaves registration and layout unchanged", InvalidAsync)
+        ("Audit profile creation invalid input leaves registration and layout unchanged", InvalidAsync),
+        ("Audit profile creation long local paths retain managed compatibility", LongPathAsync),
+        ("Audit profile creation native Windows prefix conversion preserves path semantics", PrefixAsync)
     ];
     private static void Check(bool ok, string message) { if (!ok) throw new Exception(message); }
     private static HubPaths Paths(string root) => new(Path.Combine(root, "data"), Path.Combine(root, "launch"));
@@ -212,6 +214,30 @@ internal static class AuditProfileCreationTests
         await TestAssert.ThrowsAsync<HubException>(() => manager.CreateAsync("valid", Path.Combine(owned.Root, "missing"), IsolationBackendKind.ProcessLocal));
         await TestAssert.ThrowsAsync<ConfigurationException>(() => manager.CreateAsync("valid", null, (IsolationBackendKind)999));
         Check(!Directory.EnumerateFileSystemEntries(paths.ProfilesRoot).Any() && !File.Exists(paths.ProfilesFile), "Invalid input changed state.");
+    }
+
+    private static async Task LongPathAsync()
+    {
+        using var owned = new OwnedTestDirectory(); var root = owned.Root;
+        while (root.Length < 280) root = Path.Combine(root, "controlled-long-segment");
+        var paths = Paths(root); var repository = new ConfigRepository(paths); var manager = new ProfileManager(repository, paths);
+        var profile = await manager.CreateAsync("long-path", null, IsolationBackendKind.ProcessLocal);
+        Check(Directory.GetDirectories(paths.ProfileRoot(profile.Id)).Length == 5 &&
+            (await repository.ReadProfilesAsync()).Profiles.Single().Id == profile.Id, "Long-path layout or registration incomplete.");
+    }
+
+    private static Task PrefixAsync()
+    {
+        // Pure conversion checks: no network access or filesystem calls for UNC paths.
+        foreach (var (input, expected) in new[]
+        {
+            (@"C:\owned\profile", @"\\?\C:\owned\profile"),
+            (@"\\server\share\owned\profile", @"\\?\UNC\server\share\owned\profile"),
+            (@"\\?\C:\owned\profile", @"\\?\C:\owned\profile"),
+            (@"\\?\UNC\server\share\profile", @"\\?\UNC\server\share\profile"),
+            (@"\\.\C:\owned\profile", @"\\.\C:\owned\profile")
+        }) Check(ProfileCreationLayout.WindowsDirectoryPath(input) == expected, "Native prefix conversion changed path semantics.");
+        return Task.CompletedTask;
     }
 
 }

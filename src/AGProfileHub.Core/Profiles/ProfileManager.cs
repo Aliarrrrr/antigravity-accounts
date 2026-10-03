@@ -124,7 +124,7 @@ internal sealed class ProfileCreationLayout(HubPaths paths, Guid id)
         PathSafety.RejectExistingReparsePoints(paths.DataRoot, path);
         // Native mkdir fails if the entry already exists; never adopt an existing layout.
         var created = OperatingSystem.IsWindows()
-            ? CreateDirectoryWindows(path, IntPtr.Zero)
+            ? CreateDirectoryWindows(WindowsDirectoryPath(path), IntPtr.Zero)
             : MkdirUnix(path, 448) == 0; // 0700
         if (!created) throw new IOException($"Cannot exclusively create profile directory: {path}",
             new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastPInvokeError()));
@@ -156,6 +156,17 @@ internal sealed class ProfileCreationLayout(HubPaths paths, Guid id)
             if (primary.Data["CleanupFailures"] is Exception previous) failures.Insert(0, previous);
             primary.Data["CleanupFailures"] = new AggregateException("Profile layout compensation was incomplete.", failures);
         }
+    }
+
+    // Canonical paths stay unchanged for safety checks and ownership. Only the native
+    // Windows call needs the extended prefix to retain managed long-path support.
+    internal static string WindowsDirectoryPath(string canonicalPath)
+    {
+        if (canonicalPath.StartsWith(@"\\?\", StringComparison.Ordinal) ||
+            canonicalPath.StartsWith(@"\\.\", StringComparison.Ordinal)) return canonicalPath;
+        return canonicalPath.StartsWith(@"\\", StringComparison.Ordinal)
+            ? @"\\?\UNC\" + canonicalPath[2..]
+            : @"\\?\" + canonicalPath;
     }
 
     [System.Runtime.InteropServices.DllImport("kernel32.dll", EntryPoint = "CreateDirectoryW", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
