@@ -88,6 +88,7 @@ tests.AddRange(BoundaryTests.Cases.Select(test => new TestCase(test.Name,
     test.Name.StartsWith("Runner ", StringComparison.Ordinal) ? "Runner" : "Shared", test.Run)));
 tests.AddRange(NextProtocolTests.Cases.Select(test => new TestCase(test.Name, "Next", test.Run)));
 tests.AddRange(NextCallbackTests.Cases.Select(test => new TestCase(test.Name, "Next", test.Run)));
+tests.AddRange(AuditBridgeCancellationTests.Cases.Select(test => new TestCase(test.Name, "Next", test.Run)));
 tests.AddRange(AuditPersistenceTests.Cases.Select(test => new TestCase(test.Name, "Next", test.Run)));
 tests.AddRange(AuditClassificationTests.Cases.Select(test => new TestCase(test.Name, "Next", test.Run)));
 tests.AddRange(AuditProfileCreationTests.Cases.Select(test => new TestCase(test.Name, "Shared", test.Run)));

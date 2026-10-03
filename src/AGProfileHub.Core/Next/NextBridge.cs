@@ -87,8 +87,51 @@ public sealed class NextBridge(HubPaths paths)
         { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var arg in new[] { "-NoProfile", "-NonInteractive", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(script)) }) info.ArgumentList.Add(arg);
         using var process = Process.Start(info) ?? throw new HubException("Bridge creation failed.", "bridge_create_failed");
-        var stdout = process.StandardOutput.ReadToEndAsync(token); var stderr = process.StandardError.ReadToEndAsync(token);
-        await process.WaitForExitAsync(token); await stdout; await stderr;
+        await WaitForBridgeProcessAsync(process, token);
+    }
+
+    internal static async Task WaitForBridgeProcessAsync(Process process, CancellationToken token)
+    {
+        using var drainCancellation = new CancellationTokenSource();
+        var stdout = process.StandardOutput.ReadToEndAsync(drainCancellation.Token);
+        var stderr = process.StandardError.ReadToEndAsync(drainCancellation.Token);
+        var drains = Task.WhenAll(stdout, stderr);
+        try
+        {
+            token.ThrowIfCancellationRequested();
+            await process.WaitForExitAsync(token);
+            await drains.WaitAsync(token);
+            token.ThrowIfCancellationRequested();
+        }
+        catch (OperationCanceledException cancellation) when (token.IsCancellationRequested)
+        {
+            var failures = new List<Exception>();
+            // The deadline is independent of the cancelled caller and covers exit AND pipe EOF.
+            using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            try
+            {
+                try { if (!process.HasExited) process.Kill(entireProcessTree: false); }
+                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+                {
+                    // An exit between HasExited and Kill is harmless; still confirm/reap below.
+                    if (!process.HasExited) failures.Add(ex);
+                }
+                await process.WaitForExitAsync(cleanup.Token);
+                await drains.WaitAsync(cleanup.Token);
+            }
+            catch (Exception ex) { failures.Add(ex); }
+            finally
+            {
+                // Inherited pipe handles can outlive this child. Cancel pending reads, then
+                // observe BOTH tasks before the caller disposes the held process/streams.
+                drainCancellation.Cancel();
+                try { await drains; }
+                catch (OperationCanceledException) { }
+                catch (Exception ex) { failures.Add(ex); }
+            }
+            if (failures.Count > 0) cancellation.Data["BridgeCleanupFailures"] = new AggregateException(failures);
+            throw;
+        }
         if (process.ExitCode != 0) throw new HubException("SSH junction creation failed; retry or disable bridging.", "bridge_create_failed");
     }
 }
