@@ -89,6 +89,7 @@ tests.AddRange(BoundaryTests.Cases.Select(test => new TestCase(test.Name,
 tests.AddRange(NextProtocolTests.Cases.Select(test => new TestCase(test.Name, "Next", test.Run)));
 tests.AddRange(NextCallbackTests.Cases.Select(test => new TestCase(test.Name, "Next", test.Run)));
 tests.AddRange(AuditPersistenceTests.Cases.Select(test => new TestCase(test.Name, "Next", test.Run)));
+tests.AddRange(AuditClassificationTests.Cases.Select(test => new TestCase(test.Name, "Next", test.Run)));
 return await TestRunner.RunAsync(tests, args, Console.Out, Console.Error);
 
 static async Task TestIsolationSetupAsync()

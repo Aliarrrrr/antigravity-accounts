@@ -140,7 +140,7 @@ public sealed class NextHubService
             }
             return owned.Values.ToList();
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not ConfigurationException)
         { throw new HubException("Process enumeration failed (" + ex.GetType().Name + "); liveness is unknown and no destructive operation is permitted.", "process_enumeration_unavailable", ex); }
     }
     private string RuntimePath(Guid id) => Path.Combine(Paths.RuntimeStateRoot, "next-" + id.ToString("D") + ".json");
