@@ -1,8 +1,14 @@
+#if (PREPROCVER >> 8) != 0x060703
+  #error Inno Setup 6.7.3 is required.
+#endif
 #ifndef SourceRoot
   #error SourceRoot is required.
 #endif
 #ifndef MyAppVersion
   #error MyAppVersion is required.
+#endif
+#ifndef MyFileVersion
+  #error MyFileVersion derived from the published GUI is required.
 #endif
 #define MyAppName "Antigravity Profile Hub Next"
 
@@ -25,7 +31,7 @@ RestartApplications=no
 ChangesAssociations=no
 ChangesEnvironment=no
 UninstallDisplayIcon={app}\hub\AGProfileHubNext.Gui.exe
-VersionInfoVersion=0.5.0.2
+VersionInfoVersion={#MyFileVersion}
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a Next desktop shortcut"; Flags: unchecked

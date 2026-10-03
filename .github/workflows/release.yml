@@ -5,55 +5,95 @@ on:
     tags: ['v*']
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-next-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  package:
+  validate:
     runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      artifact-id: ${{ steps.artifact.outputs.artifact-id }}
+      version: ${{ steps.package.outputs.version }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-dotnet@v6
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: 10.0.x
-      - name: Install Inno Setup
-        shell: pwsh
-        run: choco install innosetup --no-progress -y
-      - name: Build and validate release
-        shell: pwsh
-        run: ./scripts/Publish-Next.ps1 -Release -Installer
-      - name: Locate and test package
+          global-json-file: global.json
+      - name: Build contracts and system tests
         shell: pwsh
         run: |
-          $manifestFile = Get-ChildItem artifacts/next -Recurse -Filter 'package-manifest.json' |
-            Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          if (-not $manifestFile) { throw 'Next package manifest missing.' }
-          $package = $manifestFile.Directory.FullName
-          $release = Split-Path $package -Parent
-          $manifest = Get-Content $manifestFile.FullName -Raw | ConvertFrom-Json
-          if ($env:GITHUB_REF_NAME -ne "v$($manifest.version)") { throw 'Tag does not match package version.' }
-          if ($manifest.application -ne 'AntigravityProfileHubNext' -or -not $manifest.experimental -or $manifest.manualAcceptance) {
-            throw 'Unexpected Next compatibility claims.'
-          }
+          ./scripts/Test-NextBuildContract.ps1
+          ./scripts/Build.ps1 -LockedRestore -Test -IncludeSystemTests
+      - name: Install pinned Inno Setup
+        shell: pwsh
+        run: ./scripts/Install-InnoSetup.ps1
+      - name: Build and validate release
+        id: package
+        shell: pwsh
+        run: |
+          ./scripts/Publish-Next.ps1 -Release -Installer
+          $manifests = @(Get-ChildItem artifacts/next -Recurse -Filter package-manifest.json)
+          if ($manifests.Count -ne 1) { throw 'Expected exactly one built package.' }
+          $package = $manifests[0].Directory.FullName
+          $manifest = Get-Content $manifests[0].FullName -Raw | ConvertFrom-Json
+          if ($env:GITHUB_REF_NAME -cne "v$($manifest.version)" -or $manifest.provenance.commit -cne $env:GITHUB_SHA -or $manifest.provenance.dirty) { throw 'Release provenance does not match tag/commit.' }
           ./scripts/Test-NextPackage.ps1 -PackageRoot $package
-          ./scripts/Test-NextInstaller.ps1 -Installer (Get-ChildItem $release -Filter 'AGProfileHubNext-Setup-*.exe' | Select-Object -First 1 -ExpandProperty FullName)
-          "RELEASE_ROOT=$release" | Out-File $env:GITHUB_ENV -Append
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v7
+          $setups = @(Get-ChildItem (Split-Path $package -Parent) -Filter 'AGProfileHubNext-Setup-*.exe')
+          if ($setups.Count -ne 1) { throw 'Expected exactly one installer.' }
+          ./scripts/Test-NextInstaller.ps1 -Installer $setups[0].FullName
+          "version=$($manifest.version)" | Out-File $env:GITHUB_OUTPUT -Append
+      - name: Upload only validated release assets
+        id: artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: AGProfileHubNext-${{ github.ref_name }}-win-x64
+          name: validated-next-win-x64
           path: |
             artifacts/next/*/*/AGProfileHubNext-*-win-x64.zip
             artifacts/next/*/*/AGProfileHubNext-*-win-x64.zip.sha256.json
             artifacts/next/*/*/AGProfileHubNext-Setup-win-x64-*.exe
             artifacts/next/*/*/AGProfileHubNext-Setup-win-x64-*.exe.sha256.json
           if-no-files-found: error
-      - name: Create experimental GitHub release
+          retention-days: 7
+  publish:
+    needs: validate
+    runs-on: windows-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      # No checkout, SDK, compiler, source scripts, or rebuild in the writable job.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.validate.outputs.artifact-id }}
+          path: validated
+          merge-multiple: true
+      - name: Verify approved assets and create experimental release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          VALIDATED_VERSION: ${{ needs.validate.outputs.version }}
         run: |
-          $assets = Get-ChildItem $env:RELEASE_ROOT -File | Where-Object { $_.Extension -in '.zip','.exe','.json' } | ForEach-Object FullName
-          $notes = 'Windows x64 Next experimental build for Antigravity 2.19.1. Independent A/B login and restart persistence were manually checked. Full browser OAuth callback routing remains unconfirmed; actual SSH connection testing was skipped. Workspace paths are metadata only. See README and docs/VALIDATION.md before use.'
-          gh release create $env:GITHUB_REF_NAME $assets --title "Antigravity Profile Hub Next $env:GITHUB_REF_NAME" --prerelease --latest=false --verify-tag --notes $notes
+          if ($env:GITHUB_REF_NAME -cne "v$env:VALIDATED_VERSION") { throw 'Validated version/tag mismatch.' }
+          $files = @(Get-ChildItem validated -Recurse -File)
+          $names = @("AGProfileHubNext-$env:VALIDATED_VERSION-win-x64.zip", "AGProfileHubNext-Setup-win-x64-$env:VALIDATED_VERSION.exe")
+          if ($files.Count -ne 4) { throw 'Unexpected validated asset count.' }
+          foreach ($name in $names) {
+            $asset = @($files | Where-Object Name -CEQ $name)
+            $proof = @($files | Where-Object Name -CEQ ($name + '.sha256.json'))
+            if ($asset.Count -ne 1 -or $proof.Count -ne 1) { throw 'Validated asset missing or duplicated.' }
+            $hash = Get-Content $proof[0].FullName -Raw | ConvertFrom-Json
+            if ($hash.file -cne $name -or $hash.algorithm -cne 'SHA256' -or $hash.hash -cne (Get-FileHash $asset[0].FullName -Algorithm SHA256).Hash) { throw 'Validated asset digest mismatch.' }
+          }
+          $assets = @($files | ForEach-Object FullName)
+          $notes = 'Experimental Windows x64 Next package. Automated package and installer smoke checks passed. Manual acceptance remains incomplete; local fingerprint-bound compatibility proof is required. Workspace paths are metadata only. See the bundled validation documentation before use.'
+          gh release create $env:GITHUB_REF_NAME @assets --repo $env:GITHUB_REPOSITORY --title "Antigravity Profile Hub Next $env:GITHUB_REF_NAME" --prerelease --latest=false --verify-tag --notes $notes
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub release publication failed.' }

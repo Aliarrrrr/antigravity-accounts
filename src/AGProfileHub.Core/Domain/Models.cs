@@ -36,11 +36,10 @@ public sealed record HubSettings
     public string? AntigravityExecutablePath { get; init; }
 
     /// <summary>
-    /// SHA-256 of the configured executable, recorded when it was configured
-    /// and verified before every launch or deep-link handoff. Absent in older
-    /// documents means "not pinned": the executable keeps working, and doctor
-    /// recommends reconfiguring to pin it. Like the backend field this is an
-    /// additive optional change, not a schema bump.
+    /// SHA-256 recorded when the executable was configured, retained for settings
+    /// compatibility and historical launchers. Next verifies the full installation
+    /// fingerprint in compatibility.json through NextCompatibility and holds its
+    /// component files open during launch and callback handoff.
     /// </summary>
     public string? ExecutableSha256 { get; init; }
     public string? LastTestedExecutablePath { get; init; }

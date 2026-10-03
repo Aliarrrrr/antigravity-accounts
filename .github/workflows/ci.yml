@@ -6,14 +6,40 @@ on:
   pull_request:
     branches: [master, main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build-and-test:
+  validate:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          dotnet-version: 10.0.x
-      - name: Build and test
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Build contracts and system tests
         shell: pwsh
-        run: ./scripts/Build.ps1 -LockedRestore -Test
+        run: |
+          ./scripts/Test-NextBuildContract.ps1
+          ./scripts/Build.ps1 -LockedRestore -Test -IncludeSystemTests
+      - name: Install pinned Inno Setup
+        shell: pwsh
+        run: ./scripts/Install-InnoSetup.ps1
+      - name: Publish and smoke portable package and installer
+        shell: pwsh
+        run: |
+          ./scripts/Publish-Next.ps1 -Installer
+          $manifests = @(Get-ChildItem artifacts/next -Recurse -Filter package-manifest.json)
+          if ($manifests.Count -ne 1) { throw 'Expected exactly one built package.' }
+          $package = $manifests[0].Directory.FullName
+          ./scripts/Test-NextPackage.ps1 -PackageRoot $package
+          $setups = @(Get-ChildItem (Split-Path $package -Parent) -Filter 'AGProfileHubNext-Setup-*.exe')
+          if ($setups.Count -ne 1) { throw 'Expected exactly one installer.' }
+          ./scripts/Test-NextInstaller.ps1 -Installer $setups[0].FullName

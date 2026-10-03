@@ -1,4 +1,6 @@
-﻿#requires -Version 5.1
+﻿#requires -Version 7.0
+
+. (Join-Path $PSScriptRoot 'BuildContract.ps1')
 
 function Get-HubVersion {
     param([Parameter(Mandatory = $true)][string]$Root)
@@ -54,11 +56,11 @@ function Find-HubSdk {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "找不到 $path" }
             $path = (Resolve-Path -LiteralPath $path).ProviderPath
             $sdks = @(Invoke-HubCommand -FilePath $path -Arguments @('--list-sdks'))
-            if (-not ($sdks | Where-Object { "$_" -match '^10\.0\.[0-9]+\s+\[' })) {
-                throw '没有稳定版 .NET 10 SDK；仅安装 runtime 不够。'
+            if (-not ($sdks | Where-Object { "$_" -match '^10\.0\.400\s+\[' })) {
+                throw '没有精确的 .NET SDK 10.0.400；仅安装 runtime 不够。'
             }
             $selected = ((Invoke-HubCommand -FilePath $path -Arguments @('--version')) -join "`n").Trim()
-            if ($selected -notmatch '^10\.0\.[0-9]+$') { throw "global.json 未选中稳定版 .NET 10 SDK：$selected" }
+            if ($selected -cne '10.0.400') { throw "global.json 未选中精确的 .NET SDK 10.0.400：$selected" }
             return [pscustomobject]@{ Path = $path; Version = $selected }
         }
         catch {

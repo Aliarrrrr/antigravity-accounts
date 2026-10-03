@@ -66,9 +66,9 @@ internal static class NextCli
             case "callback": Count(tail, 1, 1); return new { handoffPid = await hub.RouteCallbackAsync(tail[0], token) };
             case "configure-deeplink":
                 Count(tail, 1, 1);
-                if (tail[0] == "register") { hub.RegisterProtocol(Environment.ProcessPath!); return new { registered = true }; }
-                if (tail[0] == "restore") return new { restored = NextProtocol.Restore(hub.Paths) };
-                if (tail[0] == "status") return new { registered = NextProtocol.IsRegisteredFor(hub.Paths) };
+                if (tail[0] == "register") { await hub.RegisterProtocolAsync(Environment.ProcessPath!, token); return new { registered = true }; }
+                if (tail[0] == "restore") return new { restored = await hub.RestoreProtocolAsync(token) };
+                if (tail[0] == "status") return new { registered = await hub.IsProtocolRegisteredAsync(token) };
                 throw new HubException("Use register, restore or status.", "usage_error");
             case "bridge": Count(tail, 1, 2); var bridge = await Profile(); if (tail.Count == 1) return await hub.Bridge.ReadAsync(bridge.Id, token);
                 if (tail[1] is not "on" and not "off") throw new HubException("Bridge policy must be on or off.", "usage_error");
@@ -79,7 +79,7 @@ internal static class NextCli
             case "shortcut": if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException(); Count(tail, 1, 2); return new { path = DesktopShortcut.Create(await Profile(), hub.Paths.DataRoot, Environment.ProcessPath!, tail.Count == 2 ? tail[1] : Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)) };
             case "open-data": Count(tail, 0, 1); OpenFolder(tail.Count == 0 ? hub.Paths.DataRoot : hub.Paths.ProfileRoot((await Profile()).Id)); return new { opened = true };
             case "open-logs": Count(tail, 0, 0); OpenFolder(hub.Paths.LogsRoot); return new { opened = true };
-            case "rollback": Count(tail, 0, 0); foreach (var p in await hub.Profiles.ListAsync(token)) await hub.StopAsync(p.Id, force, token); return new { protocolRestored = NextProtocol.Restore(hub.Paths), legacy2191Support = "not-guaranteed" };
+            case "rollback": Count(tail, 0, 0); return new { protocolRestored = await hub.RollbackAsync(force, token), legacy2191Support = "not-guaranteed" };
             default: throw new HubException("Unknown command. Run help.", "usage_error");
         }
     }

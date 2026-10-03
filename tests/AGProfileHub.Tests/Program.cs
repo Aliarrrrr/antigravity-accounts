@@ -1,11 +1,7 @@
 using System.Text.Json;
 using AGProfileHub.Core;
 
-// hub.ps1 may pass --include-system to the test runner. This suite has no
-// system tests, so the flag is parsed and ignored to keep the interface stable.
-_ = Array.Exists(args, a => a == "--include-system");
-
-var tests = new (string Name, Func<Task> Run)[]
+var declaredTests = new (string Name, Func<Task> Run)[]
 {
     ("Next desktop adapter executes a default-root isolated wrapper", NextTests.DesktopLaunchAsync),
     ("Next component/version/strategy changes invalidate proof", NextTests.UpgradeAsync),
@@ -14,7 +10,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Next locked atomic writes preserve original", NextTests.LockedWriteAsync),
     ("Next bridge revocation preserves host targets and recovers interruption", NextTests.BridgeAsync),
     ("Next migration requires preview and preserves IDs/source/credentials boundary", NextTests.MigrationAsync),
-    ("Next enumeration failure and callback ambiguity fail closed", NextTests.EnumerationAsync),
+    ("Next enumeration failure refuses a forced stop", NextTests.EnumerationAsync),
     ("Next callbacks never guess among multiple, expired or future waiters", NextTests.CallbackAsync),
     ("Next callback diagnostics record receipt/stage/fault without URI", NextTests.CallbackDiagnosticsAsync),
     ("Next stop retries an unknown exit snapshot without implicit success", NextTests.ExitRaceAsync),
@@ -79,14 +75,20 @@ var tests = new (string Name, Func<Task> Run)[]
     ("stopping an idle scope clears the warm attestation", TestIdleStopClearsAttestationAsync),
 };
 
-var failures = new List<string>();
-foreach (var test in tests)
-{
-    try { await test.Run(); Console.WriteLine($"PASS  {test.Name}"); }
-    catch (Exception ex) { failures.Add($"{test.Name}: {ex.GetType().Name}: {ex.Message}"); Console.Error.WriteLine($"FAIL  {failures[^1]}"); }
-}
-Console.WriteLine($"{tests.Length - failures.Count}/{tests.Length} tests passed.");
-return failures.Count == 0 ? 0 : 1;
+// Groups identify the main class under test, not mutually exclusive coverage.
+// These historical entry points directly exercise the shared production classes.
+var sharedTests = new HashSet<Func<Task>> { TestProfileCrudAsync, TestConcurrentCreatesAsync, TestInvalidConfigAsync,
+    TestIsolationBackendDefaultsAsync, TestUnknownIsolationBackendAsync, TestPathContainmentAsync,
+    TestCommandLineAsync, TestShortcutAsync, TestProfileResolveAsync };
+var tests = declaredTests.Select(test => new TestCase(test.Name,
+    test.Run.Method.DeclaringType == typeof(NextTests) ? "Next" : sharedTests.Contains(test.Run) ? "Shared" : "Legacy",
+    test.Run, test.Run == NextTests.DesktopLaunchAsync)).ToList();
+tests.AddRange(BoundaryTests.Cases.Select(test => new TestCase(test.Name,
+    test.Name.StartsWith("Next ", StringComparison.Ordinal) ? "Next" :
+    test.Name.StartsWith("Runner ", StringComparison.Ordinal) ? "Runner" : "Shared", test.Run)));
+tests.AddRange(NextProtocolTests.Cases.Select(test => new TestCase(test.Name, "Next", test.Run)));
+tests.AddRange(NextCallbackTests.Cases.Select(test => new TestCase(test.Name, "Next", test.Run)));
+return await TestRunner.RunAsync(tests, args, Console.Out, Console.Error);
 
 static async Task TestIsolationSetupAsync()
 {
@@ -1239,6 +1241,61 @@ static async Task<string> CaptureLaunchOutcomeAsync(Func<Task> action)
 {
     try { await action(); return "started"; }
     catch (UnsupportedCapabilityException) { return "blocked"; }
+}
+
+internal sealed record TestCase(string Name, string Group, Func<Task> Run, bool System = false);
+
+internal static class TestRunner
+{
+    internal static async Task<int> RunAsync(IReadOnlyList<TestCase> tests, string[] args, TextWriter output, TextWriter error)
+    {
+        var includeSystem = false; string? filter = null;
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "--include-system" && !includeSystem) includeSystem = true;
+            else if (args[i] == "--filter" && filter is null && i + 1 < args.Length &&
+                !string.IsNullOrWhiteSpace(args[i + 1]) && !args[i + 1].StartsWith("--", StringComparison.Ordinal)) filter = args[++i];
+            else
+            {
+                await error.WriteLineAsync("usage: AGProfileHub.Tests [--include-system] [--filter <substring>]");
+                return 2;
+            }
+        }
+        if (filter is not null && !tests.Any(test => test.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)))
+        {
+            await error.WriteLineAsync("usage: --filter did not match any test case.");
+            return 2;
+        }
+        var groups = tests.Select(test => test.Group).Distinct().ToDictionary(group => group, _ => (Passed: 0, Failed: 0, Skipped: 0));
+        var failures = 0; var executed = 0; var skipped = 0;
+        foreach (var test in tests)
+        {
+            var group = groups[test.Group];
+            var reason = filter is not null && !test.Name.Contains(filter, StringComparison.OrdinalIgnoreCase) ? "filter" :
+                test.System && !includeSystem ? "requires --include-system" : null;
+            if (reason is not null)
+            {
+                skipped++; groups[test.Group] = (group.Passed, group.Failed, group.Skipped + 1);
+                await output.WriteLineAsync($"SKIP  [{test.Group}] {test.Name} ({reason})");
+                continue;
+            }
+            executed++;
+            try
+            {
+                await test.Run(); groups[test.Group] = (group.Passed + 1, group.Failed, group.Skipped);
+                await output.WriteLineAsync($"PASS  [{test.Group}] {test.Name}");
+            }
+            catch (Exception ex)
+            {
+                failures++; groups[test.Group] = (group.Passed, group.Failed + 1, group.Skipped);
+                await error.WriteLineAsync($"FAIL  [{test.Group}] {test.Name}: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+        foreach (var (name, group) in groups)
+            await output.WriteLineAsync($"GROUP {name}: {group.Passed} passed, {group.Failed} failed, {group.Skipped} skipped.");
+        await output.WriteLineAsync($"{executed - failures}/{executed} tests passed; {skipped} skipped.");
+        return failures == 0 ? 0 : 1;
+    }
 }
 
 sealed class Fixture : IDisposable

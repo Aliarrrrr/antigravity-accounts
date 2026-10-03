@@ -1,4 +1,4 @@
-#requires -Version 7.0
+﻿#requires -Version 7.0
 [CmdletBinding()]
 param([string]$Executable = "$env:LOCALAPPDATA/Programs/antigravity/Antigravity.exe", [int]$ObserveSeconds = 50,
       [string]$Report = (Join-Path (Split-Path $PSScriptRoot -Parent) 'artifacts/next-desktop-probe.json'))

@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using Microsoft.Win32;
 
 namespace AGProfileHub.Core;
 
@@ -13,11 +12,19 @@ public sealed class NextHubService
     public NextBridge Bridge { get; }
     private readonly IProcessCatalog _catalog;
     private readonly IProcessController _controller;
+    private readonly IProtocolCommandStore _protocolCommands;
+    private readonly string _protocolLockPath;
+    private readonly ICallbackProcessLauncher _callbackLauncher;
+    private readonly ICallbackWaiterStore _waiters;
+    private readonly TimeSpan _callbackTimeout;
     private AtomicJsonStore Store => new(Paths.DataRoot);
     private string ProofPath => Path.Combine(Paths.DataRoot, "compatibility.json");
-    private string WaitersPath => Path.Combine(Paths.DataRoot, "runtime", "login-waiters.json");
     private static readonly TimeSpan OperationTimeout = TimeSpan.FromMinutes(5);
     public NextHubService(string? dataRoot = null, IProcessCatalog? catalog = null, IProcessController? controller = null)
+        : this(dataRoot, catalog, controller, null, null, null, null) { }
+    internal NextHubService(string? dataRoot, IProcessCatalog? catalog, IProcessController? controller,
+        IProtocolCommandStore? protocolCommands, string? protocolLockPath, ICallbackProcessLauncher? callbackLauncher,
+        ICallbackWaiterStore? waiters, TimeSpan? callbackTimeout = null)
     {
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var root = dataRoot ?? Path.Combine(local, "AntigravityProfileHubNext");
@@ -26,6 +33,11 @@ public sealed class NextHubService
         Paths = new HubPaths(root, Path.Combine(root, "runtime", "global"));
         Repository = new ConfigRepository(Paths); Profiles = new ProfileManager(Repository, Paths); Bridge = new NextBridge(Paths);
         _catalog = catalog ?? new WindowsProcessCatalog(); _controller = controller ?? new WindowsProcessController();
+        _protocolCommands = protocolCommands ?? new WindowsProtocolCommandStore();
+        _protocolLockPath = protocolLockPath ?? NextProtocol.DefaultLockPath;
+        _callbackLauncher = callbackLauncher ?? new WindowsCallbackProcessLauncher();
+        _waiters = waiters ?? new AtomicCallbackWaiterStore(Paths);
+        _callbackTimeout = callbackTimeout ?? TimeSpan.FromSeconds(20);
     }
 
     public async Task<ProfileRegistration> CreateAsync(string name, string? workspace = null, CancellationToken token = default)
@@ -80,7 +92,7 @@ public sealed class NextHubService
             ["APPDATA"] = paths.Roaming(id), ["LOCALAPPDATA"] = paths.Local(id), ["TEMP"] = paths.Temp(id), ["TMP"] = paths.Temp(id),
             ["WSL_DISTRO_NAME"] = "AGPHNext-" + id.ToString("N")[..8], ["ANTIGRAVITY_WSL_DISTRO"] = "",
             ["SSH_CONNECTION"] = "", ["SSH_CLIENT"] = "", ["SSH_TTY"] = "", ["WSL_INTEROP"] = "",
-            ["NODE_OPTIONS"] = "", ["ELECTRON_RUN_AS_NODE"] = "", ["DEV_URL"] = "", ["JETSKI_LS_PORT"] = "",
+            ["NODE_OPTIONS"] = "", ["ELECTRON_RUN_AS_NODE"] = "", ["ELECTRON_OZONE_PLATFORM_HINT"] = "", ["DEV_URL"] = "", ["JETSKI_LS_PORT"] = "",
             ["ANTIGRAVITY_LS_ADDRESS"] = "", ["ANTIGRAVITY_CSRF_TOKEN"] = ""
         };
         return new LaunchPlan(install.Executable, install.Version, ["--user-data-dir=" + paths.UserData(id)], environment,
@@ -146,8 +158,8 @@ public sealed class NextHubService
     private async Task SaveRuntimeAsync(NextRuntime runtime, CancellationToken token)
     {
         await Store.WriteAsync(RuntimePath(runtime.ProfileId), runtime, NextJsonContext.Default.NextRuntime, token);
-        await new StructuredEventLogger(Paths).WriteAsync(new HubLogEvent(DateTimeOffset.UtcNow, "next-lifecycle", runtime.ProfileId,
-            runtime.Installation?.Version, null, runtime.Root?.ProcessId, runtime.State.ToString(), null), token);
+        await WriteDiagnosticAsync(new HubLogEvent(DateTimeOffset.UtcNow, "next-lifecycle", runtime.ProfileId,
+            runtime.Installation?.Version, null, runtime.Root?.ProcessId, runtime.State.ToString(), null));
     }
     public async Task<ProfileStatus> StatusAsync(Guid id, CancellationToken token = default)
     {
@@ -260,6 +272,10 @@ public sealed class NextHubService
     public async Task<bool> StopAsync(Guid id, bool force = false, CancellationToken token = default)
     {
         await using var held = await FileLock.AcquireAsync(Paths.ProfileLock(id), OperationTimeout, token);
+        return await StopUnderProfileLockAsync(id, force, loginHeld: false, token);
+    }
+    private async Task<bool> StopUnderProfileLockAsync(Guid id, bool force, bool loginHeld, CancellationToken token)
+    {
         await Profiles.GetAsync(id, token);
         var state = await RuntimeAsync(id, token);
         var install = state.Installation ?? await CurrentInstallationAsync(token);
@@ -268,7 +284,9 @@ public sealed class NextHubService
         {
             var stopped = await StopOwnedAsync(id, install.Executable, force, null, token);
             await SaveRuntimeAsync(state with { State = RuntimeState.Stopped, Root = null, Processes = [], FileTokenStore = false }, token);
-            await EndLoginAsync(id, token); return stopped;
+            if (loginHeld) await RemoveLoginWaiterAsync(id, token);
+            else await EndLoginAsync(id, token);
+            return stopped;
         }
         catch
         { var latest = await RuntimeAsync(id, CancellationToken.None); await SaveRuntimeAsync(latest with { State = RuntimeState.Unknown, Detail = "Close incomplete; force stop is a separate explicit action." }, CancellationToken.None); throw; }
@@ -290,12 +308,18 @@ public sealed class NextHubService
         if (owned.Count == 0) return false;
         var state = await RuntimeAsync(id, token);
         await SaveRuntimeAsync(state with { Processes = owned.Select(row => new ProcessIdentity(row.ProcessId, row.StartTimeUtc, row.ExecutablePath, Paths.UserData(id))).ToList() }, token);
+        var unconfirmedRequests = 0;
         if (force)
         {
             // Kill individually, children first; the controller rechecks image and creation time.
-            foreach (var row in owned.OrderByDescending(row => row.StartTimeUtc)) _controller.Terminate(row);
+            foreach (var row in owned.OrderByDescending(row => row.StartTimeUtc))
+                if (!_controller.Terminate(row)) unconfirmedRequests++;
         }
-        else foreach (var row in owned.Where(row => row.MainWindowHandle != 0)) _controller.TryCloseMainWindow(row);
+        else foreach (var row in owned.Where(row => row.MainWindowHandle != 0))
+            if (!_controller.TryCloseMainWindow(row)) unconfirmedRequests++;
+        await WriteDiagnosticAsync(new HubLogEvent(DateTimeOffset.UtcNow,
+            "next-stop", id, null, force ? "force" : "close-window", null,
+            "requests-sent", unconfirmedRequests == 0 ? null : "process_request_unconfirmed"));
         var deadline = DateTimeOffset.UtcNow.AddSeconds(force ? 10 : 15);
         while (DateTimeOffset.UtcNow < deadline)
         {
@@ -304,7 +328,8 @@ public sealed class NextHubService
             { /* A transient exit/WMI race is still unknown; wait for a verifiable snapshot. */ }
             await Task.Delay(250, token);
         }
-        throw new HubException(force ? "Owned processes remain after force stop." : "The window did not close. Save work and use force stop explicitly if needed.", "profile_still_running");
+        var detail = unconfirmedRequests == 0 ? "" : $" {unconfirmedRequests} process requests could not be confirmed.";
+        throw new HubException((force ? "Owned processes remain after force stop." : "The window did not close. Save work and use force stop explicitly if needed.") + detail, "profile_still_running");
     }
 
     public async Task<CompatibilityProof> ProbeAsync(CancellationToken token = default)
@@ -314,56 +339,92 @@ public sealed class NextHubService
         var scratch = new NextHubService(Path.Combine(Paths.DataRoot, "probes", Guid.NewGuid().ToString("N")));
         await scratch.ConfigureExecutableAsync(install.Executable, token);
         var id = (await scratch.Profiles.CreateAsync("no-login-probe", null, IsolationBackendKind.ProcessLocal, token)).Id;
-        var previous = NextProtocol.ReadRegisteredCommand();
         var proof = new CompatibilityProof { Installation = install };
         try
         {
-            var runtime = await scratch.LaunchCoreAsync(id, install, token);
-            proof = proof with { FileTokenStore = runtime.FileTokenStore,
-                IndependentHome = Directory.Exists(Path.Combine(scratch.Paths.Home(id), ".gemini")),
-                IndependentUserData = File.Exists(Path.Combine(scratch.Paths.UserData(id), "app_storage.json")) };
+            // Keep one lock order for the entire probe transaction; never reenter these gates.
+            await using var profileHeld = await FileLock.AcquireAsync(scratch.Paths.ProfileLock(id), OperationTimeout, token);
+            await using var loginHeld = await FileLock.AcquireAsync(Path.Combine(scratch.Paths.LocksRoot, "login.lock"), OperationTimeout, token);
+            await using var protocolHeld = await FileLock.AcquireAsync(_protocolLockPath, OperationTimeout, token);
+            var previous = _protocolCommands.Read();
+            try
+            {
+                var runtime = await scratch.LaunchCoreAsync(id, install, token);
+                proof = proof with { FileTokenStore = runtime.FileTokenStore,
+                    IndependentHome = Directory.Exists(Path.Combine(scratch.Paths.Home(id), ".gemini")),
+                    IndependentUserData = File.Exists(Path.Combine(scratch.Paths.UserData(id), "app_storage.json")) };
+            }
+            finally
+            {
+                try { await scratch.StopUnderProfileLockAsync(id, true, loginHeld: true, CancellationToken.None); proof = proof with { ProcessesStopped = true }; }
+                finally { proof = proof with { ProtocolRestored = NextProtocol.RestoreProbeProtocolUnderLock(previous,
+                    install.Executable, _protocolCommands, CancellationToken.None) }; }
+            }
         }
-        finally
+        catch (Exception ex)
         {
-            try { await scratch.StopAsync(id, true, CancellationToken.None); proof = proof with { ProcessesStopped = true }; }
-            finally { proof = proof with { ProtocolRestored = RestoreProbeProtocol(previous, install.Executable) }; }
+            await WriteDiagnosticAsync(new HubLogEvent(DateTimeOffset.UtcNow, "next-probe", null,
+                install.Version, Path.GetFileName(scratch.Paths.DataRoot), null, "scratch-retained",
+                ex is HubException known ? known.Code : ex is OperationCanceledException ? "probe_cancelled" : "probe_failed"));
+            throw;
         }
         if (!NextCompatibility.Same(install, await CurrentInstallationAsync(token))) throw new HubException("Installation changed during probe; proof discarded.", "installation_changed");
         proof = proof with { ProbedUtc = DateTimeOffset.UtcNow };
         await Store.WriteAsync(ProofPath, proof, NextJsonContext.Default.CompatibilityProof, token);
+        await FinishProbeCleanupAsync(scratch.Paths.DataRoot, proof);
         return proof;
     }
-    private static bool RestoreProbeProtocol(string? previous, string executable)
+    private async Task FinishProbeCleanupAsync(string scratch, CompatibilityProof proof)
     {
-        if (!OperatingSystem.IsWindows()) return false;
-        var current = NextProtocol.ReadRegisteredCommand();
-        if (current == previous) return true;
-        if (current is null || !current.StartsWith('"' + executable + '"', StringComparison.OrdinalIgnoreCase)) return false;
-        using var key = Registry.CurrentUser.OpenSubKey(@"Software\Classes\antigravity\shell\open\command", true);
-        if (previous is null) key?.DeleteValue("", false); else key?.SetValue("", previous);
-        return NextProtocol.ReadRegisteredCommand() == previous;
+        string? code = null;
+        try { await Task.Run(() => NextProbeCleanup.DeleteOwnedScratch(Paths, scratch,
+            proof.ProcessesStopped && proof.FileTokenStore && proof.IndependentHome && proof.IndependentUserData,
+            proof.ProtocolRestored, proofSaved: true)); }
+        catch (Exception ex) when (ex is HubException or IOException or UnauthorizedAccessException)
+        { code = ex is HubException known ? known.Code : "probe_cleanup_failed"; }
+        try
+        {
+            await new StructuredEventLogger(Paths).WriteAsync(new HubLogEvent(DateTimeOffset.UtcNow,
+                "next-probe", null, proof.Installation.Version, Path.GetFileName(scratch), null,
+                code is null ? "scratch-cleaned" : "scratch-retained", code), CancellationToken.None);
+        }
+        catch (Exception) { /* The persisted proof and retained scratch are authoritative. */ }
     }
 
     public async Task BeginLoginAsync(Guid id, CancellationToken token = default)
     {
+        await using var profileHeld = await FileLock.AcquireAsync(Paths.ProfileLock(id), OperationTimeout, token);
+        await using var held = await FileLock.AcquireAsync(Path.Combine(Paths.LocksRoot, "login.lock"), OperationTimeout, token);
         var status = await StatusAsync(id, token);
         if (status.State != RuntimeState.Running) throw new HubException("Start and prove the profile before beginning login.", "login_profile_not_ready");
-        ReassertProtocolAfterVendorStart();
-        await using var held = await FileLock.AcquireAsync(Path.Combine(Paths.LocksRoot, "login.lock"), OperationTimeout, token);
+        var settings = await Repository.ReadSettingsAsync(token);
+        await using var protocolHeld = await FileLock.AcquireAsync(_protocolLockPath, OperationTimeout, token);
+        await NextProtocol.ReassertUnderLockAsync(Paths, settings.AntigravityExecutablePath, _protocolCommands, token);
         var queue = await ReadWaitersAsync(token);
         if (queue.Waiting.Any(p => p.ProfileId != id)) throw new HubException("Another profile is awaiting authorization. Complete or cancel it first; signed-in windows can stay parallel.", "login_serialized");
-        await Store.WriteAsync(WaitersPath, queue with { Waiting = [new PendingCallback { ProfileId = id, UserDataPath = Paths.UserData(id), CreatedUtc = DateTimeOffset.UtcNow }] }, NextJsonContext.Default.CallbackQueue, token);
+        await _waiters.WriteAsync(queue with { Waiting = [new PendingCallback { ProfileId = id, UserDataPath = Paths.UserData(id), CreatedUtc = DateTimeOffset.UtcNow }] }, token);
     }
     public async Task EndLoginAsync(Guid id, CancellationToken token = default)
     {
         await using var held = await FileLock.AcquireAsync(Path.Combine(Paths.LocksRoot, "login.lock"), OperationTimeout, token);
+        await RemoveLoginWaiterAsync(id, token);
+    }
+    private async Task RemoveLoginWaiterAsync(Guid id, CancellationToken token)
+    {
         var queue = await ReadWaitersAsync(token);
-        await Store.WriteAsync(WaitersPath, queue with { Waiting = queue.Waiting.Where(p => p.ProfileId != id).ToList() }, NextJsonContext.Default.CallbackQueue, token);
+        await _waiters.WriteAsync(queue with { Waiting = queue.Waiting.Where(p => p.ProfileId != id).ToList() }, token);
     }
     private async Task<CallbackQueue> ReadWaitersAsync(CancellationToken token)
     {
-        var queue = await Store.ReadAsync(WaitersPath, NextJsonContext.Default.CallbackQueue, () => new CallbackQueue(), token);
-        return queue with { Waiting = queue.Waiting.Where(p => p.ProfileId != Guid.Empty && p.CreatedUtc != default && DateTimeOffset.UtcNow - p.CreatedUtc < NextProtocol.MaxPendingAge).ToList() };
+        var queue = await _waiters.ReadAsync(token);
+        if (queue.Waiting is null || queue.Waiting.Any(p => p is null))
+            throw new HubException("Authorization waiting records are invalid; no handoff occurred.", "callback_ambiguous");
+        var now = DateTimeOffset.UtcNow;
+        var active = queue.Waiting.Where(p => p.ProfileId != Guid.Empty && p.CreatedUtc != default &&
+            p.CreatedUtc <= now && now - p.CreatedUtc < NextProtocol.MaxPendingAge).ToList();
+        if (active.Any(p => !EqualPath(p.UserDataPath, Paths.UserData(p.ProfileId))))
+            throw new HubException("Authorization scope does not match its profile; no handoff occurred.", "callback_ambiguous");
+        return queue with { Waiting = active };
     }
     public static PendingCallback SelectWaiter(IReadOnlyList<PendingCallback> waiting, DateTimeOffset now)
     {
@@ -380,7 +441,7 @@ public sealed class NextHubService
         {
         NextProtocol.ValidateCallbackUri(uri);
         stage = "check-protocol";
-        if (!NextProtocol.IsRegisteredFor(Paths)) throw new HubException("Next no longer owns the protocol; callback refused.", "protocol_owned_elsewhere");
+        if (!await IsProtocolRegisteredAsync(token)) throw new HubException("Next no longer owns the protocol; callback refused.", "protocol_owned_elsewhere");
         stage = "select-waiter";
         var selected = SelectWaiter((await ReadWaitersAsync(token)).Waiting, DateTimeOffset.UtcNow).ProfileId;
         diagnosticProfile = selected; stage = "acquire-locks";
@@ -395,6 +456,9 @@ public sealed class NextHubService
         stage = "check-installation";
         var install = await CurrentInstallationAsync(token); await RequireProofAsync(install, token);
         using var lease = await NextCompatibility.HoldAsync(install, token);
+        await using var protocolHeld = await FileLock.AcquireAsync(_protocolLockPath, OperationTimeout, token);
+        if (!await NextProtocol.IsRegisteredForUnderLockAsync(Paths, _protocolCommands, token))
+            throw new HubException("Next no longer owns the protocol; callback refused.", "protocol_owned_elsewhere");
         var plan = BuildPlan(Paths, id, install);
         var info = new ProcessStartInfo(install.Executable) { UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = Paths.ProfileRoot(id) };
@@ -402,33 +466,51 @@ public sealed class NextHubService
         foreach (var pair in plan.Environment)
             if (pair.Value.Length == 0) info.Environment.Remove(pair.Key); else info.Environment[pair.Key] = pair.Value;
         stage = "start-handoff";
-        using var process = Process.Start(info) ?? throw new HubException("Callback handoff failed.", "callback_failed");
-        var handoffId = process.Id;
-        diagnosticPid = handoffId;
-        var handoffStarted = new DateTimeOffset(process.StartTime.ToUniversalTime());
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token); deadline.CancelAfter(TimeSpan.FromSeconds(20));
-        var stdout = DrainDiscardAsync(process.StandardOutput, deadline.Token); var stderr = DrainDiscardAsync(process.StandardError, deadline.Token);
+        using var process = _callbackLauncher.Start(info);
+        int handoffId = 0;
+        DateTimeOffset? handoffStarted = null;
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token); deadline.CancelAfter(_callbackTimeout);
+        Task stdout = Task.CompletedTask, stderr = Task.CompletedTask;
         try
         {
+            handoffId = process.Id;
+            diagnosticPid = handoffId;
+            stage = "identify-handoff";
+            DateTimeOffset started;
+            try { started = process.StartTimeUtc; }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+            { throw new HubException("Callback process identity could not be verified; authorization remains pending.", "callback_identity_unknown", ex); }
+            if (handoffId <= 0 || started == default)
+                throw new HubException("Callback process identity could not be verified; authorization remains pending.", "callback_identity_unknown");
+            handoffStarted = started;
+            stdout = DrainDiscardAsync(process.StandardOutput, deadline.Token);
+            stderr = DrainDiscardAsync(process.StandardError, deadline.Token);
             stage = "wait-handoff-exit";
             await process.WaitForExitAsync(deadline.Token);
             stage = "drain-streams-exit-" + process.ExitCode;
             await stdout; await stderr;
             stage = "verify-root-exit-" + process.ExitCode;
-            if (process.ExitCode != 0 || (await StatusAsync(id, token)).Root is not { } after || status.Root is null ||
+            var finalStatus = await StatusAsync(id, token);
+            if (process.ExitCode != 0 || finalStatus.State != RuntimeState.Running || finalStatus.Root is not { } after || status.Root is null ||
                 after.ProcessId != status.Root.ProcessId || after.StartTimeUtc != status.Root.StartTimeUtc)
                 throw new HubException("The callback did not finish in the already-proven root; authorization remains pending.", "callback_failed");
         }
         catch
         {
             deadline.Cancel();
-            if (!process.HasExited) _controller.Terminate(new ProcessSnapshot(handoffId, 0, handoffStarted, install.Executable, "", 0));
+            // Never infer creation time from a newly opened PID; the held process handle is authoritative.
+            if (handoffStarted is { } verifiedStart)
+                try
+                {
+                    if (!process.HasExited) _controller.Terminate(new ProcessSnapshot(handoffId, 0, verifiedStart, install.Executable, "", 0));
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
             foreach (var drain in new[] { stdout, stderr })
                 try { await drain; } catch (OperationCanceledException) { } catch (IOException) { }
             throw;
         }
         stage = "clear-waiter";
-        await Store.WriteAsync(WaitersPath, queue with { Waiting = [] }, NextJsonContext.Default.CallbackQueue, token);
+        await _waiters.WriteAsync(queue with { Waiting = [] }, token);
         await WriteCallbackDiagnosticAsync("completed", diagnosticProfile, diagnosticPid, "succeeded", null);
         return handoffId; // Never persist the URI or authentication result.
         }
@@ -442,10 +524,14 @@ public sealed class NextHubService
     private async Task WriteCallbackDiagnosticAsync(string stage, Guid? profile, int? process, string result, string? code)
     {
         // Stage names, numeric exit/PID and fixed fault codes only; never URI, argv or exception text.
+        await WriteDiagnosticAsync(new HubLogEvent(DateTimeOffset.UtcNow,
+            "next-callback", profile, null, stage, process, result, code));
+    }
+    private async Task WriteDiagnosticAsync(HubLogEvent entry)
+    {
         try
         {
-            await new StructuredEventLogger(Paths).WriteAsync(new HubLogEvent(DateTimeOffset.UtcNow,
-                "next-callback", profile, null, stage, process, result, code), CancellationToken.None);
+            await new StructuredEventLogger(Paths).WriteAsync(entry, CancellationToken.None);
         }
         catch (Exception) { /* Diagnostic failure must not change callback ownership or routing. */ }
     }
@@ -453,28 +539,27 @@ public sealed class NextHubService
     {
         var buffer = new char[4096]; while (await reader.ReadAsync(buffer.AsMemory(), token) != 0) { }
     }
-    public void RegisterProtocol(string cli)
+    public async Task RegisterProtocolAsync(string cli, CancellationToken token = default)
     {
-        cli = PathSafety.CanonicalizeExistingFile(cli);
-        if (!Path.GetFileName(cli).Equals("agprofile-next.exe", StringComparison.OrdinalIgnoreCase))
-            throw new ConfigurationException("Only the Next CLI may own this callback registration.");
-        var current = NextProtocol.ReadRegisteredCommand();
-        if (current is not null && current.Contains("callback", StringComparison.OrdinalIgnoreCase) && !NextProtocol.IsRegisteredFor(Paths))
-            throw new HubException("Another manager owns callbacks. Restore its protocol registration before Next takes ownership.", "protocol_owned_elsewhere");
-        NextProtocol.Register(Paths, cli);
+        var settings = await Repository.ReadSettingsAsync(token);
+        var vendor = NextCompatibility.DiscoveryCandidates(settings.AntigravityExecutablePath).FirstOrDefault(File.Exists);
+        await NextProtocol.RegisterAsync(Paths, cli, vendor, _protocolCommands, _protocolLockPath, token);
     }
-    private void ReassertProtocolAfterVendorStart()
+    public Task<bool> IsProtocolRegisteredAsync(CancellationToken token = default) =>
+        NextProtocol.IsRegisteredForAsync(Paths, _protocolCommands, _protocolLockPath, token);
+    public Task<bool> RestoreProtocolAsync(CancellationToken token = default) =>
+        NextProtocol.RestoreAsync(Paths, _protocolCommands, _protocolLockPath, token);
+    public async Task<bool> RollbackAsync(bool force = false, CancellationToken token = default)
     {
-        var registration = Path.Combine(Paths.DataRoot, "runtime", "deeplink-registration.json");
-        if (!File.Exists(registration)) throw new HubException("Register callbacks before authorization.", "protocol_not_registered");
-        var record = Store.ReadAsync(registration, HubJsonContext.Default.DeepLinkRegistration, () => null!, CancellationToken.None).GetAwaiter().GetResult();
-        var current = NextProtocol.ReadRegisteredCommand();
-        if (current == record.RouterCommand) return;
-        var settings = Repository.ReadSettingsAsync().GetAwaiter().GetResult();
-        if (current is null || settings.AntigravityExecutablePath is null || !current.StartsWith('"' + settings.AntigravityExecutablePath + '"', StringComparison.OrdinalIgnoreCase))
-            throw new HubException("Callback ownership changed; no automatic takeover.", "protocol_owned_elsewhere");
-        var cli = CommandLineIdentity.Split(NextProtocol.CanonicalizeRouterCommand(Paths, record.RouterCommand))[0];
-        if (!Path.GetFileName(cli).Equals("agprofile-next.exe", StringComparison.OrdinalIgnoreCase)) throw new ConfigurationException("Foreign callback executable.");
-        NextProtocol.Register(Paths, cli);
+        try
+        {
+            foreach (var profile in await Profiles.ListAsync(token)) await StopAsync(profile.Id, force, token);
+        }
+        catch (Exception ex) when (ex is HubException or IOException or UnauthorizedAccessException)
+        {
+            throw new HubException("Rollback stopped because a profile could not be confirmed stopped. Protocol ownership is retained. After resolving the process failure, use configure-deeplink restore for independent protocol recovery.",
+                ex is HubException known ? known.Code : "rollback_stop_failed", ex);
+        }
+        return await RestoreProtocolAsync(token);
     }
 }

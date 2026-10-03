@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 7.0
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
@@ -20,7 +20,7 @@ $code = 0
 try {
     if ($Command -eq 'help') {
         Write-Output @'
-AGProfileHub 开发入口（PowerShell 5.1 / 7；不安装 SDK，不修改执行策略）
+AGProfileHub 开发入口（需要 PowerShell 7；不安装 SDK，不修改执行策略）
   .\hub.ps1 help
   .\hub.ps1 version
   .\hub.ps1 check [-LockedRestore] [-Release]
