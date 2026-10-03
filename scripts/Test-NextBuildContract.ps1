@@ -146,5 +146,65 @@ catch { $_.Exception.Message | Set-Content -LiteralPath $ResultPath; exit 1 }
         if ($case -in @('link','dangling-link')) { Remove-Item -LiteralPath $record -Force }
         $checks++
     }
+    # Exercise the runner installer with stub download/process commands; never install on this host.
+    $innoHarness = Join-Path $scratch 'inno-install-contract.ps1'
+    @'
+param([string]$ScriptPath, [string]$RunnerRoot, [string]$Case)
+$env:RUNNER_TEMP = $RunnerRoot
+$env:GITHUB_ENV = Join-Path $RunnerRoot 'github-env.txt'
+$global:innoContractLaunchPath = Join-Path $RunnerRoot 'launch.json'
+$global:innoContractCase = $Case
+'' | Set-Content -LiteralPath $env:GITHUB_ENV
+function Invoke-WebRequest {
+    param($Uri, $OutFile, $TimeoutSec)
+    if ($Uri -cne 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe') { throw 'Unexpected Inno download source.' }
+    'test stub; never executable' | Set-Content -LiteralPath $OutFile
+}
+function Get-FileHash {
+    param($LiteralPath, $Algorithm)
+    if ($Algorithm -cne 'SHA256') { throw 'Expected SHA256 verification.' }
+    $hash = if ($global:innoContractCase -eq 'hash-mismatch') { '0' * 64 } else { '9C73C3BAE7ED48D44112A0F48E66742C00090BDB5BEF71D9D3C056C66E97B732' }
+    [pscustomobject]@{ Hash = $hash }
+}
+function Start-Process {
+    param($FilePath, $ArgumentList, $WindowStyle, [switch]$PassThru)
+    @{file=$FilePath;arguments=$ArgumentList;window=$WindowStyle;passThru=[bool]$PassThru} | ConvertTo-Json | Set-Content -LiteralPath $global:innoContractLaunchPath
+    $directory = @($ArgumentList | Where-Object { $_ -cmatch '^/DIR="(.+)"$' })
+    if ($directory.Count -ne 1 -or $directory[0] -cnotmatch '^/DIR="(.+)"$') { throw 'Missing explicit Inno install directory.' }
+    New-Item -ItemType Directory -Path $Matches[1] -Force | Out-Null
+    'compiler stub' | Set-Content -LiteralPath (Join-Path $Matches[1] 'ISCC.exe')
+    $exitCode = if ($global:innoContractCase -eq 'install-failure') { 1 } else { 0 }
+    $process = [pscustomobject]@{ExitCode=$exitCode;HasExited=$true}
+    $process | Add-Member ScriptMethod WaitForExit { param($Timeout) return $true }
+    $process | Add-Member ScriptMethod Kill { throw 'Unexpected process cleanup.' }
+    $process | Add-Member ScriptMethod Dispose { }
+    return $process
+}
+try { & $ScriptPath; exit 0 }
+catch { $_.Exception.Message | Set-Content -LiteralPath (Join-Path $RunnerRoot 'error.txt'); exit 1 }
+'@ | Set-Content -LiteralPath $innoHarness -Encoding utf8
+    foreach ($case in @('success','hash-mismatch','install-failure')) {
+        $runnerRoot = Join-Path $scratch "inno-$case"
+        New-Item -ItemType Directory -Path $runnerRoot | Out-Null
+        & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -File $innoHarness -ScriptPath (Join-Path $PSScriptRoot 'Install-InnoSetup.ps1') -RunnerRoot $runnerRoot -Case $case
+        $succeeded = $LASTEXITCODE -eq 0
+        $environment = (Get-Content -LiteralPath (Join-Path $runnerRoot 'github-env.txt') -Raw).Trim()
+        $launchPath = Join-Path $runnerRoot 'launch.json'
+        if ($case -eq 'success') {
+            if (-not $succeeded -or $environment -cnotmatch '^AGPH_ISCC=(.+)$' -or
+                -not $Matches[1].StartsWith($runnerRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -or
+                -not (Test-Path -LiteralPath $Matches[1] -PathType Leaf)) {
+                $details = Get-Content -LiteralPath (Join-Path $runnerRoot 'error.txt') -Raw -ErrorAction SilentlyContinue
+                throw "Inno installation did not export its owned compiler path. $details"
+            }
+            $launch = Get-Content -LiteralPath $launchPath -Raw | ConvertFrom-Json
+            if ($launch.window -cne 'Hidden' -or -not $launch.passThru -or
+                $launch.arguments -cnotcontains '/VERYSILENT' -or $launch.arguments -cnotcontains '/CURRENTUSER' -or
+                $launch.arguments -cnotcontains '/NORESTART' -or $launch.arguments -cnotcontains '/PORTABLE=1') { throw 'Inno installation was not a hidden unattended portable process.' }
+        } elseif ($succeeded -or $environment -or ($case -eq 'hash-mismatch' -and (Test-Path -LiteralPath $launchPath))) {
+            throw 'Inno installation accepted invalid bytes or published a failed compiler path.'
+        }
+        $checks++
+    }
     "Build contract checks: $checks passed."
 } finally { Remove-Item -LiteralPath $scratch -Recurse -Force }

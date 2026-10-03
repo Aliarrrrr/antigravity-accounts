@@ -79,7 +79,7 @@ Git 桥接在独立 home 中写受管 include，SSH 桥接创建指向宿主 `.s
 
 `Directory.Build.props` 为版本源；`global.json` 精确选择 .NET SDK 10.0.400，禁止自动滚动。开发入口要求 PowerShell 7，发行包桌面适配器仍使用 Windows 内置 PowerShell。`Common.ps1` 统一 SDK 查找、环境、锁定还原、构建及控制台测试器。
 
-`Publish-Next.ps1` 先运行锁定构建和默认测试，再选择项目本地 win-x64 自包含发布锁做锁定还原，无非锁定重算或锁文件恢复。完整应用包集合、版本和 NuGet 内容哈希须与测试图一致，实际 assets / deps 也须匹配。运行时及平台包单独记录；产物包含提交、SDK、锁文件及依赖摘要。Inno Setup 固定 6.7.3，数字版本取 GUI FileVersion。
+`Publish-Next.ps1` 先运行锁定构建和默认测试，再选择项目本地 win-x64 自包含发布锁做锁定还原，无非锁定重算或锁文件恢复。完整应用包集合、版本和 NuGet 内容哈希须与测试图一致，实际 assets / deps 也须匹配。运行时及平台包单独记录；产物包含提交、SDK、锁文件及依赖摘要。Inno Setup 固定 6.7.3，CI 从官方固定 release 下载并核对固定 SHA-256，以 portable 模式放入本次 runner 的独立目录；数字版本取 GUI FileVersion。
 
 PR CI 在干净 Windows runner 执行系统测试、便携包与安装 / 卸载冒烟。发布分为只读验证 job 和写权限上传 job；后者仅下载前者的验证产物。Actions 固定完整 SHA，checkout 不保留凭据，并设置超时及并发控制。
 

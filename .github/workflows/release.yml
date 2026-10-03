@@ -35,9 +35,7 @@ jobs:
           ./scripts/Build.ps1 -LockedRestore -Test -IncludeSystemTests
       - name: Install pinned Inno Setup
         shell: pwsh
-        run: |
-          choco install innosetup --version=6.7.3 --no-progress -y
-          if ($LASTEXITCODE -notin @(0,3010)) { throw 'Inno Setup 6.7.3 installation failed.' }
+        run: ./scripts/Install-InnoSetup.ps1
       - name: Build and validate release
         id: package
         shell: pwsh

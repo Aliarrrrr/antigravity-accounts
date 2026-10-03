@@ -9,6 +9,7 @@ internal static class NextCallbackTests
     public static IEnumerable<(string Name, Func<Task> Run)> Cases =>
     [
         ("Next launch and callback clear inherited rendering overrides", EnvironmentAsync),
+        ("Next native callback adapter keeps the held process identity after exit", NativeProcessIdentityAsync),
         ("Next callback success preserves the lease and URI boundary then clears its waiter", SuccessAsync),
         ("Next callback nonzero exit preserves the pending association", NonzeroAsync),
         ("Next callback launcher failure preserves its waiter and private diagnostics", LauncherFailureAsync),
@@ -70,6 +71,47 @@ internal static class NextCallbackTests
         TestAssert.Check(fixture.Controller.Terminated.Count == 0 && fixture.Process.Disposed, "Successful callback killed a process or leaked its handle.");
         using (File.Open(fixture.Vendor, FileMode.Open, FileAccess.Write, FileShare.Read)) { }
         await fixture.AssertPrivateAsync();
+    }
+
+    private static async Task NativeProcessIdentityAsync()
+    {
+        var executable = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe");
+        var info = new ProcessStartInfo(executable)
+        {
+            UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardOutput = true, RedirectStandardError = true,
+            WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.System)
+        };
+        foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-Command",
+            "[Console]::Out.WriteLine('NATIVE-CALLBACK-STDOUT'); [Console]::Error.WriteLine('NATIVE-CALLBACK-STDERR'); exit 0" })
+            info.ArgumentList.Add(argument);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var before = DateTimeOffset.UtcNow;
+        using var process = new WindowsCallbackProcessLauncher().Start(info);
+        var pid = process.Id;
+        var stdout = process.StandardOutput.ReadToEndAsync(deadline.Token);
+        var stderr = process.StandardError.ReadToEndAsync(deadline.Token);
+        try { await Task.WhenAll(process.WaitForExitAsync(deadline.Token), stdout, stderr); }
+        catch
+        {
+            deadline.Cancel();
+            // This helper belongs to this test; terminate it only when the held handle confirms its identity.
+            try
+            {
+                if (!process.HasExited && process.StartTimeUtc is var started && started != default && pid > 0)
+                    new WindowsProcessController().Terminate(new ProcessSnapshot(pid, 0, started, executable, "", 0));
+            }
+            catch (Exception error) when (error is InvalidOperationException or Win32Exception) { }
+            throw;
+        }
+        var after = DateTimeOffset.UtcNow;
+        var firstCreation = process.StartTimeUtc;
+        var secondCreation = process.StartTimeUtc;
+        TestAssert.Check(process.HasExited && process.ExitCode == 0 && pid > 0 && firstCreation != default &&
+            firstCreation == secondCreation && firstCreation >= before && firstCreation <= after,
+            "Native callback adapter lost the held process identity after the helper exited.");
+        TestAssert.Check((await stdout).Trim() == "NATIVE-CALLBACK-STDOUT" && (await stderr).Trim() == "NATIVE-CALLBACK-STDERR",
+            "Native callback adapter did not drain both redirected streams.");
     }
 
     private static async Task NonzeroAsync()
