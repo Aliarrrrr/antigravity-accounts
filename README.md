@@ -2,7 +2,7 @@
 
 在 Windows 上管理多个 Antigravity Profile。每个 Profile 使用独立的 home、user-data 和文件令牌存储；用户在官方 Antigravity / Google 窗口手动登录，已登录的实例可以并行运行。
 
-当前发行版本为 **0.5.0-next.2 实验版**，交付 .NET 10 / WPF GUI 与 `agprofile-next` CLI。2026-10-03 使用审计整改便携包完成了本机真实使用验证：A/B 使用不同账号、测试项目正常，A 普通关闭并重启后登录保留且 B 不受影响；专用空白 Profile 的日常 Chrome 授权回调成功，重启后登录保留，A/B 继续正常。**本轮结果属于整改便携包，既有发布标签尚未更新；SSH 实际连接仍未执行，完整人工验收保持 `manualAcceptance=false`。** 详见 [验证记录](docs/VALIDATION.md)。
+当前发行版本为 **0.5.0-next.2 实验版**，交付 .NET 10 / WPF GUI 与 `agprofile-next` CLI。2026-10-03 使用审计整改便携包完成了本机真实使用验证：A/B 使用不同账号、测试项目正常，A 普通关闭并重启后登录保留且 B 不受影响；专用空白 Profile 的日常 Chrome 授权回调成功，普通重启后登录保留，Git / SSH 桥接撤销及恢复通过，A/B 继续正常。**本轮结果属于整改便携包，既有发布标签尚未更新；SSH 实际连接受主机信任配置阻塞，尚未通过，完整人工验收保持 `manualAcceptance=false`。** 详见 [验证记录](docs/VALIDATION.md)。
 
 ## 安装与首次使用
 
