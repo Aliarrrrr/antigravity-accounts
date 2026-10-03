@@ -31,11 +31,11 @@ internal sealed class AtomicJsonStore(string managedRoot)
         PathSafety.EnsureContained(managedRoot, path);
         PathSafety.RejectExistingReparsePoints(managedRoot, path);
         PathSafety.RejectExistingReparsePoints(managedRoot, path + ".bak");
-        PathSafety.EnsureSafeDirectory(managedRoot, directory);
         var temporary = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
         var backupTemporary = temporary + ".backup";
         try
         {
+            PathSafety.EnsureSafeDirectory(managedRoot, directory);
             await using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.Asynchronous | FileOptions.WriteThrough))
             {
                 await System.Text.Json.JsonSerializer.SerializeAsync(stream, value, typeInfo, cancellationToken).ConfigureAwait(false);
@@ -46,11 +46,13 @@ internal sealed class AtomicJsonStore(string managedRoot)
             if (File.Exists(path))
             {
                 // Replace the backup directory entry instead of writing through an existing link.
-                File.Copy(path, backupTemporary, overwrite: false);
-                File.Move(backupTemporary, path + ".bak", overwrite: true);
+                await RetryContentionAsync(() => File.Copy(path, backupTemporary, overwrite: false), cancellationToken).ConfigureAwait(false);
+                await RetryContentionAsync(() => File.Move(backupTemporary, path + ".bak", overwrite: true), cancellationToken).ConfigureAwait(false);
             }
-            File.Move(temporary, path, overwrite: true);
+            await RetryContentionAsync(() => File.Move(temporary, path, overwrite: true), cancellationToken).ConfigureAwait(false);
         }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        { throw new ConfigurationException("Configuration could not be saved.", "configuration_write_failed", ex); }
         finally
         {
             foreach (var ownedTemporary in new[] { temporary, backupTemporary })
@@ -58,6 +60,20 @@ internal sealed class AtomicJsonStore(string managedRoot)
                 PathSafety.RejectExistingReparsePoints(managedRoot, ownedTemporary);
                 if (File.Exists(ownedTemporary)) File.Delete(ownedTemporary);
             }
+        }
+    }
+
+    private static async Task RetryContentionAsync(Action commit, CancellationToken token)
+    {
+        // Windows readers frequently omit delete sharing. Retry only native contention codes.
+        for (var attempt = 0; ; attempt++)
+        {
+            token.ThrowIfCancellationRequested();
+            try { commit(); return; }
+            catch (Exception ex) when (OperatingSystem.IsWindows() &&
+                ex is IOException or UnauthorizedAccessException &&
+                ex.HResult is unchecked((int)0x80070020) or unchecked((int)0x80070021) or unchecked((int)0x80070005) && attempt < 9)
+            { await Task.Delay(50, token).ConfigureAwait(false); }
         }
     }
 }

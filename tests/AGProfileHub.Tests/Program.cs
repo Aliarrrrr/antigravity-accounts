@@ -88,6 +88,7 @@ tests.AddRange(BoundaryTests.Cases.Select(test => new TestCase(test.Name,
     test.Name.StartsWith("Runner ", StringComparison.Ordinal) ? "Runner" : "Shared", test.Run)));
 tests.AddRange(NextProtocolTests.Cases.Select(test => new TestCase(test.Name, "Next", test.Run)));
 tests.AddRange(NextCallbackTests.Cases.Select(test => new TestCase(test.Name, "Next", test.Run)));
+tests.AddRange(AuditPersistenceTests.Cases.Select(test => new TestCase(test.Name, "Next", test.Run)));
 return await TestRunner.RunAsync(tests, args, Console.Out, Console.Error);
 
 static async Task TestIsolationSetupAsync()
@@ -629,10 +630,10 @@ static async Task TestRuntimeWriteFailureBarrierAsync()
     Directory.Delete(fixture.Paths.RuntimeStateRoot);
     File.WriteAllText(fixture.Paths.RuntimeStateRoot, "block runtime directory creation");
 
-    await ThrowsAsync<IOException>(() => fixture.Hub.LaunchAsync(a.Id));
+    await TestAssert.ThrowsCodeAsync<ConfigurationException>(() => fixture.Hub.LaunchAsync(a.Id), "configuration_write_failed");
     True(File.Exists(fixture.Paths.LaunchBarrierFile));
     Equal(1, fixture.World.RootCount);
-    await ThrowsAsync<IOException>(() => fixture.Hub.LaunchAsync(b.Id));
+    await TestAssert.ThrowsCodeAsync<ConfigurationException>(() => fixture.Hub.LaunchAsync(b.Id), "configuration_write_failed");
     Equal(1, fixture.World.LaunchCount);
 }
 

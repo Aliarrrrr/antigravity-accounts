@@ -207,7 +207,8 @@ public sealed class NextHubService
         await Bridge.ApplyAsync(id, (await Bridge.ReadAsync(id, token)).Enabled, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), token);
         return await LaunchCoreAsync(id, install, token);
     }
-    private async Task<NextRuntime> LaunchCoreAsync(Guid id, InstallationFingerprint install, CancellationToken token)
+    internal async Task<NextRuntime> LaunchCoreAsync(Guid id, InstallationFingerprint install, CancellationToken token,
+        Action<HubPaths, Guid, LaunchPlan>? launch = null)
     {
         using var lease = await NextCompatibility.HoldAsync(install, token);
         Paths.EnsureProfileLayout(id);
@@ -219,7 +220,7 @@ public sealed class NextHubService
         var plan = BuildPlan(Paths, id, install);
         try
         {
-            NextDesktopLauncher.Launch(Paths, id, plan);
+            (launch ?? NextDesktopLauncher.Launch)(Paths, id, plan);
             var deadline = DateTimeOffset.UtcNow.AddSeconds(120);
             while (DateTimeOffset.UtcNow < deadline)
             {
@@ -247,13 +248,23 @@ public sealed class NextHubService
             }
             throw new HubException("No independent file token store proof within 120 seconds.", "isolation_scope_unverified");
         }
-        catch
+        catch (ConfigurationException ex) when (ex.Code == "configuration_write_failed")
+        {
+            // A save failure is not failed isolation proof. Retain the last conservative state
+            // and leave live processes for an explicit, ownership-checked stop.
+            throw;
+        }
+        catch (Exception failure)
         {
             // This attempt's roots only; enumeration failure remains unknown, never means stopped.
             try { await StopOwnedAsync(id, install.Executable, true, state.AttemptUtc, CancellationToken.None); }
             catch (HubException) { state = state with { State = RuntimeState.Unknown }; }
-            await SaveRuntimeAsync(state with { State = state.State == RuntimeState.Unknown ? RuntimeState.Unknown : RuntimeState.Failed,
-                FileTokenStore = false, Detail = "Startup proof failed; inspect diagnostics before retrying." }, CancellationToken.None);
+            try
+            {
+                await SaveRuntimeAsync(state with { State = state.State == RuntimeState.Unknown ? RuntimeState.Unknown : RuntimeState.Failed,
+                    FileTokenStore = false, Detail = "Startup proof failed; inspect diagnostics before retrying." }, CancellationToken.None);
+            }
+            catch (Exception persistenceFailure) { failure.Data["RecoveryPersistenceFailure"] = persistenceFailure; }
             throw;
         }
     }
@@ -288,8 +299,16 @@ public sealed class NextHubService
             else await EndLoginAsync(id, token);
             return stopped;
         }
-        catch
-        { var latest = await RuntimeAsync(id, CancellationToken.None); await SaveRuntimeAsync(latest with { State = RuntimeState.Unknown, Detail = "Close incomplete; force stop is a separate explicit action." }, CancellationToken.None); throw; }
+        catch (Exception failure)
+        {
+            try
+            {
+                var latest = await RuntimeAsync(id, CancellationToken.None);
+                await SaveRuntimeAsync(latest with { State = RuntimeState.Unknown, Detail = "Close incomplete; force stop is a separate explicit action." }, CancellationToken.None);
+            }
+            catch (Exception persistenceFailure) { failure.Data["RecoveryPersistenceFailure"] = persistenceFailure; }
+            throw;
+        }
     }
     public async Task<NextRuntime> RestartAsync(Guid id, bool force = false, CancellationToken token = default)
     {
