@@ -8,11 +8,30 @@
 
 协议测试使用内部命令存储与交接进程适配器，没有修改本机真实协议或登录数据。本地发布构建通过，便携包清单、CLI、GUI 截图与快捷方式冒烟通过；改动依赖触发 NU1004，篡改 RID 发布锁被应用图检查拒绝。
 
-完整安装 / 卸载须在干净 Windows 环境执行；本机已有真实 Profile 或协议恢复记录，冒烟已提前拒绝。PR CI 已纳入便携包和安装器冒烟，干净环境结果以整改 PR 的 CI 检查为准。真实 Chrome 回调与 SSH 人工验收状态延续下列记录，`manualAcceptance=false`。
+完整安装 / 卸载须在干净 Windows 环境执行；本机已有真实 Profile 或协议恢复记录，冒烟已提前拒绝。PR CI 已纳入便携包和安装器冒烟，干净环境结果以整改 PR 的 CI 检查为准。本轮真实使用与历史人工验收分别记录如下，`manualAcceptance=false`。
+
+## 2026-10-03 整改便携包真实使用验收
+
+本轮在本机使用审计整改分支构建的便携包，未重新发布或更新既有 `v0.5.0-next.2` 标签。Chrome 回调测试使用专用空白 Profile，Git / SSH 桥接关闭；仅记录非敏感诊断与用户确认。
+
+| 项目 | 结果与证据 |
+| --- | --- |
+| A/B 并行实际使用 | 用户确认两个官方窗口正常、账号不同，实际测试项目正常 |
+| A 普通关闭并重启 | 用户确认登录保留，B 继续正常 |
+| 日常 Chrome 真实授权回调 | 用户确认日常 Chrome 授权与专用目标窗口登录正常；本地时间（Asia/Shanghai）17:58:38 新增 `received`，17:58:42 为 `completed` / `succeeded` |
+| 回调等待槽与进程归属 | 等待槽由 1 变为 0，专用 Profile 原受管根进程保持不变，A/B 未受影响 |
+| 专用 Profile 普通关闭并重启 | 用户明确确认登录保留，A/B 也正常 |
+| A/B 桥接只读核对 | Git 展开受管 include 后的作者名称、邮箱均与宿主配置一致；SSH junction 指向预期宿主目录，仅比较结果与链接元数据，不读取私钥、不修改宿主 |
+| SSH 实际连接 | 本轮未执行 |
+| 完整人工验收标记 | 保持 `manualAcceptance=false`，未设置本机人工通过标记 |
+
+本轮已确认日常 Chrome → Windows 协议 → Next → 专用官方窗口的真实授权回调链路及重启后的登录保留。结果仅适用于本轮整改便携包与本机环境；下列 2026-10-02 历史未确认结果保持原样。
+
+## 2026-10-02 历史验证记录
 
 记录日期：2026-10-02。测试对象为 Windows 上的官方 Antigravity 2.19.1 与 Profile Hub Next，探测策略修订号 2。仅记录非敏感结果，不公开机器用户名、绝对机器路径、Profile ID、进程 ID、账号或回调内容。
 
-## 自动验证
+### 自动验证
 
 | 项目 | 结果与范围 |
 | --- | --- |
@@ -29,7 +48,7 @@
 
 发布证据：[next.2 构建与回归测试](https://github.com/Aliarrrrr/antigravity-profile-hub/actions/runs/37010881277)、[完整发布流水线](https://github.com/Aliarrrrr/antigravity-profile-hub/actions/runs/37010885225)、[Windows x64 下载](https://github.com/Aliarrrrr/antigravity-profile-hub/releases/tag/v0.5.0-next.2)。旧源码和未提交工作已保存到远端 `archive/*-20261002` 分支；本地旧副本和重复产物采用 Windows 回收站清理，实际 Profile 数据及并行 Rust 开发目录保留。
 
-## 人工验证
+### 人工验证
 
 | 项目 | 结果 |
 | --- | --- |
@@ -52,6 +71,6 @@
 
 当前保持实验版，发行清单中的 `manualAcceptance=false`，本机完整人工通过标记未设置。Workspace 自动打开仍为 `unsupported`，手动 Workspace 通过不会改变这个能力。
 
-后续按 [人工验收计划](../NEXT_MANUAL_TEST_PLAN.md) 完成适用项目，重点补充常用 Chrome 的真实登录回调与实际 SSH 连接。仅在证据完整时由用户明确设置 `compatibility accept --manual-passed`；发行流水线不得自动设置。
+后续按 [人工验收计划](../NEXT_MANUAL_TEST_PLAN.md) 完成剩余适用项目，重点补充实际 SSH 连接；日常 Chrome 的真实登录回调已在本轮整改便携包验收通过。仅在证据完整时由用户明确设置 `compatibility accept --manual-passed`；发行流水线不得自动设置。
 
 清理本地时保留已登录的 Profile 数据、宿主桥接目标与当前 Workspace。旧发布包可以在 GitHub 保留后删除；删除注册回调所指向的旧包前，必须先将处理器更新到保留的新包。

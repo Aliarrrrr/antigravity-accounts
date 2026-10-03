@@ -2,11 +2,13 @@
 
 在 Windows 上管理多个 Antigravity Profile。每个 Profile 使用独立的 home、user-data 和文件令牌存储；用户在官方 Antigravity / Google 窗口手动登录，已登录的实例可以并行运行。
 
-当前版本为 **0.5.0-next.2 实验版**，交付 .NET 10 / WPF GUI 与 `agprofile-next` CLI。2026-10-02 在 Antigravity 2.19.1 上完成了部分人工验证：A/B 分别登录、A 重启后保留登录且 B 不受影响、两个 Workspace 手动打开均正常，C 也登录成功。**日常 Chrome 的真实登录回调端到端尚未确认，SSH 实际连接已跳过，完整人工验收保持 `manualAcceptance=false`。** 详见 [验证记录](docs/VALIDATION.md)。
+当前发行版本为 **0.5.0-next.2 实验版**，交付 .NET 10 / WPF GUI 与 `agprofile-next` CLI。2026-10-03 使用审计整改便携包完成了本机真实使用验证：A/B 使用不同账号、测试项目正常，A 普通关闭并重启后登录保留且 B 不受影响；专用空白 Profile 的日常 Chrome 授权回调成功，重启后登录保留，A/B 继续正常。**本轮结果属于整改便携包，既有发布标签尚未更新；SSH 实际连接仍未执行，完整人工验收保持 `manualAcceptance=false`。** 详见 [验证记录](docs/VALIDATION.md)。
 
 ## 安装与首次使用
 
 从 [v0.5.0-next.2 下载页](https://github.com/Aliarrrrr/antigravity-profile-hub/releases/tag/v0.5.0-next.2) 下载 Windows x64 安装器或便携 ZIP。发行包包含 .NET 运行时，无需另装 SDK 或 PowerShell 7；桌面适配器和桥接使用 Windows 内置 PowerShell。
+
+上述下载页仍为既有实验发行包。本轮审计整改和真实 Chrome 回调验收使用整改分支便携包，尚未发布新版本。
 
 - 安装器默认位置：`%LOCALAPPDATA%/Programs/AntigravityProfileHubNext`。
 - 便携版：解压完整 `AGProfileHubNext` 目录，双击 `Start Next.cmd`。保留其中的 `hub` 与 `cli` 目录。
@@ -21,7 +23,7 @@
 4. 点击“注册回调”，选中 Profile 并点击“启动”。登录前点击“准备登录”，然后在该 Profile 的官方窗口完成登录。
 5. 先完成或取消当前 Profile 的授权等待，再准备下一个 Profile 的登录。已登录的窗口可以保持运行。
 
-若官方窗口已登录，而 Next 仍保留等待状态，可选中对应 Profile 点击“取消等待”，再继续下一次登录。这只清除管理器的等待槽。浏览器回调仍属于待验证能力，不能据此认定整条回调链已经通过。
+若官方窗口已登录，而 Next 仍保留等待状态，可选中对应 Profile 点击“取消等待”，再继续下一次登录。这只清除管理器的等待槽，不能据此认定该次回调链已经通过；本轮成功验收同时确认了真实回调接收、交接完成和目标窗口登录。
 
 Next 仅保存 Workspace 路径；请在对应官方窗口手动打开项目。当前没有验证通过的自动 Workspace 转发接口。账号标签也由用户填写，管理器不读取登录账号或自动执行 Google 登录。
 
