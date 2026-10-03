@@ -90,6 +90,7 @@ tests.AddRange(NextProtocolTests.Cases.Select(test => new TestCase(test.Name, "N
 tests.AddRange(NextCallbackTests.Cases.Select(test => new TestCase(test.Name, "Next", test.Run)));
 tests.AddRange(AuditPersistenceTests.Cases.Select(test => new TestCase(test.Name, "Next", test.Run)));
 tests.AddRange(AuditClassificationTests.Cases.Select(test => new TestCase(test.Name, "Next", test.Run)));
+tests.AddRange(AuditProfileCreationTests.Cases.Select(test => new TestCase(test.Name, "Shared", test.Run)));
 return await TestRunner.RunAsync(tests, args, Console.Out, Console.Error);
 
 static async Task TestIsolationSetupAsync()
@@ -385,7 +386,7 @@ static Task TestLaunchWrapperContentAsync()
 {
     // A Chinese Windows user name makes the managed home non-ASCII; ASCII
     // encoding would silently corrupt it into '?'.
-    var home = "C:\\Users\\Âº†‰∏â\\AppData\\Local\\AntigravityProfileHub\\profiles\\abc\\home";
+    var home = "C:\\Users\\’≈»˝\\AppData\\Local\\AntigravityProfileHub\\profiles\\abc\\home";
     var content = ProcessLocalBackend.BuildLaunchWrapperContent(
         new Dictionary<string, string>
         {
@@ -774,8 +775,8 @@ static async Task TestShortcutAsync()
 {
     if (!OperatingSystem.IsWindows()) return;
     using var fixture = new Fixture();
-    var profile = await fixture.Hub.CreateProfileAsync("ÊµãËØï / A");
-    var directory = Path.Combine(fixture.Root, "Ê°åÈù¢ with spaces");
+    var profile = await fixture.Hub.CreateProfileAsync("≤‚ ‘ / A");
+    var directory = Path.Combine(fixture.Root, "◊¿√Ê with spaces");
     Directory.CreateDirectory(directory);
     var path = await fixture.Hub.CreateShortcutAsync(profile.Id, fixture.Executable, directory);
     True(File.Exists(path) && Path.GetDirectoryName(path) == directory, "shortcut must be created in the Unicode destination");

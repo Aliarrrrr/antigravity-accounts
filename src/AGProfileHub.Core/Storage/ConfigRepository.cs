@@ -34,6 +34,66 @@ public sealed class ConfigRepository
         return result;
     }
 
+    // Preparation, persistence, reconciliation and compensation share one config lock.
+    // A thrown save may already have committed: never infer absence from the exception.
+    internal async Task<ProfileRegistration> CreateProfileAsync(ProfileRegistration profile,
+        Action prepare, Action<Exception> compensate, CancellationToken cancellationToken = default)
+    {
+        await using var held = await FileLock.AcquireAsync(_paths.GlobalConfigLock, LockTimeout, cancellationToken);
+        var current = await ReadProfilesUnlockedAsync(cancellationToken);
+        Validate(current);
+        if (current.Profiles.Any(p => string.Equals(p.Name.Trim(), profile.Name.Trim(), StringComparison.OrdinalIgnoreCase)))
+            throw new HubException($"A profile named '{profile.Name}' already exists. Profile names must be unique.", "profile_name_conflict");
+        var next = current with { Profiles = [.. current.Profiles, profile] };
+        Validate(next);
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            prepare();
+            await _json.WriteAsync(_paths.ProfilesFile, next, HubJsonContext.Default.ProfilesDocument, cancellationToken);
+            return profile;
+        }
+        catch (Exception primary)
+        {
+            await ReconcileFailedCreationAsync(profile.Id, primary, compensate);
+            throw;
+        }
+    }
+
+    // Called only while GlobalConfigLock is held. Deliberately ignores cancellation.
+    private async Task ReconcileFailedCreationAsync(Guid id, Exception primary, Action<Exception> compensate)
+    {
+        bool registered;
+        try
+        {
+            PathSafety.RejectExistingReparsePoints(_paths.DataRoot, _paths.ProfilesFile);
+            var exists = true;
+            try
+            {
+                if ((File.GetAttributes(_paths.ProfilesFile) & FileAttributes.Directory) != 0)
+                    throw new IOException("Profile registry is a directory.");
+            }
+            catch (FileNotFoundException) { exists = false; }
+            catch (DirectoryNotFoundException) { exists = false; }
+            registered = false;
+            if (exists)
+            {
+                var actual = await _json.ReadAsync(_paths.ProfilesFile, HubJsonContext.Default.ProfilesDocument,
+                    () => throw new IOException("Profile registry disappeared during reconciliation."), CancellationToken.None);
+                Validate(actual);
+                registered = actual.Profiles.Any(p => p.Id == id);
+            }
+        }
+        catch (Exception reconciliation)
+        {
+            primary.Data["ProfileCreationOutcome"] = "Unknown";
+            primary.Data["ProfileCreationReconciliationFailure"] = reconciliation;
+            return;
+        }
+        primary.Data["ProfileCreationOutcome"] = registered ? "Registered" : "NotRegistered";
+        if (!registered) compensate(primary);
+    }
+
     public async Task<HubSettings> ReadSettingsAsync(CancellationToken cancellationToken = default)
     {
         await using var held = await FileLock.AcquireAsync(_paths.GlobalConfigLock, LockTimeout, cancellationToken);

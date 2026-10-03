@@ -48,17 +48,8 @@ public sealed class ProfileManager(ConfigRepository repository, HubPaths paths)
             throw new ConfigurationException("Unknown isolation backend.", "invalid_isolation_backend");
         var now = DateTimeOffset.UtcNow;
         var profile = new ProfileRegistration(Guid.NewGuid(), name, workspacePath, now, now) { Backend = backend };
-        paths.EnsureProfileLayout(profile.Id);
-        return await repository.UpdateProfilesAsync(document =>
-        {
-            // Names address profiles interactively, so a duplicate would make
-            // every lookup ambiguous.
-            if (document.Profiles.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)))
-                throw new HubException($"A profile named '{name}' already exists. Profile names must be unique.", "profile_name_conflict");
-            var profiles = document.Profiles.ToList();
-            profiles.Add(profile);
-            return (document with { Profiles = profiles }, profile);
-        }, cancellationToken);
+        var layout = new ProfileCreationLayout(paths, profile.Id);
+        return await repository.CreateProfileAsync(profile, layout.Prepare, layout.Compensate, cancellationToken);
     }
 
     public Task<ProfileRegistration> RenameAsync(Guid id, string name, CancellationToken cancellationToken = default)
@@ -68,7 +59,7 @@ public sealed class ProfileManager(ConfigRepository repository, HubPaths paths)
         {
             var index = document.Profiles.FindIndex(p => p.Id == id);
             if (index < 0) throw new ProfileNotFoundException(id);
-            if (document.Profiles.Any(p => p.Id != id && string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)))
+            if (document.Profiles.Any(p => p.Id != id && string.Equals(p.Name.Trim(), name, StringComparison.OrdinalIgnoreCase)))
                 throw new HubException($"A profile named '{name}' already exists. Profile names must be unique.", "profile_name_conflict");
             var updated = document.Profiles[index] with { Name = name, UpdatedUtc = DateTimeOffset.UtcNow };
             var profiles = document.Profiles.ToList();
@@ -112,4 +103,65 @@ public sealed class ProfileManager(ConfigRepository repository, HubPaths paths)
         if (result is not null && !Directory.Exists(result)) throw new HubException($"Workspace directory does not exist: {result}", "workspace_not_found");
         return result;
     }
+}
+
+
+// Records only successful exclusive creates. Path checks are conservative but cannot
+// provide handle-based identity guarantees against hostile external replacement.
+internal sealed class ProfileCreationLayout(HubPaths paths, Guid id)
+{
+    private readonly List<string> owned = [];
+
+    public void Prepare()
+    {
+        foreach (var path in new[] { paths.ProfileRoot(id), paths.UserData(id), paths.Home(id), paths.Roaming(id), paths.Local(id), paths.Temp(id) })
+            CreateDirectory(path);
+    }
+
+    internal void CreateDirectory(string path)
+    {
+        PathSafety.EnsureContained(paths.ProfileRoot(id), path);
+        PathSafety.RejectExistingReparsePoints(paths.DataRoot, path);
+        // Native mkdir fails if the entry already exists; never adopt an existing layout.
+        var created = OperatingSystem.IsWindows()
+            ? CreateDirectoryWindows(path, IntPtr.Zero)
+            : MkdirUnix(path, 448) == 0; // 0700
+        if (!created) throw new IOException($"Cannot exclusively create profile directory: {path}",
+            new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastPInvokeError()));
+        owned.Add(path);
+        PathSafety.RejectExistingReparsePoints(paths.DataRoot, path);
+    }
+
+    public void Compensate(Exception primary)
+    {
+        var failures = new List<Exception>();
+        foreach (var path in owned.AsEnumerable().Reverse())
+        {
+            try
+            {
+                PathSafety.EnsureContained(paths.ProfileRoot(id), path);
+                PathSafety.RejectExistingReparsePoints(paths.DataRoot, path);
+                // Nonrecursive deletion preserves files and untracked descendants.
+                var attributes = File.GetAttributes(path);
+                if ((attributes & FileAttributes.Directory) == 0)
+                    throw new IOException($"Owned profile directory was replaced by a file: {path}");
+                Directory.Delete(path, recursive: false);
+            }
+            catch (FileNotFoundException) { }
+            catch (DirectoryNotFoundException) { }
+            catch (Exception ex) { failures.Add(ex); }
+        }
+        if (failures.Count != 0)
+        {
+            if (primary.Data["CleanupFailures"] is Exception previous) failures.Insert(0, previous);
+            primary.Data["CleanupFailures"] = new AggregateException("Profile layout compensation was incomplete.", failures);
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", EntryPoint = "CreateDirectoryW", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool CreateDirectoryWindows(string path, IntPtr securityAttributes);
+
+    [System.Runtime.InteropServices.DllImport("libc", EntryPoint = "mkdir", SetLastError = true)]
+    private static extern int MkdirUnix([System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPUTF8Str)] string path, uint mode);
 }
