@@ -33,6 +33,7 @@ internal sealed class AtomicJsonStore(string managedRoot)
         PathSafety.RejectExistingReparsePoints(managedRoot, path + ".bak");
         var temporary = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
         var backupTemporary = temporary + ".backup";
+        Exception? failure = null;
         try
         {
             PathSafety.EnsureSafeDirectory(managedRoot, directory);
@@ -52,13 +53,38 @@ internal sealed class AtomicJsonStore(string managedRoot)
             await RetryContentionAsync(() => File.Move(temporary, path, overwrite: true), cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        { throw new ConfigurationException("Configuration could not be saved.", "configuration_write_failed", ex); }
+        {
+            var classified = new ConfigurationException("Configuration could not be saved.", "configuration_write_failed", ex);
+            failure = classified;
+            throw classified;
+        }
+        catch (Exception ex) { failure = ex; throw; }
         finally
         {
+            List<Exception>? cleanupFailures = null;
             foreach (var ownedTemporary in new[] { temporary, backupTemporary })
             {
-                PathSafety.RejectExistingReparsePoints(managedRoot, ownedTemporary);
-                if (File.Exists(ownedTemporary)) File.Delete(ownedTemporary);
+                try
+                {
+                    PathSafety.RejectExistingReparsePoints(managedRoot, ownedTemporary);
+                    if (File.Exists(ownedTemporary)) File.Delete(ownedTemporary);
+                }
+                catch (Exception ex) { (cleanupFailures ??= []).Add(ex); }
+            }
+            if (cleanupFailures is not null)
+            {
+                var cleanup = new AggregateException("Owned configuration temporary cleanup failed.", cleanupFailures);
+                if (failure is not null) failure.Data["CleanupFailures"] = cleanup;
+                else
+                {
+                    // Preserve known path contracts; standalone IO still obeys the save contract.
+                    var first = cleanupFailures[0];
+                    var classified = first is IOException or UnauthorizedAccessException
+                        ? new ConfigurationException("Configuration temporary cleanup failed.", "configuration_write_failed", first)
+                        : first;
+                    classified.Data["CleanupFailures"] = cleanup;
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(classified).Throw();
+                }
             }
         }
     }

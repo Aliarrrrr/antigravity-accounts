@@ -12,7 +12,9 @@ internal static class AuditPersistenceTests
         ("Audit persistence independent process reader is released and reaped", ProcessAsync),
         ("Audit persistence startup write failure never invokes proof cleanup", StartupAsync),
         ("Audit persistence failure-state write preserves the startup cause", FailureCauseAsync),
-        ("Audit persistence failed stop recovery retains enumeration cause", StopCauseAsync)
+        ("Audit persistence failed stop recovery retains enumeration cause", StopCauseAsync),
+        ("Audit persistence cleanup contention preserves exhausted save fault", () => CleanupContentionAsync(false)),
+        ("Audit persistence cleanup contention preserves cancellation and token", () => CleanupContentionAsync(true))
     ];
     private static void Check(bool condition, string message) { if (!condition) throw new Exception(message); }
     private static Task Write(string root, string path, CancellationToken token = default) =>
@@ -150,5 +152,56 @@ internal static class AuditPersistenceTests
             Check(controller.Terminations == 0, "Unknown process state was terminated.");
         }
         finally { reader?.Dispose(); }
+    }
+    private static async Task CleanupContentionAsync(bool cancel)
+    {
+        using var owned = new OwnedTestDirectory();
+        var path = Path.Combine(owned.Root, "state.json");
+        await File.WriteAllTextAsync(path, Original);
+        await File.WriteAllTextAsync(path + ".bak", "previous backup");
+        using var targetReader = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        // Keep the backup move pending too, so both owned cleanup paths exist.
+        using var backupReader = new FileStream(path + ".bak", FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var cancellation = new CancellationTokenSource();
+        var writing = Write(owned.Root, path, cancellation.Token);
+        FileStream? temporaryReader = null;
+        try
+        {
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+            while (temporaryReader is null && !writing.IsCompleted && DateTimeOffset.UtcNow < deadline)
+            {
+                var temporary = Directory.EnumerateFiles(owned.Root, ".state.json.*.tmp").SingleOrDefault();
+                if (temporary is not null)
+                    try { temporaryReader = new FileStream(temporary, FileMode.Open, FileAccess.Read, FileShare.ReadWrite); }
+                    catch (IOException) { } // Serializer still owns its exclusive stream.
+                if (temporaryReader is null) await Task.Delay(1);
+            }
+            Check(temporaryReader is not null, "Did not acquire the generated temporary during contention.");
+            // Serialization can resume on another thread; wait for the actual backup-copy signal.
+            while (!Directory.EnumerateFiles(owned.Root, "*.tmp.backup").Any() &&
+                !writing.IsCompleted && DateTimeOffset.UtcNow < deadline) await Task.Delay(1);
+            Check(Directory.EnumerateFiles(owned.Root, "*.tmp.backup").Any(), "Backup temporary was not created.");
+            if (cancel) cancellation.Cancel();
+            Exception? observed = null;
+            try { await writing; } catch (Exception ex) { observed = ex; }
+            if (cancel)
+                Check(observed is OperationCanceledException stopped && stopped.CancellationToken == cancellation.Token,
+                    "Cleanup replaced cancellation or its original token: " + observed?.GetType().Name);
+            else
+                Check(observed is ConfigurationException { Code: "configuration_write_failed", InnerException: IOException or UnauthorizedAccessException },
+                    "Cleanup replaced the classified save fault: " + observed?.GetType().Name);
+            Check(observed!.Data["CleanupFailures"] is AggregateException cleanup &&
+                cleanup.InnerExceptions.Count == 1 && cleanup.InnerExceptions[0] is IOException or UnauthorizedAccessException,
+                "Secondary cleanup failure was not retained.");
+            Check(!Directory.EnumerateFiles(owned.Root, "*.tmp.backup").Any(), "Second owned temporary cleanup was skipped.");
+            Check(await File.ReadAllTextAsync(path) == Original, "Failed cleanup changed original JSON.");
+            Check(await File.ReadAllTextAsync(path + ".bak") == "previous backup", "Failed write changed existing backup.");
+        }
+        finally
+        {
+            cancellation.Cancel();
+            try { await writing; } catch (Exception) { } // Observe completion before releasing test-owned handles.
+            temporaryReader?.Dispose();
+        }
     }
 }
