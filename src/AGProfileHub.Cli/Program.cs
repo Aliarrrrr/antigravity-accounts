@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AGProfileHub.Core;
+using AGProfileHub.Cli;
 
 return await NextCli.RunAsync(args);
 internal static class NextCli
@@ -22,17 +23,19 @@ internal static class NextCli
                 if (index + 1 >= list.Count || !Path.IsPathFullyQualified(list[index + 1])) throw new HubException("Data root must be absolute.", "usage_error");
                 root = list[index + 1]; list.RemoveRange(index, 2);
             }
-            if (list.Count == 0 || list[0] is "help" or "--help" or "-h") { Console.WriteLine(json ? JsonSerializer.Serialize(new { help = Help }, Json) : Help); return 0; }
+            if (list.Count == 0 || list[0] is "help" or "--help" or "-h") { Console.WriteLine(json ? JsonSerializer.Serialize(new { help = Help, sharedWorkspaces = SharedCli.Help }, Json) : Help + Environment.NewLine + SharedCli.Help); return 0; }
             if (list[0] is "version" or "--version") { Console.WriteLine(JsonSerializer.Serialize(new { version = HubVersion.Version, application = "AntigravityProfileHubNext" }, Json)); return 0; }
             var result = await ExecuteAsync(new NextHubService(root), list, cancellation.Token);
-            Console.WriteLine(JsonSerializer.Serialize(result, Json)); return 0;
+            Console.WriteLine(JsonSerializer.Serialize(result, Json)); return result is AccountSwitchResult { Succeeded: false } ? 1 : 0;
         }
         catch (OperationCanceledException) { Console.Error.WriteLine("Cancelled; inspect status before retrying."); return 130; }
         catch (Exception ex)
         {
             var code = ex is HubException known ? known.Code : "operation_failed";
             var message = ex is HubException ? ex.Message : "Operation failed: " + ex.GetType().Name + ". Files preserved; inspect diagnostics.";
-            Console.Error.WriteLine(json ? JsonSerializer.Serialize(new { error = new { code, message } }, Json) : code + ": " + message);
+            var importId = ex.Data["SharedImportId"] is Guid receipt ? receipt : (Guid?)null;
+            var recovery = importId is null ? "" : " Import recovery ID: " + importId + ". Use group restore-import with the original group.";
+            Console.Error.WriteLine(json ? JsonSerializer.Serialize(new { error = new { code, message, importId } }, Json) : code + ": " + message + recovery);
             return code == "usage_error" ? 2 : 1;
         }
     }
@@ -40,6 +43,7 @@ internal static class NextCli
     { if (args.Count < min || args.Count > max) throw new HubException("Invalid arguments. Run help.", "usage_error"); }
     private static async Task<object> ExecuteAsync(NextHubService hub, List<string> command, CancellationToken token)
     {
+        if (command[0].Equals("group", StringComparison.OrdinalIgnoreCase)) return await SharedCli.ExecuteAsync(hub, command.Skip(1).ToArray(), token);
         var verb = command[0].ToLowerInvariant(); var tail = command.Skip(1).ToList(); var force = tail.Remove("--force");
         async Task<ProfileRegistration> Profile() { if (tail.Count == 0) throw new HubException("Profile required.", "usage_error"); return await hub.Profiles.ResolveAsync(tail[0], token); }
         switch (verb)

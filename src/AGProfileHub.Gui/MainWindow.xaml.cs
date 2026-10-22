@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     }
     private void Show(object value) => Output.Text = JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true });
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RunAsync(RefreshAsync);
+    private void SharedWorkspaces_Click(object sender, RoutedEventArgs e) => new SharedWorkspacesWindow(_hub) { Owner = this }.ShowDialog();
     private async void Create_Click(object sender, RoutedEventArgs e)
     {
         var name = InputDialog.Ask(this, "创建 Profile · 1/2", "账号标签由你填写；管理器不读取登录凭据。"); if (string.IsNullOrWhiteSpace(name)) return;

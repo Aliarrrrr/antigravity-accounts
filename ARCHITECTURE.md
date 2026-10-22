@@ -2,6 +2,8 @@
 
 当前生产入口为 .NET 10 WPF GUI 与 `agprofile-next` CLI，两者共用 `NextHubService`。本版管理独立应用状态和进程生命周期；登录操作由用户在官方窗口完成。
 
+共享工作空间开发入口使用 `SharedWorkspaceService` 和 `AccountSwitchCoordinator`，原有生命周期入口保留。共享组持有内容，成员只引用原 Profile；组内操作共用文件锁。会话按数据库、brain、annotations 判断冲突，项目关联从已确认的 JSON 和摘要索引读取；缺失或冲突引用会阻止项目导入。`SharedConversationDatabase` 使用系统 SQLite 只读检查已确认的本地 App 格式，不写源数据库或合并索引。`ClientRestoreValidated=false` 表示尚未检查官方恢复。协调器失败时只尝试重连原服务并重新确认身份与上下文，否则保持 `RecoveryRequired`。没有凭据存储或邮箱读取接口，生产客户端适配始终返回 `shared_client_unsupported`。具体范围见 [共享工作空间说明](docs/SHARED_WORKSPACES.md)。
+
 ## 项目与责任
 
 | 位置 | 责任 |

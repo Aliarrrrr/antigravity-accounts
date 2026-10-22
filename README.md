@@ -2,6 +2,8 @@
 
 > Windows 上的 Antigravity 多账号管理器。为工作、个人和测试账号建立各自的 Profile，在官方窗口完成登录，让多个已登录实例一起运行。
 
+本开发分支增加了共享组与选择性文件导入入口，见 [共享工作空间说明](docs/SHARED_WORKSPACES.md)。Hub 不管理账号凭据或自动获取邮箱。无感账号切换尚不可用；会话索引尚未导入，文件导入不代表原客户端可恢复。默认多开方式保留。
+
 [![版本](https://img.shields.io/badge/version-0.5.0--next.3-orange)](https://github.com/Aliarrrrr/antigravity-profile-hub/releases/tag/v0.5.0-next.3)
 ![Windows x64](https://img.shields.io/badge/Windows-x64-0078D4)
 ![.NET 10 / WPF](https://img.shields.io/badge/.NET_10-WPF-512BD4)

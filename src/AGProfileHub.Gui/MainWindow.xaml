@@ -9,6 +9,7 @@
   <WrapPanel Grid.Row="1" Margin="0,0,0,14" x:Name="Toolbar">
    <Button Content="创建 Profile" Click="Create_Click" Margin="0,0,8,8" Padding="12,8"/>
    <Button Content="刷新" Click="Refresh_Click" Margin="0,0,8,8" Padding="12,8"/>
+   <Button Content="共享工作空间…" Click="SharedWorkspaces_Click" Margin="0,0,8,8" Padding="12,8"/>
    <Button Content="应用路径" Click="Configure_Click" Margin="0,0,8,8" Padding="12,8"/>
    <Button Content="探测兼容性" Click="Probe_Click" Margin="0,0,8,8" Padding="12,8"/>
    <Button Content="兼容性 / 诊断" Click="Doctor_Click" Margin="0,0,8,8" Padding="12,8"/>
