@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <title>Accounts</title>
+  <rect x="13" y="13" width="102" height="102" rx="24" fill="#172554" stroke="#38bdf8" stroke-width="2"/>
+  <circle cx="49" cy="48" r="12" fill="#e0f2fe"/>
+  <path d="M28 84c0-12 9-21 21-21s21 9 21 21v4H28z" fill="#e0f2fe"/>
+  <circle cx="82" cy="53" r="10" fill="#38bdf8"/>
+  <path d="M73 71a18 18 0 0 1 27 16v1H77v-4c0-5-1-9-4-13z" fill="#38bdf8"/>
+</svg>

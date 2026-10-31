@@ -28,3 +28,6 @@ Antigravity Profile Hub — Codex Master Prompt.md
 **/target/
 .worktrees/
 .superpowers/
+
+# Generated native program copies used during local adapter development.
+packages/hostauth-adapter/.local-validation/

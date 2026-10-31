@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Antigravity.Accounts</AssemblyName>
+    <NuGetLockFilePath Condition="'$(RuntimeIdentifier)' == 'win-x64' and '$(SelfContained)' == 'true'">$(MSBuildProjectDirectory)/packages.win-x64.lock.json</NuGetLockFilePath>
+    <Version>0.4.0-preview.7</Version>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(PublishSingleFile)' == 'true'">
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Antigravity.Accounts.Tests" />
+  </ItemGroup>
+</Project>
