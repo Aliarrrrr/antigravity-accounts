@@ -2,7 +2,7 @@
 
 const { spawn } = require('node:child_process');
 
-const METHODS = new Set(['getToken', 'getStatus', 'listAccounts', 'selectAccount', 'setPrimaryAccount', 'beginSwitch', 'commitSwitch', 'cancelSwitch', 'configureOAuth', 'beginLogin', 'removeAccount', 'shutdown']);
+const METHODS = new Set(['getToken', 'getStatus', 'listAccounts', 'selectAccount', 'setPrimaryAccount', 'beginSwitch', 'commitSwitch', 'cancelSwitch', 'configureOAuth', 'beginLogin', 'removeAccount', 'renameAccount', 'shutdown']);
 const MAX_LINE_BYTES = 128 * 1024;
 
 class ComponentError extends Error {

@@ -7,12 +7,13 @@ const { ComponentClient, ComponentError } = require('./component-client.cjs');
 const { SwitchCoordinator } = require('./switch-coordinator.cjs');
 const { TokenBarrier } = require('./token-barrier.cjs');
 const { createModelMenuBridge } = require('./model-menu-bridge.cjs');
+const { createAccountPreferences } = require('./account-preferences.cjs');
 const { refreshNativeViews } = require('./native-view.cjs');
 const { createNativeTaskAdapter, resolveNativeProgram } = require('./native-task-adapter.cjs');
 
 const PROVIDER_NATIVE_PATH = 'hostauth-addon/native/language_server.exe';
 
-const PUBLIC_METHODS = new Set(['getStatus', 'listAccounts', 'selectAccount', 'setPrimaryAccount', 'cancelSwitch', 'beginLogin', 'removeAccount', 'confirmModelSelection']);
+const PUBLIC_METHODS = new Set(['getStatus', 'listAccounts', 'selectAccount', 'setPrimaryAccount', 'cancelSwitch', 'beginLogin', 'removeAccount', 'renameAccount', 'confirmModelSelection']);
 const LOCKED_METHODS = new Set(['setPrimaryAccount', 'configureOAuth']);
 const STARTUP_ACCOUNT_ERRORS = new Set(['account_reauth_required', 'account_not_selected', 'oauth_request_failed',
   'oauth_response_invalid', 'oauth_refresh_token_missing', 'operation_cancelled', 'account_operation_failed']);
@@ -185,6 +186,7 @@ async function prepare({ electron, parent, resourcesPath = process.resourcesPath
   });
   const modelMenuBridge = electron?.ipcMain ? createModelMenuBridge({ electron,
     client: publicClient,
+    preferences: createAccountPreferences(path.join(path.dirname(activationStatePath), 'account-preferences.json')),
     isAccountWindow: window => ui.isAccountWindow(window),
   }) : undefined;
   try {

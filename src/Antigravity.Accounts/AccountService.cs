@@ -265,6 +265,22 @@ internal sealed class AccountService : IAsyncDisposable
         finally { _selectionGate.Release(); }
     }
 
+    public async Task RenameAccountAsync(Guid id, string? label, CancellationToken token = default)
+    {
+        label = ValidateLabel(label);
+        await _selectionGate.WaitAsync(token);
+        try
+        {
+            RequireNoSwitch();
+            await _store.UpdateAsync(s =>
+            {
+                var account = s.Accounts.FirstOrDefault(a => a.Id == id) ?? throw NotFound();
+                account.Label = label ?? (string.IsNullOrWhiteSpace(account.Email) ? "Google account" : account.Email);
+            }, token);
+        }
+        finally { _selectionGate.Release(); }
+    }
+
     public async Task RemoveAccountAsync(Guid id, CancellationToken token = default)
     {
         await _selectionGate.WaitAsync(token);

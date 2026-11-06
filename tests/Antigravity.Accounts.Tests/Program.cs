@@ -14,6 +14,8 @@ var cases = new (string Name, Func<Task> Run)[]
     ("direct selection freezes after token request", FrozenSelection),
     ("primary identity and attached account deletion are constrained", PrimaryIdentity),
     ("deleting an inactive attached account preserves both remaining identities and switches", RemoveInactiveAttached),
+    ("account label edits persist without changing active identity or credentials", RenameAccount),
+    ("account label edits reject invalid requests and pending switches", RenameAccountBoundaries),
     ("switch commit changes quota identity without restarting service", SwitchCommit),
     ("pending switch blocks all token requests until cancellation", SwitchCancellation),
     ("failed target refresh preserves prior selected account", FailedSwitch),
@@ -124,6 +126,62 @@ async Task PrimaryIdentity()
     for (var i = 0; i < 100 && (await service.GetStatusAsync()).Login.State == "pending"; i++) await Task.Delay(5);
     Check((await service.ListAccountsAsync()).Count == 3 && (await service.GetStatusAsync()).PrimaryAccountId == primary.Id,
         "Adding an independently authorized attached account replaced or required restarting the primary.");
+}
+async Task RenameAccount()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "ag-accounts-test-" + Guid.NewGuid().ToString("N"));
+    try
+    {
+        static byte[] Transform(byte[] bytes) => bytes.Select(b => (byte)(b ^ 0xAA)).ToArray();
+        var store = new EncryptedAccountStore(directory, Transform, Transform);
+        var primary = Account(); var attached = Account(); var oauth = new FakeOAuth(now);
+        await store.UpdateAsync(s =>
+        {
+            s.OAuth = primary.Client; s.Accounts = [primary, attached];
+            s.PrimaryAccountId = primary.Id; s.SelectedAccountId = attached.Id; s.Generation = 7;
+        });
+        await using (var service = new AccountService(store, oauth, _ => oauth.BrowserOpens++, () => now))
+        {
+            _ = await service.GetTokenAsync();
+            using var parameters = JsonDocument.Parse(JsonSerializer.Serialize(new { id = attached.Id, label = "  工作账号  " }));
+            _ = await Antigravity.Accounts.Program.DispatchAsync(service, "renameAccount", parameters.RootElement);
+            Check((await service.ListAccountsAsync()).Single(a => a.Id == attached.Id).Label == "工作账号", "The public account label was not updated.");
+            var status = await service.GetStatusAsync();
+            Check(status.SelectedAccountId == attached.Id && status.PrimaryAccountId == primary.Id && status.SelectionLocked && status.Generation == 7,
+                "A label edit changed the active identity or generation.");
+        }
+        var reopened = new EncryptedAccountStore(directory, Transform, Transform);
+        var saved = await reopened.ReadAsync();
+        var changed = saved.Accounts.Single(a => a.Id == attached.Id);
+        Check(changed.Label == "工作账号" && changed.Token == attached.Token && changed.Client == attached.Client &&
+            changed.Subject == attached.Subject && changed.Email == attached.Email && !changed.Disabled &&
+            saved.Accounts.Single(a => a.Id == primary.Id).Label == primary.Label && oauth.Logins == 0 && oauth.Refreshes == 0 && oauth.BrowserOpens == 0,
+            "The label did not persist independently of authorization and identity fields.");
+        await using var restarted = new AccountService(reopened, oauth, _ => oauth.BrowserOpens++, () => now);
+        await restarted.RenameAccountAsync(attached.Id, " ");
+        Check((await restarted.ListAccountsAsync()).Single(a => a.Id == attached.Id).Label == attached.Email, "An empty label did not restore the email display.");
+    }
+    finally { CleanupSyntheticDirectory(directory); }
+}
+async Task RenameAccountBoundaries()
+{
+    var a = Account(); var b = Account();
+    var store = new MemoryStore(new() { PrimaryAccountId = a.Id, SelectedAccountId = a.Id, Accounts = [a, b] });
+    await using var service = Service(store, new(now));
+    await Expect("invalid_label", () => service.RenameAccountAsync(a.Id, new string('x', 81)));
+    await Expect("invalid_label", () => service.RenameAccountAsync(a.Id, "bad\nlabel"));
+    await Expect("account_not_found", () => service.RenameAccountAsync(Guid.NewGuid(), "New label"));
+    foreach (var fields in new object[] { new { id = a.Id }, new { id = a.Id, label = 1 } })
+    {
+        using var parameters = JsonDocument.Parse(JsonSerializer.Serialize(fields));
+        await Expect("invalid_request", () => Antigravity.Accounts.Program.DispatchAsync(service, "renameAccount", parameters.RootElement));
+    }
+    using (var extra = JsonDocument.Parse(JsonSerializer.Serialize(new { id = a.Id, label = "New label", accessToken = "synthetic" })))
+        await Expect("unsupported_parameter", () => Antigravity.Accounts.Program.DispatchAsync(service, "renameAccount", extra.RootElement));
+    var ticket = await service.BeginSwitchAsync(b.Id, 0);
+    await Expect("switch_in_progress", () => service.RenameAccountAsync(a.Id, "New label"));
+    await service.CancelSwitchAsync(ticket.Ticket);
+    Check((await service.ListAccountsAsync()).All(account => account.Label == "Synthetic"), "A rejected label edit changed an account.");
 }
 async Task SwitchCommit()
 {

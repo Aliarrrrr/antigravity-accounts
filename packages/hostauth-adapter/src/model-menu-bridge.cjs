@@ -4,7 +4,7 @@ const { ComponentError } = require('./component-client.cjs');
 const { loopbackOrigin } = require('./submission-gate.cjs');
 const path = require('node:path');
 const CHANNEL = 'antigravity-accounts:model-menu';
-const ACTIONS = new Set(['getState', 'selectAccount', 'cancelSwitch', 'beginLogin', 'setPrimaryAccount', 'removeAccount', 'confirmModelSelection']);
+const ACTIONS = new Set(['getState', 'getPreferences', 'setPreferences', 'renameAccount', 'selectAccount', 'cancelSwitch', 'beginLogin', 'setPrimaryAccount', 'removeAccount', 'confirmModelSelection']);
 
 function publicState(status, accounts) {
   const pick = (source, names) => Object.fromEntries(names.filter(name => source?.[name] !== undefined).map(name => [name, source[name]]));
@@ -19,7 +19,7 @@ function publicState(status, accounts) {
   };
 }
 
-function createModelMenuBridge({ electron, client, isAccountWindow = () => false }) {
+function createModelMenuBridge({ electron, client, preferences, isAccountWindow = () => false }) {
   let origin, closed = false;
   function nativeWindow(event) {
     if (closed || !origin || !event?.sender || !event.senderFrame ||
@@ -37,16 +37,33 @@ function createModelMenuBridge({ electron, client, isAccountWindow = () => false
         Object.keys(request).some(key => !['method', 'params'].includes(key)) || !ACTIONS.has(request.method))
       throw new ComponentError('method_not_allowed');
     const { method } = request, params = request.params ?? {};
-    const fields = method === 'beginLogin' ? ['label'] : ['selectAccount', 'setPrimaryAccount', 'removeAccount'].includes(method) ? ['id'] : [];
+    const fields = method === 'setPreferences' ? ['dataUsageConsent'] : method === 'renameAccount' ? ['id', 'label'] :
+      method === 'beginLogin' ? ['label'] : ['selectAccount', 'setPrimaryAccount', 'removeAccount'].includes(method) ? ['id'] : [];
     if (typeof params !== 'object' || Array.isArray(params) || Object.keys(params).some(key => !fields.includes(key)))
       throw new ComponentError('unsupported_parameter');
     if (fields[0] === 'id' && (typeof params.id !== 'string' || !params.id || params.id.length > 128)) throw new ComponentError('invalid_account');
-    if (fields[0] === 'label' && params.label !== undefined && (typeof params.label !== 'string' || params.label.length > 120))
+    if ((fields.includes('label') && params.label !== undefined || method === 'renameAccount') &&
+        (typeof params.label !== 'string' || params.label.length > 80 || /[\x00-\x1f\x7f-\x9f]/.test(params.label)))
       throw new ComponentError('unsupported_parameter');
     try {
+      if (method === 'getPreferences') return preferences ? await preferences.get() : { dataUsageConsent: 'off' };
+      if (method === 'setPreferences') {
+        if (!preferences) throw new ComponentError('account_preferences_unavailable');
+        const next = await preferences.set(params);
+        for (const window of electron.BrowserWindow.getAllWindows()) {
+          try {
+            if (!window.isDestroyed() && new URL(window.webContents.getURL()).origin === origin)
+              window.webContents.send?.(CHANNEL + ':preferences', next);
+          } catch { /* A closing or navigating window does not undo a saved preference. */ }
+        }
+        return next;
+      }
       if (method === 'getState') {
         const [status, accounts] = await Promise.all([client.request('getStatus', {}), client.request('listAccounts', {})]);
-        return publicState(status, accounts);
+        let settings = { dataUsageConsent: 'off' }, preferencesError;
+        try { if (preferences) settings = await preferences.get(); }
+        catch { settings = { dataUsageConsent: 'manual' }; preferencesError = 'account_preferences_unavailable'; }
+        return { ...publicState(status, accounts), preferences: settings, ...(preferencesError ? { preferencesError } : {}) };
       }
       await client.request(method, params);
       return { accepted: true };

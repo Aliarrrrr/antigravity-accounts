@@ -46,9 +46,18 @@ Before an independent provider has been activated, an unconfigured plugin regist
 its model-menu account groups and continues ordinary native startup without
 `--use_host_auth`. It does not request a token or open an authorization dialog.
 The `--accounts` App argument opens the native model selector after startup.
-Daily account selection and Google authorization live inside that selector.
-The addon has no separate BrowserWindow, HTML page, stylesheet or exposed
+Daily account selection stays in that selector. Its single management entry opens
+a themed dialog in the same window for Google authorization, labels, reauthorization,
+primary-account configuration, removal and data-use preferences.
+The addon has no separate BrowserWindow, HTML page, standalone theme or exposed
 renderer credential API. Startup-only credential recovery uses native dialogs.
+
+After an account change, data-use consent defaults to saving collection as unchecked
+and confirming only after the native save succeeds. The same panel also offers
+checked-and-confirm or manual handling. First-use terms, changed terms types,
+unrecognized dialogs and failed reads or saves retain the native prompt. Preview.10
+resolves the committed React fiber through parent child/sibling membership when
+return pointers are shared; this avoids reading the stale checkbox state after saving.
 
 When an independently configured primary is activated, startup verifies that
 account before supplying `--use_host_auth=true` and a live bridge. A separate
@@ -74,6 +83,10 @@ language-service processes, window, workspace and available concrete model.
 No model requests were initiated. This does not verify generation, quota charging,
 cross-account generation continuation or an actual NSIS upgrade. See the
 [version-specific validation record](https://github.com/Aliarrrrr/antigravity-accounts/blob/master/docs/ACCOUNTS_VALIDATION.md).
+Preview.10 on installed 2.29.0 was observed to uncheck the data-use option and
+close the prompt automatically while switching back to the original account. The
+original account/model were retained and another normal restart loaded successfully.
+No model request was sent. This does not establish real-account switching on 2.28.2.
 Other native images remain unsupported.
 
 `npm ci --ignore-scripts --no-audit --no-fund` installs locked test dependencies;

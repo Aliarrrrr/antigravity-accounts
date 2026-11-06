@@ -90,6 +90,10 @@ internal static class Program
                 Allowed(parameters, "id");
                 await service.RemoveAccountAsync(Identifier(parameters));
                 return new { removed = true };
+            case "renameAccount":
+                Allowed(parameters, "id", "label");
+                await service.RenameAccountAsync(Identifier(parameters), Text(parameters, "label", true));
+                return new { renamed = true };
             case "shutdown": Allowed(parameters); return new { stopped = true };
             default: throw new AccountOperationException("method_not_supported", "This component only manages independently authorized accounts; importing official credentials is not supported.");
         }

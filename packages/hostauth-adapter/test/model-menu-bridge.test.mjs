@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { CHANNEL, createModelMenuBridge } = require('../src/model-menu-bridge.cjs');
 
-function harness({ fail } = {}) {
+function harness({ fail, preferences } = {}) {
   const handlers = new Map(), calls = [], opened = [];
   const preloads = new Map();
   const sender = { getURL: () => frame.url, async executeJavaScript(source) { opened.push(source); } }, frame = { url: 'https://127.0.0.1:12345/?local=fake', parent: null };
@@ -24,7 +24,7 @@ function harness({ fail } = {}) {
     if (method === 'getStatus') return { configured: true, selectedAccountId: 'a', login: { state: 'idle', token: 'PRIVATE' }, switch: { state: 'active' }, accessToken: 'PRIVATE' };
     if (method === 'listAccounts') return [{ id: 'a', label: 'Work', selected: true, token: 'PRIVATE' }];
     return { refreshToken: 'PRIVATE' };
-  } }, isAccountWindow: () => accountWindow });
+  } }, preferences, isAccountWindow: () => accountWindow });
   return { handlers, opened, calls, preloads, frame, sender, window, bridge, event: { sender, senderFrame: frame },
     destroy() { destroyed = true; }, manager() { accountWindow = true; } };
 }
@@ -68,6 +68,43 @@ test('IPC preserves only a bounded error code in Electron serialized messages', 
     });
     h.bridge.close();
   }
+});
+
+test('label updates and consent preferences stay bounded and preferences never call the account broker', async () => {
+  let saved = { dataUsageConsent: 'off' }, unavailable = false;
+  const preferences = {
+    async get() { if (unavailable) throw new Error('private path'); return saved; },
+    async set(value) {
+      if (!['off', 'on', 'manual'].includes(value.dataUsageConsent)) throw Object.assign(new Error(), { code: 'unsupported_parameter' });
+      saved = { ...value }; return saved;
+    },
+  };
+  const h = harness({ preferences }); h.bridge.setEndpoint('https://127.0.0.1:12345');
+  const handle = request => h.handlers.get(CHANNEL)(h.event, request);
+  try {
+    assert.deepEqual(await handle({ method: 'getPreferences' }), { dataUsageConsent: 'off' });
+    for (const dataUsageConsent of ['on', 'manual', 'off']) {
+      assert.deepEqual(await handle({ method: 'setPreferences', params: { dataUsageConsent } }), { dataUsageConsent });
+      assert.equal((await handle({ method: 'getState' })).preferences.dataUsageConsent, dataUsageConsent);
+    }
+    assert(h.calls.every(call => ['getStatus', 'listAccounts'].includes(call.method)));
+    await handle({ method: 'renameAccount', params: { id: 'a', label: 'Work label' } });
+    assert.deepEqual(h.calls.at(-1), { method: 'renameAccount', params: { id: 'a', label: 'Work label' } });
+    for (const request of [
+      { method: 'renameAccount', params: { label: 'Work' } },
+      { method: 'renameAccount', params: { id: 'a' } },
+      { method: 'renameAccount', params: { id: 'a', label: 'a\n' } },
+      { method: 'renameAccount', params: { id: 'a', label: 'a'.repeat(81) } },
+      { method: 'setPreferences', params: { dataUsageConsent: true } },
+      { method: 'setPreferences', params: { dataUsageConsent: 'off', accessToken: 'private' } },
+    ]) await assert.rejects(handle(request));
+    unavailable = true;
+    const state = await handle({ method: 'getState' });
+    assert.equal(state.preferences.dataUsageConsent, 'manual');
+    assert.equal(state.preferencesError, 'account_preferences_unavailable');
+    assert(!JSON.stringify(state).includes('private'));
+    await assert.rejects(handle({ method: 'getPreferences' }), { code: 'account_operation_failed' });
+  } finally { h.bridge.close(); }
 });
 
 test('model-menu IPC rejects foreign frames, other origins, manager pages and destroyed windows', async () => {

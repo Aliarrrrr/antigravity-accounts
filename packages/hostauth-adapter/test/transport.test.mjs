@@ -21,6 +21,7 @@ test('stdio multiplexes independent requests and returns only matched results', 
     const [status, token] = await Promise.all([client.request('getStatus'), client.request('getToken')]);
     assert.equal(status.configured, true);
     assert.equal(token.accessToken, 'independent-fake-access');
+    assert.equal((await client.request('renameAccount', { id: 'fake', label: 'Work' })).method, 'renameAccount');
     await assert.rejects(client.request('inventedMethod'), { code: 'method_not_allowed' });
   } finally { await client.close(); }
 });
@@ -86,6 +87,8 @@ test('configured independent account is checked before token release and runtime
     session.markLanguageServerStarted();
     await assert.rejects(uiClient.request('getToken'), { code: 'method_not_allowed' });
     assert.equal(installs, 1);
+    await uiClient.request('renameAccount', { id: 'fake', label: 'Work' });
+    assert.equal(calls.at(-1), 'renameAccount');
     await assert.rejects(uiClient.request('selectAccount', { id: 'attached' }), { code: 'native_switch_unsupported' });
     await assert.rejects(uiClient.request('configureOAuth'), { code: 'method_not_allowed' });
     await assert.rejects(uiClient.request('removeAccount', { id: 'fake' }), { code: 'account_locked' });

@@ -2,7 +2,7 @@
   "$schema": "https://antigravity.google/schemas/v1/plugin.json",
   "name": "antigravity-accounts",
   "displayName": "Antigravity Accounts",
-  "version": "0.4.0-preview.8",
+  "version": "0.4.0-preview.10",
   "description": "在原生模型列表按账号选择用量。需要另行安装匹配的 HostAuth 宿主适配；此清单本身不加载账号切换功能。",
   "logo": "assets/accounts.svg",
   "suggestedPrompts": [],

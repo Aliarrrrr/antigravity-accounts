@@ -1,5 +1,7 @@
+import { installAccountManagement } from './account-management.mjs';
+import { installDataUsageConsent } from './data-usage-consent.mjs';
 // Serialized into an isolated Electron preload. Keep dependencies in this body.
-export function installModelMenuEntry({ document, window, request } = {}) {
+export function installModelMenuEntry({ document, window, request, createManagement = installAccountManagement } = {}) {
   if (!document?.documentElement || !window || typeof request !== 'function' ||
       typeof window.MutationObserver !== 'function') return null;
   const key = '__antigravityAccountsModelMenuEntryV2';
@@ -14,13 +16,13 @@ export function installModelMenuEntry({ document, window, request } = {}) {
   const entries = new Map();
   const buttonClass = 'flex w-full shrink-0 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs outline-none hover:bg-secondary focus-visible:bg-secondary disabled:cursor-default disabled:opacity-50';
   let stopped = false, queued = false, busy = false, loading = false, pendingRefresh = false, timer;
-  let state, lastState = '', errorText = '', confirmingNativeSelection = false;
+  let state, lastState = '', errorText = '', confirmingNativeSelection = false, management;
   const visibleTrigger = trigger => !trigger.closest(excluded + ',[hidden],[aria-hidden="true"]') &&
     trigger.getAttribute('aria-expanded') !== 'false';
   const validPanel = panel => panel.isConnected && panel.matches(panelSelector) &&
     !panel.closest(excluded + ',[hidden],[aria-hidden="true"]') &&
     [...document.querySelectorAll(triggerSelector)].some(visibleTrigger);
-  const running = () => !stopped && [...entries.keys()].some(validPanel);
+  const running = () => !stopped && (management?.isOpen() || [...entries.keys()].some(validPanel));
   const activeSwitch = () => ['waiting', 'confirming', 'blocked'].includes(state?.status?.switch?.state);
 
   function element(tag, className = '', text = '') {
@@ -69,12 +71,11 @@ export function installModelMenuEntry({ document, window, request } = {}) {
       catch { errorText = '此阶段已不能取消，请等待账号确认。'; }
       await refresh(); return;
     }
-    for (const entry of entries.values()) entry.pendingRemoval = undefined;
     busy = true; errorText = ''; render(); schedule();
     try { await request(method, params); }
     catch { errorText = method === 'removeAccount'
       ? '删除未完成。请确认此账号未在使用或切换，再重新操作。'
-      : '操作未完成，请查看账号与切换状态后重试。'; }
+      : method === 'setPreferences' ? '设置未保存，请重试。' : method === 'renameAccount' ? '标签未保存。请使用不超过 80 字的标签，并等待切换完成后重试。' : '操作未完成，请查看账号与切换状态后重试。'; }
     finally { busy = false; await refresh(); }
   }
   async function refresh() {
@@ -94,7 +95,8 @@ export function installModelMenuEntry({ document, window, request } = {}) {
         componentError: Boolean(status.componentError), selectedAccountDisabled: status.selectedAccountDisabled === true,
         login: { state: status.login?.state },
         switch: { state: status.switch?.state, targetAccountId: status.switch?.targetAccountId, cancellable: status.switch?.cancellable === true, errorCode: status.switch?.errorCode },
-      }, accounts: next.accounts.slice(0, 100).filter(a => typeof a?.id === 'string' && a.id.length <= 100).map(a => ({
+      }, preferences: { dataUsageConsent: ['off', 'on', 'manual'].includes(next.preferences?.dataUsageConsent) ? next.preferences.dataUsageConsent : 'off' },
+      preferencesError: Boolean(next.preferencesError), accounts: next.accounts.slice(0, 100).filter(a => typeof a?.id === 'string' && a.id.length <= 100).map(a => ({
         id: a.id, label: typeof a.label === 'string' ? a.label : '', email: typeof a.email === 'string' ? a.email : '',
         disabled: a.disabled === true,
       })) };
@@ -126,22 +128,9 @@ export function installModelMenuEntry({ document, window, request } = {}) {
       node.setAttribute('data-antigravity-accounts-menu', '');
       node.style.color = 'inherit'; node.style.fontFamily = 'inherit';
     }
-    const loginRow = element('div', 'flex items-center gap-1');
-    const label = element('input', 'min-w-0 flex-1 rounded-md border border-border bg-transparent px-2 py-1 text-xs outline-none focus-visible:ring-1 focus-visible:ring-ring');
-    label.type = 'text'; label.maxLength = 80; label.placeholder = '账号标签（可选）';
-    label.setAttribute('aria-label', '新账号标签');
-    label.style.width = '1px'; label.style.color = 'inherit'; label.style.fontFamily = 'inherit';
-    const login = actionButton(entry, '添加账号', () => operate('beginLogin', { label: label.value.trim() }));
-    label.addEventListener('keydown', event => {
-      if (event.isTrusted !== true || event.key !== 'Enter' || event.repeat || event.isComposing || event.keyCode === 229 ||
-          busy || login.disabled || !validPanel(panel)) return;
-      event.preventDefault(); event.stopPropagation(); void operate('beginLogin', { label: label.value.trim() });
-    });
-    // Keep text-entry keys out of the native menu's typeahead handler.
-    label.addEventListener('keydown', event => { if (event.isTrusted === true) event.stopPropagation(); });
-    login.style.width = 'auto';
-    loginRow.append(label, login); controls.append(message, loginRow);
-    entry.login = login; entry.label = label;
+    const manage = actionButton(entry, '账号设置与管理…', () => management.open(manage), { role: 'menuitem', actionId: 'manage' });
+    manage.setAttribute('data-testid', 'antigravity-accounts-manage');
+    controls.append(message, manage);
     entry.remove = () => {
       for (const node of entry.nodes) node.remove();
       for (const name of Object.keys(entry.panelStyles)) restorePanelStyle(entry, name);
@@ -211,57 +200,7 @@ export function installModelMenuEntry({ document, window, request } = {}) {
     if (lastState === signature) return;
     lastState = signature;
     for (const entry of entries.values()) renderEntry(entry);
-  }
-  function removalReason(account) {
-    const status = state?.status;
-    if (busy || activeSwitch()) return '请等待当前账号操作或切换完成。';
-    if (status?.login?.state === 'pending') return '请先完成或结束 Google 授权。';
-    if (!status?.configured || status.componentError) return '本机账号组件尚未就绪。';
-    const locked = status.selectionLocked || status.mode === 'native-provider' && status.runtimeStarted;
-    if (locked && account.id === status.selectedAccountId) return '当前账号正在使用，请先切换到其他账号再删除。';
-    if (account.id === status.primaryAccountId) {
-      if (locked) return '主账号不能在运行中删除。';
-      if (state.accounts.length > 1) return '请先删除附属账号，再删除主账号。';
-    }
-    return '';
-  }
-  function focusAccountAction(entry, id, action) {
-    [...entry.panel.querySelectorAll('button[data-account-id]')].find(button =>
-      button.getAttribute('data-account-id') === id && button.getAttribute('data-account-action') === action && !button.disabled)?.focus({ preventScroll: true });
-  }
-  function appendRemoval(entry, row, parent, account) {
-    const reason = removalReason(account);
-    const remove = actionButton(entry, '删除', () => {
-      if (removalReason(account)) return;
-      entry.pendingRemoval = { id: account.id, email: account.email, label: account.label };
-      renderEntry(entry); focusAccountAction(entry, account.id, 'remove-cancel');
-      // Recheck public local state when opening confirmation: another window
-      // may have selected or removed this account since the menu opened.
-      void refresh();
-    }, { disabled: Boolean(reason), id: account.id, actionId: 'remove', role: 'menuitem' });
-    remove.style.width = 'auto'; remove.style.flexShrink = '0';
-    remove.setAttribute('data-testid', 'antigravity-accounts-remove');
-    remove.setAttribute('aria-label', `删除账号 ${account.email || account.label || 'Google 账号'}`);
-    remove.title = reason || '删除此插件在本机保存的账号授权';
-    row.append(remove);
-    if (entry.pendingRemoval?.id !== account.id) return;
-    const confirm = element('div', 'px-2 pb-1 text-xs');
-    confirm.setAttribute('data-testid', 'antigravity-accounts-remove-confirmation');
-    confirm.setAttribute('role', 'group'); confirm.setAttribute('aria-label', '确认删除账号');
-    const description = element('div', 'py-1 text-muted-foreground');
-    description.style.overflowWrap = 'anywhere';
-    description.textContent = `删除 ${account.email || account.label || '此账号'}？仅删除本机插件保存的授权，再次使用需要重新添加。${reason}`;
-    const actions = element('div', 'flex items-center gap-1');
-    actions.append(actionButton(entry, '确认删除', async () => {
-      const current = state?.accounts.find(item => item.id === account.id);
-      const pending = entry.pendingRemoval;
-      if (!current || !pending || pending.id !== account.id || pending.email !== current.email || pending.label !== current.label || removalReason(current)) return;
-      await operate('removeAccount', { id: account.id });
-    }, { disabled: Boolean(reason), id: account.id, actionId: 'remove-confirm' }),
-    actionButton(entry, '取消', () => {
-      entry.pendingRemoval = undefined; renderEntry(entry); focusAccountAction(entry, account.id, 'remove');
-    }, { disabled: busy, id: account.id, actionId: 'remove-cancel' }));
-    confirm.append(description, actions); parent.append(confirm);
+    management?.render();
   }
   function renderEntry(entry) {
     const { before, after, controls, message } = entry;
@@ -272,10 +211,7 @@ export function installModelMenuEntry({ document, window, request } = {}) {
     const focusedAction = ownsFocus ? focused?.getAttribute('data-account-action') : null;
     before.replaceChildren(); after.replaceChildren();
     const status = state?.status, accounts = state?.accounts || [];
-    if (entry.pendingRemoval && !accounts.some(account => account.id === entry.pendingRemoval.id &&
-      account.email === entry.pendingRemoval.email && account.label === entry.pendingRemoval.label)) entry.pendingRemoval = undefined;
     const providerActive = status?.mode === 'native-provider' && status.runtimeStarted;
-    const locked = providerActive;
     const switching = activeSwitch();
     const selected = accounts.find(a => a.id === status?.selectedAccountId);
     const primary = accounts.find(a => a.id === status?.primaryAccountId);
@@ -290,7 +226,6 @@ export function installModelMenuEntry({ document, window, request } = {}) {
     const currentRow = element('div', 'flex items-center gap-1');
     current.style.minWidth = '0'; current.style.flex = '1';
     currentRow.append(current); before.append(currentRow);
-    if (selected) appendRemoval(entry, currentRow, before, selected);
     if (selected && status.switch?.state === 'blocked' && status.switch.targetAccountId === selected.id) {
       const recover = actionButton(entry, '重新确认此账号', () => operate('selectAccount', { id: selected.id }), {
         disabled: busy || !status.liveSwitchSupported, id: selected.id, actionId: 'reconfirm',
@@ -316,11 +251,8 @@ export function installModelMenuEntry({ document, window, request } = {}) {
       choose.title = `${account.label || account.email || 'Google 账号'} — ${account.disabled ? '此账号需要通过 Google 重新授权' : '选择此账号后显示其原生可用模型'}`;
       const accountRow = element('div', 'flex items-center gap-1');
       accountRow.append(choose); group.append(accountRow);
-      appendRemoval(entry, accountRow, group, account);
-      if (!primary && !locked) group.append(actionButton(entry, '设为主账号', () => operate('setPrimaryAccount', { id: account.id }), { disabled: busy || account.disabled, id: account.id, actionId: 'primary' }));
       after.append(group);
     }
-    if (selected && !primary && !locked) after.prepend(actionButton(entry, '将当前账号设为主账号', () => operate('setPrimaryAccount', { id: selected.id }), { disabled: busy || selected.disabled, id: selected.id, actionId: 'primary' }));
     const failureCode = /^[a-z][a-z0-9_]{0,63}$/.test(status?.switch?.errorCode || '') ? status.switch.errorCode : '';
     const messages = {
       waiting: '等待生成、工具和后台任务结束；原任务继续执行。',
@@ -339,10 +271,7 @@ export function installModelMenuEntry({ document, window, request } = {}) {
       (status?.componentError ? '本机账号组件尚未就绪。' : status?.activationRequired ? '账号已配置，重新打开 Antigravity 后启用。' :
         status?.login?.state === 'pending' ? '请在官方 Google 页面完成授权。' :
         status?.login?.state === 'failed' ? 'Google 授权未完成，可重新添加账号。' :
-        !state ? '正在读取本机账号…' : !primary ? '添加账号后，将一个账号设为主账号。' : '');
-    entry.login.disabled = busy || !status?.configured || status.componentError || status.login?.state === 'pending' || switching;
-    entry.login.textContent = status?.login?.state === 'pending' ? '等待授权…' : '添加账号';
-    entry.label.disabled = entry.login.disabled;
+        !state ? '正在读取本机账号…' : !primary ? '在账号设置与管理中添加账号并设定主账号。' : '');
     if (entry.cancel) { entry.cancel.remove(); entry.cancel = undefined; }
     if (status?.switch?.cancellable) {
       entry.cancel = actionButton(entry, '取消切换，继续原任务', () => operate('cancelSwitch'));
@@ -443,7 +372,7 @@ export function installModelMenuEntry({ document, window, request } = {}) {
   window.addEventListener('resize', resized);
   const controller = Object.freeze({ stop() {
     if (stopped) return;
-    stopped = true; pendingRefresh = false; observer.disconnect(); window.clearTimeout(timer);
+    stopped = true; pendingRefresh = false; observer.disconnect(); window.clearTimeout(timer); management?.stop();
     document.removeEventListener('click', nativeModelSelection, true);
     document.removeEventListener('keydown', nativeModelSelection, true);
     window.removeEventListener('resize', resized);
@@ -451,6 +380,10 @@ export function installModelMenuEntry({ document, window, request } = {}) {
     state = undefined;
     if (window[key] === controller) delete window[key];
   } });
+  management = createManagement({ document, window, operate, getState: () => state,
+    isBusy: () => busy, getError: () => errorText,
+    onOpen: () => { void refresh(); }, onRefresh: () => { void refresh(); }, onClose: () => { schedule(); },
+  });
   window[key] = controller; update(); return controller;
 }
 
@@ -458,11 +391,26 @@ export function modelMenuEntrySource() {
   return `\n// ANTIGRAVITY_ACCOUNTS_MODEL_MENU_V2\n(() => {
     if (process.isMainFrame !== true || window.top !== window ||
         location.protocol !== 'https:' || location.hostname !== '127.0.0.1') return;
-    const { ipcRenderer } = require('electron');
-    const start = () => (${installModelMenuEntry.toString()})({
-      document, window,
-      request: (method, params = {}) => ipcRenderer.invoke('antigravity-accounts:model-menu', { method, params }),
-    });
+    const { ipcRenderer, webFrame } = require('electron');
+    const consentInstaller = ${JSON.stringify(installDataUsageConsent.toString())};
+    const syncConsent = preferences => {
+      const value = ['off', 'on', 'manual'].includes(preferences?.dataUsageConsent) ? preferences.dataUsageConsent : 'manual';
+      void webFrame.executeJavaScript('(' + consentInstaller + ')({document,window,preference:' + JSON.stringify(value) + '})').catch(() => {});
+    };
+    ipcRenderer.on('antigravity-accounts:model-menu:preferences', (_event, preferences) => syncConsent(preferences));
+    const start = () => {
+      void ipcRenderer.invoke('antigravity-accounts:model-menu', { method: 'getPreferences', params: {} })
+        .then(syncConsent).catch(() => syncConsent({ dataUsageConsent: 'manual' }));
+      return (${installModelMenuEntry.toString()})({
+        document, window, createManagement: (${installAccountManagement.toString()}),
+        request: async (method, params = {}) => {
+          const result = await ipcRenderer.invoke('antigravity-accounts:model-menu', { method, params });
+          if (method === 'getState') syncConsent(result.preferences);
+          if (method === 'setPreferences') syncConsent(result);
+          return result;
+        },
+      });
+    };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
     else start();
   })();\n`;

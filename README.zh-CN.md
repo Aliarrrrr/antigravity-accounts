@@ -4,7 +4,7 @@
 
 **在 Antigravity 原生模型列表中使用已授权的 Google 账号。**
 
-![Preview 0.4.0-preview.8](https://img.shields.io/badge/preview-0.4.0--preview.8-8b5cf6)
+![Preview 0.4.0-preview.10](https://img.shields.io/badge/preview-0.4.0--preview.10-8b5cf6)
 ![Windows x64](https://img.shields.io/badge/platform-Windows%20x64-0078D4)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
@@ -12,7 +12,7 @@ Antigravity Accounts 在现有模型菜单中加入账号分组，保留官方�
 
 这是通过 ZIP 分发的 **Windows 非官方宿主适配预览版**，尚未在 Antigravity 插件市场收录。单独安装 `plugin.json` 不会启用账号切换。
 
-[下载 preview.8](https://github.com/Aliarrrrr/antigravity-accounts/releases/tag/accounts-v0.4.0-preview.8) · [安装说明](docs/ACCOUNTS_PLUGIN.md) · [更新日志](CHANGELOG.md) · [检查记录](docs/ACCOUNTS_VALIDATION.md)
+[下载 preview.10](https://github.com/Aliarrrrr/antigravity-accounts/releases/tag/accounts-v0.4.0-preview.10) · [安装说明](docs/ACCOUNTS_PLUGIN.md) · [更新日志](CHANGELOG.md) · [检查记录](docs/ACCOUNTS_VALIDATION.md)
 
 ## 安装
 
@@ -22,13 +22,13 @@ Antigravity Accounts 在现有模型菜单中加入账号分组，保留官方�
 | Antigravity App | 已检查的 2.29.0、2.28.2 程序组合 |
 | 额外运行时 | 分发包无需另装运行时；.NET 组件自包含，安装辅助程序使用已安装的 Electron 运行时 |
 
-1. 下载并完整解压 [AntigravityAccounts-0.4.0-preview.8-win-x64.zip](https://github.com/Aliarrrrr/antigravity-accounts/releases/download/accounts-v0.4.0-preview.8/AntigravityAccounts-0.4.0-preview.8-win-x64.zip)。
+1. 下载并完整解压 [AntigravityAccounts-0.4.0-preview.10-win-x64.zip](https://github.com/Aliarrrrr/antigravity-accounts/releases/download/accounts-v0.4.0-preview.10/AntigravityAccounts-0.4.0-preview.10-win-x64.zip)。
 2. 完全退出 Antigravity。若应用常驻系统托盘，请从托盘菜单选择“退出”。
 3. 在解压后的 `AntigravityAccounts` 目录运行 `Install-Preview.cmd`，然后正常启动 Antigravity。
 
 安装器会检查已安装的程序、保存原始文件，再应用本机宿主适配，不修改 `Antigravity.exe`。请保留完整分发目录及校验文件，以便恢复。
 
-已应用中文适配时，操作顺序为：**恢复中文层 → 安装 Accounts → 重新应用中文层**。恢复 Accounts 时也采用相同顺序。详见[安装说明](docs/ACCOUNTS_PLUGIN.md#安装)。
+从旧版 Accounts 升级时，先退出 Antigravity，运行旧分发包的 `Restore.cmd`，再安装新版；已添加的账号授权会保留。叠加中文适配时，顺序为：**恢复中文层 → 恢复旧 Accounts → 安装新 Accounts → 重新应用中文层**。详见[安装说明](docs/ACCOUNTS_PLUGIN.md#安装)。
 
 自定义安装目录时，在运行安装器前将 `ANTIGRAVITY_INSTALL_ROOT` 设为包含 `Antigravity.exe` 的目录。仓库当前为私有仓库，下载与提交问题需要相应访问权限。
 
@@ -37,21 +37,31 @@ Antigravity Accounts 在现有模型菜单中加入账号分组，保留官方�
 - **原生模型菜单：** 账号分组与官方模型选项显示在同一列表，沿用宿主样式和键盘导航。
 - **同一窗口切换账号：** 后续切换无需重启 App 或语言服务；提交切换前，先等待生成、工具和后台任务结束。
 - **保护模型选择：** 原有具体模型可用时保留；不可用时，等待用户在原生列表中明确选择可用模型后再允许发送。
-- **列表内管理账号：** 通过 Google 官方授权页面添加账号；删除非当前附属账号前，在同组核对邮箱并确认。
+- **统一账号管理：** 同窗口面板提供添加、删除、标签编辑、重新授权、主账号配置和数据使用授权设置，沿用宿主主题。
 - **更新后恢复：** 缓存适配文件，通过已支持的启动入口在兼容程序替换后重新应用适配。
 
 ## 使用
 
-1. 打开模型列表，点击“添加账号”，在 Google 官方页面完成授权。
-2. 设定唯一“主账号”。首次配置后，完全退出并重启一次 Antigravity，启用独立账号路径。
+管理操作集中在“账号设置与管理…”面板；模型列表保留账号切换和这一个管理入口。
+
+1. 打开模型列表，点击“账号设置与管理…”，在面板中添加账号并在 Google 官方页面完成授权。
+2. 在管理面板中设定唯一“主账号”。首次配置后，完全退出并重启一次 Antigravity，启用独立账号路径。
 3. 点击模型列表中的另一个账号。插件等待原生工作空闲、提交所选账号并确认账号元数据。
 4. 继续使用官方模型选项。原模型在新账号中不可用时，请先选择可用模型再发送。
 
 确认完成后，当前组显示“正在使用”。取消等待不会取消原任务；确认失败时暂停新的发送，并提供“重新确认此账号”操作。
 
-删除非当前附属账号时，点击其右侧“删除”，核对邮箱后点击“确认删除”。当前账号需先切换到其他账号；主账号不能在运行中删除。此操作仅删除插件中的本机账号记录，不删除 Google 账号。
+删除非当前附属账号时，在“账号设置与管理”中点击“删除账号”，核对邮箱后点击“确认删除”。当前账号需先切换到其他账号；主账号不能在运行中删除。此操作仅删除插件中的本机账号记录，不删除 Google 账号。
 
-Google 的安全、资格和数据使用提示需要由账号所有者在官方界面亲自处理。
+面板还可修改标签、重新授权已有账号。“数据使用授权”提供三种选择：
+
+| 选择 | 账号切换后的行为 |
+| --- | --- |
+| 自动确认，不勾选（默认） | 将数据收集保存为不勾选，原生保存成功后确认弹窗 |
+| 自动确认，并勾选 | 将数据收集保存为勾选，原生保存成功后确认弹窗 |
+| 每次手动处理 | 保留原生弹窗，由用户选择 |
+
+首次条款、条款类型变化、无法识别、读取或保存失败时保留原生弹窗。Google 身份验证和服务资格提示仍需账号所有者亲自处理。preview.10 修复了已成功保存不勾选、却因读取 React 旧状态而没有确认的问题。
 
 ## 兼容与更新
 
@@ -63,7 +73,9 @@ Google 的安全、资格和数据使用提示需要由账号所有者在官方�
 
 ### 已检查的范围
 
-已安装的 Antigravity 2.29.0 完成了仅元数据的 **账号 A → 账号 B → 账号 A** 往返。App 与语言服务进程、窗口、工作区和可用的具体模型均保留，代理模型请求为 **0**。
+preview.8 在已安装的 Antigravity 2.29.0 上完成了仅元数据的 **账号 A → 账号 B → 账号 A** 往返，保留 App 与语言服务进程、窗口、工作区和可用的具体模型。
+
+安装 preview.10 后，已在 2.29.0 上观察到切回原账号时数据使用选项自动取消勾选、弹窗随后关闭；原账号和模型保留，再次普通重启后正常加载。代理模型请求为 **0**。这不代表已验证 2.28.2 的真实账号切换。
 
 真实生成、额度扣减、跨账号继续生成和真实 NSIS 升级尚未验证。不同版本的具体结果见[检查记录](docs/ACCOUNTS_VALIDATION.md)。
 
@@ -75,7 +87,7 @@ Google 的安全、资格和数据使用提示需要由账号所有者在官方�
 .\Restore.cmd
 ```
 
-该操作恢复保存的官方程序并移除适配运行文件，保留账号记录供以后重新安装使用。需要移除某个账号记录时，请先使用模型菜单中的删除功能。请保留已登记 Accounts 状态目录中的 `restore-*` 文件夹。
+该操作恢复保存的官方程序并移除适配运行文件，保留账号记录供以后重新安装使用。需要移除某个账号记录时，请先使用管理面板中的删除功能。请保留已登记 Accounts 状态目录中的 `restore-*` 文件夹。
 
 ## 数据与授权
 
