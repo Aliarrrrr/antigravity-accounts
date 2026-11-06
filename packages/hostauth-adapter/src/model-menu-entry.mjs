@@ -14,7 +14,7 @@ export function installModelMenuEntry({ document, window, request, createManagem
   const ownSelector = '[data-antigravity-accounts-menu]';
   const excluded = 'pre,code,textarea,[contenteditable],[data-message-role],[data-message-id],.markdown,.prose,[data-user-content],iframe';
   const entries = new Map();
-  const buttonClass = 'flex w-full shrink-0 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs outline-none hover:bg-secondary focus-visible:bg-secondary disabled:cursor-default disabled:opacity-50';
+  const buttonClass = 'agy-overlay-item flex w-full min-w-0 shrink-0 select-none cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs outline-none transition-colors hover:bg-secondary hover:text-foreground focus-visible:bg-secondary disabled:cursor-default disabled:opacity-50';
   let stopped = false, queued = false, busy = false, loading = false, pendingRefresh = false, timer;
   let state, lastState = '', errorText = '', confirmingNativeSelection = false, management;
   const visibleTrigger = trigger => !trigger.closest(excluded + ',[hidden],[aria-hidden="true"]') &&
@@ -28,6 +28,38 @@ export function installModelMenuEntry({ document, window, request, createManagem
   function element(tag, className = '', text = '') {
     const node = document.createElement(tag);
     node.className = className; node.textContent = text; return node;
+  }
+  function icon(name) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    for (const [key, value] of Object.entries({ width: '14', height: '14', viewBox: '0 0 24 24', fill: 'none',
+      stroke: 'currentColor', 'stroke-width': '1.75', 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+      'aria-hidden': 'true', focusable: 'false', 'data-account-icon': name })) svg.setAttribute(key, value);
+    svg.setAttribute('class', 'shrink-0');
+    const shape = (tag, attributes) => {
+      const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+      for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
+      svg.append(node);
+    };
+    if (name === 'check') shape('path', { d: 'm5 12 4 4L19 6' });
+    else if (name === 'chevron') shape('path', { d: 'm9 6 6 6-6 6' });
+    else if (name === 'clock') { shape('circle', { cx: '12', cy: '12', r: '9' }); shape('path', { d: 'M12 7v5l3 2' }); }
+    else if (name === 'settings') {
+      shape('path', { d: 'M4 7h5m4 0h7M4 17h9m4 0h3' });
+      shape('circle', { cx: '11', cy: '7', r: '2' }); shape('circle', { cx: '15', cy: '17', r: '2' });
+    } else { shape('circle', { cx: '12', cy: '8', r: '3' }); shape('path', { d: 'M5 20v-2a7 7 0 0 1 14 0v2' }); }
+    return svg;
+  }
+  function accountName(text) {
+    const label = element('span', 'min-w-0 flex-1 truncate', text);
+    label.setAttribute('data-account-label', '');
+    label.style.overflow = 'hidden'; label.style.textOverflow = 'ellipsis'; label.style.whiteSpace = 'nowrap';
+    return label;
+  }
+  function accountState(text) {
+    const label = element('span', 'shrink-0 text-muted-foreground font-normal', text);
+    label.setAttribute('data-account-state', '');
+    label.style.whiteSpace = 'nowrap';
+    return label;
   }
   function trusted(event, button, entry) {
     return !stopped && event.isTrusted === true && event.currentTarget === button &&
@@ -112,12 +144,13 @@ export function installModelMenuEntry({ document, window, request, createManagem
   }
   function createEntry(panel) {
     const before = element('div', 'shrink-0');
-    const after = element('div', 'min-h-0 shrink-0 overflow-y-auto');
+    const after = element('div', 'min-h-0 shrink-0 overflow-y-auto border-t border-border py-1');
     // Account rows have their own bounded area, so a long account list cannot
     // push the native model options, add-account row or usage footer offscreen.
     after.style.maxHeight = 'min(32vh, 12rem)'; after.style.overscrollBehavior = 'contain';
-    const controls = element('div', 'shrink-0 border-t border-border px-2 py-2 text-xs');
-    const message = element('div', 'text-muted-foreground py-1');
+    const controls = element('div', 'shrink-0 border-t border-border p-1 text-xs');
+    const message = element('div', 'text-muted-foreground px-2 py-1');
+    message.style.overflowWrap = 'anywhere';
     message.setAttribute('role', 'status'); message.setAttribute('aria-live', 'polite');
     const entry = { panel, before, after, controls, message, nodes: [before, after, controls],
       nativeMaxHeight: window.getComputedStyle?.(panel).maxHeight,
@@ -128,7 +161,9 @@ export function installModelMenuEntry({ document, window, request, createManagem
       node.setAttribute('data-antigravity-accounts-menu', '');
       node.style.color = 'inherit'; node.style.fontFamily = 'inherit';
     }
-    const manage = actionButton(entry, '账号设置与管理…', () => management.open(manage), { role: 'menuitem', actionId: 'manage' });
+    const manage = actionButton(entry, '', () => management.open(manage), { role: 'menuitem', actionId: 'manage' });
+    manage.append(icon('settings'), element('span', 'min-w-0 flex-1', '账号设置'));
+    manage.setAttribute('aria-label', '账号设置与管理'); manage.title = '账号设置与管理';
     manage.setAttribute('data-testid', 'antigravity-accounts-manage');
     controls.append(message, manage);
     entry.remove = () => {
@@ -215,13 +250,19 @@ export function installModelMenuEntry({ document, window, request, createManagem
     const switching = activeSwitch();
     const selected = accounts.find(a => a.id === status?.selectedAccountId);
     const primary = accounts.find(a => a.id === status?.primaryAccountId);
-    before.append(element('div', 'px-2 pt-2 pb-1 text-xs text-muted-foreground', '账号与模型'));
-    const current = element('div', 'px-2 py-1.5 text-xs font-medium');
+    before.append(element('div', 'px-2 pt-1.5 pb-1 text-xs text-muted-foreground font-medium', '账号'));
+    const current = element('div', 'flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium');
     current.setAttribute('data-testid', 'antigravity-accounts-current-group');
-    current.style.overflow = 'hidden'; current.style.textOverflow = 'ellipsis'; current.style.whiteSpace = 'nowrap';
     const selectionState = status?.switch?.state === 'confirming' ? '正在确认' : status?.switch?.state === 'blocked' ? '等待确认' : providerActive ? '正在使用' : '待启用';
-    current.textContent = selected ? `${selected.label || selected.email || 'Google 账号'} · ${selectionState}` : 'Antigravity 当前登录';
+    const selectionPending = ['confirming', 'blocked'].includes(status?.switch?.state);
+    const selectedConfirmed = selected && providerActive && !selectionPending;
+    current.append(icon(selected ? selectedConfirmed ? 'check' : 'clock' : 'account'),
+      accountName(selected ? selected.label || selected.email || 'Google 账号' : 'Antigravity 当前登录'));
+    if (selected) current.append(element('span', 'sr-only', ' · '), accountState(selectionState));
     current.title = current.textContent;
+    current.setAttribute('aria-label', current.textContent);
+    current.setAttribute('data-account-selection', selected ? selectedConfirmed ? 'confirmed' : 'pending' : 'official');
+    if (selectedConfirmed) current.setAttribute('aria-current', 'true');
     current.setAttribute('role', 'heading'); current.setAttribute('aria-level', '3');
     const currentRow = element('div', 'flex items-center gap-1');
     current.style.minWidth = '0'; current.style.flex = '1';
@@ -237,17 +278,21 @@ export function installModelMenuEntry({ document, window, request, createManagem
       if (account === selected) continue;
       const recovering = status.switch?.state === 'blocked' && status.switch.targetAccountId === account.id;
       const selectDisabled = busy || account.disabled || !primary || (providerActive && !status.liveSwitchSupported) || (switching && !recovering);
-      const group = element('div', 'border-t border-border py-1');
+      const group = element('div', 'min-w-0');
       group.setAttribute('role', 'group'); group.setAttribute('aria-label', account.label || account.email || 'Google 账号');
       group.setAttribute('data-testid', 'antigravity-accounts-collapsed-group');
-      const text = `${account.label || account.email || 'Google 账号'}${account.id === status.primaryAccountId ? ' · 主账号' : ''}${account.disabled ? ' · 需要重新授权' : recovering ? ' · 重新确认' : ' ▸'}`;
-      const choose = actionButton(entry, text, () => operate('selectAccount', { id: account.id }), { disabled: selectDisabled, id: account.id, role: 'menuitemradio', actionId: 'select' });
+      const name = account.label || account.email || 'Google 账号';
+      const metadata = [account.id === status.primaryAccountId ? '主账号' : '', account.disabled ? '需授权' : recovering ? '重新确认' :
+        switching && status.switch.targetAccountId === account.id ? '等待切换' : ''].filter(Boolean).join(' · ');
+      const choose = actionButton(entry, '', () => operate('selectAccount', { id: account.id }), { disabled: selectDisabled, id: account.id, role: 'menuitemradio', actionId: 'select' });
       choose.style.minWidth = '0';
       choose.style.flex = '1';
-      const accountLabel = element('span', 'min-w-0 flex-1 truncate', text);
-      accountLabel.style.overflow = 'hidden'; accountLabel.style.textOverflow = 'ellipsis'; accountLabel.style.whiteSpace = 'nowrap';
-      choose.replaceChildren(accountLabel);
+      choose.append(accountName(name));
+      if (metadata) choose.append(element('span', 'sr-only', ' · '), accountState(metadata));
+      choose.append(icon('chevron'));
+      choose.lastElementChild.classList.add('text-muted-foreground');
       choose.setAttribute('aria-checked', 'false'); choose.setAttribute('aria-expanded', 'false');
+      choose.setAttribute('aria-label', `${name}${metadata ? '，' + metadata : ''}，选择此账号`);
       choose.title = `${account.label || account.email || 'Google 账号'} — ${account.disabled ? '此账号需要通过 Google 重新授权' : '选择此账号后显示其原生可用模型'}`;
       const accountRow = element('div', 'flex items-center gap-1');
       accountRow.append(choose); group.append(accountRow);
@@ -269,13 +314,21 @@ export function installModelMenuEntry({ document, window, request, createManagem
     // the rejected IPC operation. Do not hide its recovery action or code.
     message.textContent = messages[status?.switch?.state] || errorText ||
       (status?.componentError ? '本机账号组件尚未就绪。' : status?.activationRequired ? '账号已配置，重新打开 Antigravity 后启用。' :
-        status?.login?.state === 'pending' ? '请在官方 Google 页面完成授权。' :
+        status?.login?.state === 'pending' ? '请在官方 Google 页面完成授权，或在账号设置与管理中取消。' :
+        status?.login?.state === 'cancelled' ? '已取消本次授权，已添加的账号保持不变。' :
         status?.login?.state === 'failed' ? 'Google 授权未完成，可重新添加账号。' :
         !state ? '正在读取本机账号…' : !primary ? '在账号设置与管理中添加账号并设定主账号。' : '');
-    if (entry.cancel) { entry.cancel.remove(); entry.cancel = undefined; }
+    message.hidden = !message.textContent;
+    after.hidden = !after.firstElementChild;
     if (status?.switch?.cancellable) {
-      entry.cancel = actionButton(entry, '取消切换，继续原任务', () => operate('cancelSwitch'));
-      controls.insertBefore(entry.cancel, message.nextSibling);
+      if (!entry.cancel) {
+        entry.cancel = actionButton(entry, '取消切换，继续原任务', () => operate('cancelSwitch'), { actionId: 'cancel-switch' });
+        controls.insertBefore(entry.cancel, message.nextSibling);
+      }
+    } else if (entry.cancel) {
+      const hadFocus = document.activeElement === entry.cancel;
+      entry.cancel.remove(); entry.cancel = undefined;
+      if (hadFocus) controls.querySelector('[data-account-action="manage"]')?.focus({ preventScroll: true });
     }
     after.scrollTop = accountScrollTop;
     if (focusedId) [...entry.panel.querySelectorAll('button[data-account-id]')].find(b =>

@@ -26,6 +26,7 @@ function harness({ failPreferences = false, collapseHostMenu = false } = {}) {
       calls.push({ method, params });
       if (method === 'removeAccount') state.accounts = state.accounts.filter(a => a.id !== params.id);
       if (method === 'renameAccount') state.accounts.find(a => a.id === params.id).label = params.label;
+      if (method === 'cancelLogin') state.status.login.state = 'cancelled';
       if (method === 'setPreferences') {
         if (failPreferences) error = '设置保存失败';
         else state.preferences = { ...params };
@@ -179,5 +180,46 @@ test('closing the native menu portal while opening management does not remove it
     assert.deepEqual(h.calls, [{ method: 'beginLogin', params: { label: 'Offline' } }]);
     h.trusted(h.action('close'), 'click');
     assert.equal(h.document.activeElement, h.document.querySelector('[data-testid="model-selector-trigger"]'));
+  } finally { h.close(); }
+});
+
+test('saving a label with Enter resumes following saved changes after focus leaves the input', async () => {
+  const h = harness();
+  try {
+    const input = h.action('label', 'b'); input.focus(); input.value = 'Research';
+    h.trusted(input, 'input'); h.trusted(input, 'keydown', { key: 'Enter' }); await settle();
+    assert.deepEqual(h.calls, [{ method: 'renameAccount', params: { id: 'b', label: 'Research' } }]);
+    input.blur(); h.state.accounts[1].label = 'Updated in another window'; h.controller.render();
+    assert.equal(input.value, 'Updated in another window');
+  } finally { h.close(); }
+});
+
+test('pending Google authorization can be cancelled without changing stored accounts', async () => {
+  const h = harness();
+  try {
+    const cancel = h.action('cancel-login'); assert.equal(cancel.hidden, true);
+    const accounts = structuredClone(h.state.accounts);
+    h.state.status.login.state = 'pending'; h.controller.render();
+    assert.equal(cancel.hidden, false); assert.equal(cancel.disabled, false);
+    assert.equal(h.action('add').disabled, true);
+    cancel.click(); await settle(); assert.deepEqual(h.calls, []);
+    cancel.focus(); h.trusted(cancel, 'click'); await settle();
+    assert.deepEqual(h.calls, [{ method: 'cancelLogin', params: {} }]);
+    assert.deepEqual(h.state.accounts, accounts);
+    assert.equal(cancel.hidden, true); assert.equal(h.action('add').disabled, false);
+    assert.equal(h.document.activeElement, h.action('add'));
+    assert.match(h.document.querySelector('[role="status"]').textContent, /已取消本次授权/);
+  } finally { h.close(); }
+});
+
+test('removing a focused account keeps keyboard focus in the management dialog', async () => {
+  const h = harness();
+  try {
+    h.trusted(h.action('remove', 'b'), 'click');
+    const confirm = h.action('remove-confirm', 'b'); confirm.focus();
+    h.trusted(confirm, 'click'); await settle();
+    assert.equal(confirm.isConnected, false);
+    assert(h.document.querySelector('dialog').contains(h.document.activeElement));
+    assert.equal(h.document.activeElement, h.action('label', 'a'));
   } finally { h.close(); }
 });

@@ -54,6 +54,7 @@ internal sealed class SavedAccount
 
 internal sealed class SavedState
 {
+    public const int MaximumAccounts = 100;
     public int SchemaVersion { get; set; } = 2;
     public OAuthClient? OAuth { get; set; }
     public Guid? PrimaryAccountId { get; set; }

@@ -101,6 +101,25 @@ const openManagement = async h => {
   return management(h.document);
 };
 
+test('status polling preserves the focused cancel button and gives focus back when waiting ends', async () => {
+  const h = harness();
+  try {
+    h.state().status.switch = { state: 'waiting', targetAccountId: 'b', cancellable: true };
+    await settle(); h.tick(); await settle();
+    // Reopening causes a fresh read even when the menu was idle before the switch.
+    const panel = h.document.querySelector('[data-testid="model-selector-panel"]');
+    panel.setAttribute('hidden', ''); await settle(); panel.removeAttribute('hidden'); await settle();
+    const cancel = h.document.querySelector('[data-account-action="cancel-switch"]');
+    assert(cancel); cancel.focus();
+    h.state().status.switch.errorCode = 'native_tasks_pending'; h.tick(); await settle();
+    assert.equal(h.document.querySelector('[data-account-action="cancel-switch"]'), cancel);
+    assert.equal(h.document.activeElement, cancel);
+    h.state().status.switch = { state: 'active', cancellable: false }; h.tick(); await settle();
+    assert.equal(cancel.isConnected, false);
+    assert.equal(h.document.activeElement, h.document.querySelector('[data-account-action="manage"]'));
+  } finally { h.close(); }
+});
+
 test('an inactive attached account can be removed during native use only after explicit confirmation', { skip: !JSDOM }, async () => {
   const h = harness({ onRequest(method, params, state) {
     if (method === 'getState') return state;
@@ -291,6 +310,57 @@ test('accounts surround the actual model list without cloning, moving, or replac
     assert.equal(document.querySelector('[data-antigravity-accounts-menu]').style.color, 'inherit');
     h.controller.stop();
     assert.deepEqual([...panel.children], [models, usage]);
+  } finally { h.close(); }
+});
+
+test('account labels truncate independently of status and decorative icons retain complete accessible names', async () => {
+  const h = harness();
+  try {
+    const longName = '工作账号 / 非常长的团队名称 / production@example.invalid';
+    h.state().accounts[0].label = longName;
+    h.state().accounts[1].label = longName + ' personal';
+    h.state().accounts[1].disabled = true;
+    await settle();
+    const selected = current(h.document), other = groupButton(h.document);
+    assert.equal(selected.getAttribute('aria-current'), 'true');
+    assert.equal(selected.getAttribute('aria-label'), `${longName} · 正在使用`);
+    assert.equal(selected.querySelector('[data-account-label]').textContent, longName);
+    assert(selected.querySelector('[data-account-label]').classList.contains('truncate'));
+    assert.equal(selected.querySelector('[data-account-state]').textContent, '正在使用');
+    assert(selected.querySelector('[data-account-state]').classList.contains('shrink-0'));
+    assert.equal(selected.querySelector('[data-account-icon]').getAttribute('data-account-icon'), 'check');
+    assert(other.disabled);
+    assert.equal(other.getAttribute('aria-checked'), 'false');
+    assert.equal(other.getAttribute('aria-label'), `${longName} personal，需授权，选择此账号`);
+    assert.equal(other.querySelector('[data-account-state]').textContent, '需授权');
+    assert.equal(other.querySelector('[data-account-icon]').getAttribute('data-account-icon'), 'chevron');
+    for (const svg of h.document.querySelectorAll('[data-account-icon]')) {
+      assert.equal(svg.getAttribute('aria-hidden'), 'true'); assert.equal(svg.getAttribute('focusable'), 'false');
+      assert.equal(svg.getAttribute('stroke'), 'currentColor');
+    }
+    const manage = h.document.querySelector('[data-testid="antigravity-accounts-manage"]');
+    assert.equal(manage.getAttribute('aria-label'), '账号设置与管理');
+    assert.equal(manage.textContent, '账号设置');
+    assert(h.document.querySelector('[role="status"]').hidden, 'An empty status row takes no menu height');
+  } finally { h.close(); }
+});
+
+test('an unconfirmed current account has pending visuals until its native identity is confirmed', async () => {
+  const h = harness();
+  try {
+    h.state().status.switch = { state: 'confirming', targetAccountId: 'a', cancellable: false };
+    await settle();
+    assert.equal(current(h.document).getAttribute('data-account-selection'), 'pending');
+    assert.equal(current(h.document).getAttribute('aria-current'), null);
+    assert.equal(current(h.document).querySelector('[data-account-icon]').getAttribute('data-account-icon'), 'clock');
+    assert.match(current(h.document).textContent, /Work · 正在确认/);
+    assert.equal(h.document.querySelector('[role="status"]').hidden, false);
+    h.state().status.switch = { state: 'active', cancellable: false }; h.tick(); await settle();
+    assert.equal(current(h.document).getAttribute('data-account-selection'), 'confirmed');
+    assert.equal(current(h.document).getAttribute('aria-current'), 'true');
+    assert.equal(current(h.document).querySelector('[data-account-icon]').getAttribute('data-account-icon'), 'check');
+    assert.match(current(h.document).textContent, /Work · 正在使用/);
+    assert(h.document.querySelector('[role="status"]').hidden);
   } finally { h.close(); }
 });
 

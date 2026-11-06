@@ -13,7 +13,8 @@ internal sealed class AccountService : IAsyncDisposable
     private readonly CancellationTokenSource _lifetime = new();
     private readonly object _loginGate = new();
     private LoginStatus _login = new("idle");
-    private Task? _loginTask;
+    private readonly List<Task> _loginTasks = [];
+    private CancellationTokenSource? _loginCancellation;
     private bool _selectionLocked;
     private bool _tokenProvided;
     private Guid? _lockedAccount;
@@ -106,28 +107,65 @@ internal sealed class AccountService : IAsyncDisposable
             {
                 if (_login.State == "pending") throw new AccountOperationException("login_pending", "An account sign-in is already pending.");
                 _login = new("pending");
-                _loginTask = RunLoginAsync(client, label);
+                _loginCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+                _loginTasks.RemoveAll(task => task.IsCompleted);
+                _loginTasks.Add(RunLoginAsync(client, label, _loginCancellation));
             }
         }
         finally { _selectionGate.Release(); }
     }
 
-    private async Task RunLoginAsync(OAuthClient client, string? label)
+    public async Task<bool> CancelLoginAsync(CancellationToken token = default)
+    {
+        await _selectionGate.WaitAsync(token);
+        try
+        {
+            lock (_loginGate)
+            {
+                if (_login.State != "pending" || _loginCancellation is not { } pending) return false;
+                _loginCancellation = null;
+                _login = new("cancelled", "Account sign-in was cancelled. Saved accounts have not changed.");
+                pending.Cancel();
+                return true;
+            }
+        }
+        finally { _selectionGate.Release(); }
+    }
+
+    private void FinishLogin(CancellationTokenSource attempt, LoginStatus status)
+    {
+        lock (_loginGate)
+        {
+            if (_loginCancellation != attempt) return;
+            _loginCancellation = null;
+            _login = status;
+        }
+    }
+
+    private async Task RunLoginAsync(OAuthClient client, string? label, CancellationTokenSource attempt)
     {
         // Yield before calling the browser so beginLogin can return and status/shutdown remain usable.
         await Task.Yield();
         try
         {
-            var result = await _oauth.LoginAsync(client, _openBrowser, _lifetime.Token);
-            await _selectionGate.WaitAsync(_lifetime.Token);
+            attempt.Token.ThrowIfCancellationRequested();
+            var result = await _oauth.LoginAsync(client, uri =>
+            {
+                attempt.Token.ThrowIfCancellationRequested();
+                _openBrowser(uri);
+            }, attempt.Token).WaitAsync(attempt.Token);
+            await _selectionGate.WaitAsync(attempt.Token);
             try
             {
+                attempt.Token.ThrowIfCancellationRequested();
                 await _store.UpdateAsync(s =>
                 {
                     if (s.OAuth is not { } configured || !SameClient(configured, client))
                         throw new AccountOperationException("oauth_configuration_changed", "OAuth configuration changed during sign-in; start sign-in again.");
                     var existing = s.Accounts.FirstOrDefault(a => a.Subject == result.Subject);
                     RequireNoSwitch();
+                    if (existing is null && s.Accounts.Count >= SavedState.MaximumAccounts)
+                        throw new AccountOperationException("account_limit_reached", "Remove an unused account before adding another account; the account limit is 100.");
                     if (existing is not null && _selectionLocked && existing.Id == _lockedAccount)
                         throw new AccountOperationException("account_locked", "Switch away from the active quota account before replacing its authorization.");
                     var account = existing ?? new SavedAccount { Id = Guid.NewGuid(), Subject = result.Subject };
@@ -138,14 +176,17 @@ internal sealed class AccountService : IAsyncDisposable
                     account.Disabled = false;
                     if (existing is null) s.Accounts.Add(account);
                     // Explicit selection is required even after the first successful sign-in.
-                }, _lifetime.Token);
+                }, attempt.Token);
+                // Cancellation shares this gate with persistence: once saved,
+                // a later cancel cannot report that the completed login was cancelled.
+                FinishLogin(attempt, new("succeeded"));
             }
             finally { _selectionGate.Release(); }
-            lock (_loginGate) _login = new("succeeded");
         }
-        catch (OperationCanceledException) { lock (_loginGate) _login = new("failed", "Account sign-in was cancelled or timed out."); }
-        catch (AccountOperationException error) { lock (_loginGate) _login = new("failed", error.Message); }
-        catch { lock (_loginGate) _login = new("failed", "Account sign-in could not be completed."); }
+        catch (OperationCanceledException) { FinishLogin(attempt, new("failed", "Account sign-in was cancelled or timed out.")); }
+        catch (AccountOperationException error) { FinishLogin(attempt, new("failed", error.Message)); }
+        catch { FinishLogin(attempt, new("failed", "Account sign-in could not be completed.")); }
+        finally { lock (_loginGate) attempt.Dispose(); }
     }
 
     public async Task SelectAccountAsync(Guid id, CancellationToken token = default)
@@ -447,9 +488,9 @@ internal sealed class AccountService : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _lifetime.Cancel();
-        Task? pending;
-        lock (_loginGate) pending = _loginTask;
-        if (pending is not null) await pending;
+        Task[] pending;
+        lock (_loginGate) pending = _loginTasks.ToArray();
+        await Task.WhenAll(pending);
         try { await Task.WhenAll(_refreshes.Values.Where(x => x.IsValueCreated).Select(x => x.Value)); } catch { }
         _lifetime.Dispose();
         _selectionGate.Dispose();

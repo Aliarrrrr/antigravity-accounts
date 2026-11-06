@@ -13,7 +13,7 @@ const { createNativeTaskAdapter, resolveNativeProgram } = require('./native-task
 
 const PROVIDER_NATIVE_PATH = 'hostauth-addon/native/language_server.exe';
 
-const PUBLIC_METHODS = new Set(['getStatus', 'listAccounts', 'selectAccount', 'setPrimaryAccount', 'cancelSwitch', 'beginLogin', 'removeAccount', 'renameAccount', 'confirmModelSelection']);
+const PUBLIC_METHODS = new Set(['getStatus', 'listAccounts', 'selectAccount', 'setPrimaryAccount', 'cancelSwitch', 'beginLogin', 'cancelLogin', 'removeAccount', 'renameAccount', 'confirmModelSelection']);
 const LOCKED_METHODS = new Set(['setPrimaryAccount', 'configureOAuth']);
 const STARTUP_ACCOUNT_ERRORS = new Set(['account_reauth_required', 'account_not_selected', 'oauth_request_failed',
   'oauth_response_invalid', 'oauth_refresh_token_missing', 'operation_cancelled', 'account_operation_failed']);

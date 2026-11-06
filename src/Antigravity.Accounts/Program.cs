@@ -67,6 +67,9 @@ internal static class Program
                 Allowed(parameters, "label");
                 await service.BeginLoginAsync(Text(parameters, "label"));
                 return new { started = true };
+            case "cancelLogin":
+                Allowed(parameters);
+                return new { cancelled = await service.CancelLoginAsync() };
             case "getToken": Allowed(parameters); return await service.GetTokenResponseAsync();
             case "setPrimaryAccount":
                 Allowed(parameters, "id");

@@ -6,6 +6,7 @@ namespace Antigravity.Accounts;
 
 internal sealed class EncryptedAccountStore : IAccountStore
 {
+    private const int MaximumFileBytes = 4 * 1024 * 1024;
     private readonly string _root;
     private readonly Func<byte[], byte[]> _protect;
     private readonly Func<byte[], byte[]> _unprotect;
@@ -34,10 +35,13 @@ internal sealed class EncryptedAccountStore : IAccountStore
         await using var held = await AcquireAsync("store.lock", token);
         var state = ReadUnlocked(out var migrated);
         update(state);
+        ValidateState(state);
         byte[] clear = JsonSerializer.SerializeToUtf8Bytes(state, Json);
         byte[] encrypted;
         try { encrypted = _protect(clear); }
         finally { CryptographicOperations.ZeroMemory(clear); }
+        if (encrypted.Length > MaximumFileBytes)
+            throw InvalidStore();
         var temporary = Path.Combine(_root, ".accounts." + Guid.NewGuid().ToString("N") + ".tmp");
         try
         {
@@ -67,8 +71,8 @@ internal sealed class EncryptedAccountStore : IAccountStore
         migrated = false;
         CheckAncestors(StatePath);
         if (!File.Exists(StatePath)) return new();
-        if (new FileInfo(StatePath).Length > 4 * 1024 * 1024)
-            throw new AccountOperationException("store_invalid", "Account storage is invalid; it has not been replaced.");
+        if (new FileInfo(StatePath).Length > MaximumFileBytes)
+            throw InvalidStore();
         var encrypted = File.ReadAllBytes(StatePath);
         byte[] clear;
         try { clear = _unprotect(encrypted); }
@@ -76,12 +80,8 @@ internal sealed class EncryptedAccountStore : IAccountStore
         try
         {
             var state = JsonSerializer.Deserialize<SavedState>(clear, Json);
-            if (state is null || state.SchemaVersion is not (1 or 2) || state.Accounts is null || state.Accounts.Count > 100 ||
-                state.Accounts.Any(a => a is null || a.Id == Guid.Empty || string.IsNullOrWhiteSpace(a.Subject) || a.Client is null || a.Token is null) ||
-                state.Accounts.Select(a => a.Id).Distinct().Count() != state.Accounts.Count ||
-                state.SelectedAccountId is { } selected && state.Accounts.All(a => a.Id != selected) ||
-                state.PrimaryAccountId is { } primary && state.Accounts.All(a => a.Id != primary) || state.Generation < 0)
-                throw new JsonException();
+            if (state is null) throw InvalidStore();
+            ValidateState(state);
             if (state.SchemaVersion == 1)
             {
                 // A legacy selection does not establish a primary identity. The user chooses it explicitly.
@@ -92,9 +92,21 @@ internal sealed class EncryptedAccountStore : IAccountStore
             }
             return state;
         }
-        catch (JsonException) { throw new AccountOperationException("store_invalid", "Account storage is invalid; it has not been replaced."); }
+        catch (JsonException) { throw InvalidStore(); }
         finally { CryptographicOperations.ZeroMemory(clear); }
     }
+
+    private static void ValidateState(SavedState state)
+    {
+        if (state.SchemaVersion is not (1 or 2) || state.Accounts is null || state.Accounts.Count > SavedState.MaximumAccounts ||
+            state.Accounts.Any(a => a is null || a.Id == Guid.Empty || string.IsNullOrWhiteSpace(a.Subject) || a.Client is null || a.Token is null) ||
+            state.Accounts.Select(a => a.Id).Distinct().Count() != state.Accounts.Count ||
+            state.SelectedAccountId is { } selected && state.Accounts.All(a => a.Id != selected) ||
+            state.PrimaryAccountId is { } primary && state.Accounts.All(a => a.Id != primary) || state.Generation < 0)
+            throw InvalidStore();
+    }
+
+    private static AccountOperationException InvalidStore() => new("store_invalid", "Account storage is invalid; it has not been replaced.");
 
     private void PreserveLegacyState()
     {

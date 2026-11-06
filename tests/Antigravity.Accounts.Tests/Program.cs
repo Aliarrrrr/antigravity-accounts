@@ -35,11 +35,16 @@ var cases = new (string Name, Func<Task> Run)[]
     ("abandoned initial refresh cannot overwrite replacement authorization", AbandonedRefreshAuthorization),
     ("OAuth PKCE and callback state are checked", ProofValidation),
     ("OAuth loopback callback exchanges PKCE and verifies subject", LoopbackLogin),
+    ("OAuth cancellation closes the loopback listener without an exchange", LoopbackLoginCancellation),
     ("initial authorization requires an offline refresh token", MissingRefreshToken),
     ("encrypted store persists only protected bytes", EncryptedStore),
+    ("invalid and oversized updates preserve readable account storage", StoreWriteBoundaries),
     ("refresh token rotation is preserved", RotatedRefresh),
     ("HTTP unauthorized disables even with non-JSON body", UnauthorizedResponse),
     ("explicit login records verified identity without selecting it", ExplicitLogin),
+    ("cancelling login preserves saved accounts and active identity", LoginCancellation),
+    ("cancelled login cannot save or replace a newer login status", CancelledLoginCompletion),
+    ("account capacity rejects new identities while permitting reauthorization", LoginAccountCapacity),
     ("OAuth scopes and client changes are constrained", ConfigurationBoundaries),
     ("a native scope reduction preserves existing accounts and credentials", NativeScopeReduction),
     ("cancelled refresh waiter does not cancel shared refresh", CancelledWaiter),
@@ -541,6 +546,23 @@ async Task LoopbackLogin()
         result.Token.RefreshToken == "synthetic-login-refresh" && handler.Calls == 2,
         "The loopback login did not complete through the token and identity handlers.");
 }
+async Task LoopbackLoginCancellation()
+{
+    var handler = new StubHandler(_ => throw new Exception("Cancelled OAuth must not contact a Google endpoint."));
+    using var oauth = new GoogleOAuth(handler, () => now);
+    using var cancellation = new CancellationTokenSource();
+    var opened = new TaskCompletionSource<Uri>(TaskCreationOptions.RunContinuationsAsynchronously);
+    var login = oauth.LoginAsync(new("synthetic.apps.googleusercontent.com"), uri => opened.TrySetResult(uri), cancellation.Token);
+    var authorization = await opened.Task.WaitAsync(TimeSpan.FromSeconds(3));
+    var redirect = System.Web.HttpUtility.ParseQueryString(authorization.Query)["redirect_uri"]!;
+    cancellation.Cancel();
+    try { _ = await login.WaitAsync(TimeSpan.FromSeconds(3)); throw new Exception("Cancelled OAuth completed successfully."); }
+    catch (OperationCanceledException) { }
+    using var loopback = new HttpClient(new HttpClientHandler { UseProxy = false, AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(3) };
+    try { using var response = await loopback.GetAsync(redirect); throw new Exception("Cancelled OAuth left its loopback listener open."); }
+    catch (HttpRequestException) { }
+    Check(handler.Uris.Count == 0, "Cancelled OAuth attempted an external authorization request.");
+}
 async Task MissingRefreshToken()
 {
     var handler = new LoginHandler { OmitRefresh = true };
@@ -572,6 +594,28 @@ async Task EncryptedStore()
     }
     finally { CleanupSyntheticDirectory(directory); }
 }
+async Task StoreWriteBoundaries()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "ag-accounts-test-" + Guid.NewGuid().ToString("N"));
+    try
+    {
+        static byte[] Transform(byte[] bytes) => bytes.Select(b => (byte)(b ^ 0xAA)).ToArray();
+        var store = new EncryptedAccountStore(directory, Transform, Transform);
+        var account = Account();
+        await store.UpdateAsync(s => { s.Accounts.Add(account); s.PrimaryAccountId = account.Id; s.SelectedAccountId = account.Id; });
+        var path = Path.Combine(directory, "accounts.v1.dpapi");
+        var original = await File.ReadAllBytesAsync(path);
+        await Expect("store_invalid", () => store.UpdateAsync(s => s.Accounts.AddRange(Enumerable.Range(0, SavedState.MaximumAccounts).Select(_ => Account()))));
+        await Expect("store_invalid", () => store.UpdateAsync(s => s.SelectedAccountId = Guid.NewGuid()));
+        await Expect("store_invalid", () => store.UpdateAsync(s => s.Accounts[0].Email = new string('x', 4 * 1024 * 1024)));
+        var remaining = await store.ReadAsync();
+        Check((await File.ReadAllBytesAsync(path)).SequenceEqual(original) && remaining.Accounts.Count == 1 &&
+            remaining.Accounts[0].Id == account.Id && remaining.SelectedAccountId == account.Id && remaining.PrimaryAccountId == account.Id,
+            "A rejected update replaced the original account file or made it unreadable.");
+        Check(!Directory.EnumerateFiles(directory, "*.tmp").Any(), "A rejected update left an account temporary file.");
+    }
+    finally { CleanupSyntheticDirectory(directory); }
+}
 async Task RotatedRefresh()
 {
     var handler = new StubHandler(_ => new(HttpStatusCode.OK)
@@ -597,6 +641,95 @@ async Task ExplicitLogin()
     for (var i = 0; i < 100 && (await service.GetStatusAsync()).Login.State == "pending"; i++) await Task.Delay(5);
     var list = await service.ListAccountsAsync();
     Check(oauth.Logins == 1 && oauth.BrowserOpens == 1 && list.Single().Label == "Chosen label" && !list.Single().Selected, "Explicit login did not preserve selection rules.");
+    Check(!await service.CancelLoginAsync() && (await service.GetStatusAsync()).Login.State == "succeeded", "Cancelling after completion changed a completed login.");
+}
+async Task LoginCancellation()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "ag-accounts-test-" + Guid.NewGuid().ToString("N"));
+    try
+    {
+        static byte[] Transform(byte[] bytes) => bytes.Select(b => (byte)(b ^ 0xAA)).ToArray();
+        var primary = Account(); var selected = Account();
+        var store = new EncryptedAccountStore(directory, Transform, Transform);
+        await store.UpdateAsync(s => { s.Accounts = [primary, selected]; s.OAuth = primary.Client; s.PrimaryAccountId = primary.Id; s.SelectedAccountId = selected.Id; s.Generation = 9; });
+        var original = await File.ReadAllBytesAsync(Path.Combine(directory, "accounts.v1.dpapi"));
+        var oauth = new PendingLoginOAuth();
+        await using var service = new AccountService(store, oauth, _ => { }, () => now);
+        Check(!await service.CancelLoginAsync() && (await service.GetStatusAsync()).Login.State == "idle", "An idle cancellation changed login state.");
+        _ = await service.GetTokenResponseAsync();
+        await service.BeginLoginAsync("Cancelled account");
+        var pending = await oauth.Started.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(3));
+        using var empty = JsonDocument.Parse("{}");
+        var result = JsonSerializer.SerializeToElement(await Antigravity.Accounts.Program.DispatchAsync(service, "cancelLogin", empty.RootElement));
+        Check(result.GetProperty("cancelled").GetBoolean() && pending.Token.IsCancellationRequested, "Cancelling login did not cancel its OAuth token.");
+        Check(!await service.CancelLoginAsync(), "Repeated cancellation claimed another pending login.");
+        using var unsupported = JsonDocument.Parse("{\"label\":\"not accepted\"}");
+        await Expect("unsupported_parameter", () => Antigravity.Accounts.Program.DispatchAsync(service, "cancelLogin", unsupported.RootElement));
+        pending.Completion.TrySetResult(new("cancelled-subject", "cancelled@example.invalid", selected.Token));
+        var status = await service.GetStatusAsync();
+        Check(status.Login.State == "cancelled" && status.PrimaryAccountId == primary.Id && status.SelectedAccountId == selected.Id && status.Generation == 9 && status.SelectionLocked &&
+            (await service.ListAccountsAsync()).Count == 2 && (await File.ReadAllBytesAsync(Path.Combine(directory, "accounts.v1.dpapi"))).SequenceEqual(original),
+            "Cancelling login changed saved accounts or the active selection.");
+    }
+    finally { CleanupSyntheticDirectory(directory); }
+}
+async Task CancelledLoginCompletion()
+{
+    foreach (var lateFailure in new[] { false, true })
+    {
+        var primary = Account(); var oauth = new PendingLoginOAuth();
+        var store = new MemoryStore(new() { OAuth = primary.Client, Accounts = [primary], PrimaryAccountId = primary.Id, SelectedAccountId = primary.Id });
+        await using var service = new AccountService(store, oauth, _ => { }, () => now);
+        await service.BeginLoginAsync("Old attempt");
+        var old = await oauth.Started.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(3));
+        Check(await service.CancelLoginAsync(), "A pending attempt could not be cancelled.");
+        await service.BeginLoginAsync("New attempt");
+        var current = await oauth.Started.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(3));
+        if (lateFailure) old.Completion.TrySetException(new AccountOperationException("oauth_request_failed", "Late old failure."));
+        else old.Completion.TrySetResult(new("old-subject", "old@example.invalid", primary.Token));
+        // The cancelled provider deliberately ignores its cancellation token.
+        // Its late completion must not terminate or save the new attempt.
+        await Task.Yield();
+        Check((await service.GetStatusAsync()).Login.State == "pending" && (await service.ListAccountsAsync()).Count == 1 && !current.Token.IsCancellationRequested,
+            "The old attempt changed state while its replacement was pending.");
+        current.Completion.TrySetResult(new("new-subject", "new@example.invalid", primary.Token));
+        for (var i = 0; i < 100 && (await service.GetStatusAsync()).Login.State == "pending"; i++) await Task.Delay(5);
+        var saved = await store.ReadAsync();
+        Check((await service.GetStatusAsync()).Login.State == "succeeded" && saved.Accounts.Count == 2 &&
+            saved.Accounts.Single(a => a.Subject == "new-subject").Label == "New attempt" && saved.Accounts.All(a => a.Subject != "old-subject") &&
+            saved.PrimaryAccountId == primary.Id && saved.SelectedAccountId == primary.Id && saved.Generation == 0,
+            "A late cancelled attempt replaced the new login or changed the saved identity.");
+    }
+}
+async Task LoginAccountCapacity()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "ag-accounts-test-" + Guid.NewGuid().ToString("N"));
+    try
+    {
+        static byte[] Transform(byte[] bytes) => bytes.Select(b => (byte)(b ^ 0xAA)).ToArray();
+        var accounts = Enumerable.Range(0, SavedState.MaximumAccounts).Select(_ => Account()).ToList();
+        var store = new EncryptedAccountStore(directory, Transform, Transform);
+        await store.UpdateAsync(s => { s.Accounts = accounts; s.OAuth = accounts[0].Client; s.PrimaryAccountId = accounts[0].Id; s.SelectedAccountId = accounts[0].Id; });
+        var original = await File.ReadAllBytesAsync(Path.Combine(directory, "accounts.v1.dpapi"));
+        var oauth = new FakeOAuth(now);
+        await using var service = new AccountService(store, oauth, _ => { }, () => now);
+        await service.BeginLoginAsync("New identity");
+        for (var i = 0; i < 100 && (await service.GetStatusAsync()).Login.State == "pending"; i++) await Task.Delay(5);
+        var failed = await service.GetStatusAsync();
+        Check(failed.Login.State == "failed" && failed.Login.Message!.Contains("account limit", StringComparison.Ordinal) &&
+            (await service.ListAccountsAsync()).Count == SavedState.MaximumAccounts &&
+            (await File.ReadAllBytesAsync(Path.Combine(directory, "accounts.v1.dpapi"))).SequenceEqual(original),
+            "Adding an identity beyond capacity did not preserve the readable original accounts.");
+        oauth.LoginSubject = accounts[1].Subject;
+        await service.BeginLoginAsync("Reauthorized identity");
+        for (var i = 0; i < 100 && (await service.GetStatusAsync()).Login.State == "pending"; i++) await Task.Delay(5);
+        var saved = await store.ReadAsync();
+        Check((await service.GetStatusAsync()).Login.State == "succeeded" && saved.Accounts.Count == SavedState.MaximumAccounts &&
+            saved.Accounts.Single(a => a.Id == accounts[1].Id).Token.AccessToken == "synthetic-login-access" &&
+            saved.PrimaryAccountId == accounts[0].Id && saved.SelectedAccountId == accounts[0].Id,
+            "The account limit prevented existing authorization recovery or changed the selected identity.");
+    }
+    finally { CleanupSyntheticDirectory(directory); }
 }
 Task DpapiRoundtrip()
 {
@@ -852,13 +985,14 @@ sealed class PausingTokenReadStore(SavedState state) : IAccountStore
 sealed class FakeOAuth(DateTimeOffset now) : IGoogleOAuth
 {
     public int Logins; public int Refreshes; public int BrowserOpens;
+    public string LoginSubject = "synthetic-subject";
     public bool InvalidGrant; public bool DelayRefresh; public bool TemporaryFailure;
     public TaskCompletionSource RefreshStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public TaskCompletionSource ReleaseRefresh { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public Task<OAuthLoginResult> LoginAsync(OAuthClient client, Action<Uri> openBrowser, CancellationToken token)
     {
         Interlocked.Increment(ref Logins); openBrowser(new("https://accounts.google.com/o/oauth2/v2/auth"));
-        return Task.FromResult(new OAuthLoginResult("synthetic-subject", "synthetic@example.invalid", new("synthetic-login-access", "Bearer", "synthetic-login-refresh", now.AddHours(1))));
+        return Task.FromResult(new OAuthLoginResult(LoginSubject, "synthetic@example.invalid", new("synthetic-login-access", "Bearer", "synthetic-login-refresh", now.AddHours(1))));
     }
     public async Task<AccountToken> RefreshAsync(OAuthClient client, AccountToken current, CancellationToken token)
     {
@@ -868,6 +1002,23 @@ sealed class FakeOAuth(DateTimeOffset now) : IGoogleOAuth
         if (TemporaryFailure) throw new AccountOperationException("oauth_request_failed", "Synthetic temporary refresh failure.");
         return current with { AccessToken = "synthetic-refreshed-secret", Expiry = now.AddHours(1) };
     }
+}
+sealed class PendingLoginOAuth : IGoogleOAuth
+{
+    public sealed class Attempt(CancellationToken token)
+    {
+        public CancellationToken Token { get; } = token;
+        public TaskCompletionSource<OAuthLoginResult> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+    public System.Threading.Channels.Channel<Attempt> Started { get; } = System.Threading.Channels.Channel.CreateUnbounded<Attempt>();
+    public Task<OAuthLoginResult> LoginAsync(OAuthClient client, Action<Uri> openBrowser, CancellationToken token)
+    {
+        openBrowser(new("https://accounts.google.com/o/oauth2/v2/auth"));
+        var attempt = new Attempt(token);
+        Started.Writer.TryWrite(attempt);
+        return attempt.Completion.Task;
+    }
+    public Task<AccountToken> RefreshAsync(OAuthClient client, AccountToken current, CancellationToken token) => throw new Exception("A cancelled login must not trigger a token refresh.");
 }
 sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
 {

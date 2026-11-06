@@ -161,3 +161,100 @@ test('late old-account metadata cannot release submission pause even with the ne
   assert.equal(coordinator.getStatus().state, 'blocked');
   assert.equal(calls.some(x => x[0] === 'release'), false);
 });
+
+test('partially cleared model captures can finish cleanup without repeating identity confirmation', async () => {
+  const { coordinator, adapter, calls } = setup();
+  const confirm = adapter.confirmIdentity;
+  let captured = true, clears = 0;
+  adapter.confirmIdentity = async options => {
+    if (!captured) throw Object.assign(new Error(), { code: 'native_view_capture_missing' });
+    return confirm(options);
+  };
+  adapter.clearModelSelection = async () => {
+    calls.push(['clear']);
+    // One native window was cleared before a second window failed.
+    captured = false;
+    if (++clears === 1) throw Object.assign(new Error(), { code: 'native_view_execution_failed' });
+    return { cleared: true };
+  };
+  await assert.rejects(coordinator.selectAccount('attached'), { code: 'native_view_execution_failed' });
+  assert.equal(coordinator.getStatus().state, 'blocked');
+  assert.equal(calls.some(call => call[0] === 'release'), false);
+  await coordinator.selectAccount('attached');
+  assert.equal(coordinator.getStatus().state, 'active');
+  assert.equal(clears, 2);
+  assert.equal(calls.filter(call => call[0] === 'commitSwitch').length, 1);
+  assert.equal(calls.filter(call => call[0] === 'confirm').length, 1);
+  assert.equal(calls.at(-1)[0], 'release');
+});
+
+test('a failed pause release retries only the unfinished release after captures were cleared', async () => {
+  const { coordinator, adapter, calls } = setup();
+  let releases = 0;
+  adapter.pauseSubmissions = async () => ({
+    closedToFrontendRequests: true,
+    async release() {
+      calls.push(['release']);
+      if (++releases === 1) throw Object.assign(new Error(), { code: 'native_submission_gate_unavailable' });
+    },
+  });
+  await assert.rejects(coordinator.selectAccount('attached'), { code: 'native_submission_gate_unavailable' });
+  assert.equal(coordinator.getStatus().state, 'blocked');
+  await coordinator.selectAccount('attached');
+  assert.equal(coordinator.getStatus().state, 'active');
+  assert.equal(releases, 2);
+  for (const method of ['commitSwitch', 'confirm', 'clear']) {
+    assert.equal(calls.filter(call => call[0] === method).length, 1);
+  }
+});
+
+test('an unavailable model still requires an explicit selection before cleanup can be resumed', async () => {
+  const { coordinator, adapter, calls } = setup();
+  const confirm = adapter.confirmIdentity;
+  let modelSelected = false;
+  adapter.confirmIdentity = async options => {
+    if (!modelSelected) throw Object.assign(new Error(), { code: 'native_model_selection_required' });
+    return confirm(options);
+  };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await assert.rejects(coordinator.selectAccount('attached'), { code: 'native_model_selection_required' });
+    assert.equal(coordinator.getStatus().state, 'blocked');
+    assert.equal(calls.some(call => ['clear', 'release'].includes(call[0])), false);
+  }
+  modelSelected = true;
+  await coordinator.selectAccount('attached');
+  assert.equal(coordinator.getStatus().state, 'active');
+  assert.equal(calls.filter(call => call[0] === 'commitSwitch').length, 1);
+  assert.deepEqual(calls.slice(-2).map(call => call[0]), ['clear', 'release']);
+});
+
+test('only one native window can retry a failed cancellation cleanup at a time', async () => {
+  const { coordinator, client, calls } = setup();
+  const request = client.request;
+  const retry = deferred();
+  let cancellations = 0;
+  client.request = async (method, params) => {
+    if (method === 'beginSwitch') {
+      const result = await request(method, params);
+      coordinator.cancelSwitch();
+      return result;
+    }
+    if (method === 'cancelSwitch') {
+      calls.push([method, params]);
+      if (++cancellations === 1) throw Object.assign(new Error(), { code: 'component_request_failed' });
+      await retry.promise;
+      return { cancelled: true };
+    }
+    return request(method, params);
+  };
+  await assert.rejects(coordinator.selectAccount('attached'), { code: 'switch_cancel_unconfirmed' });
+  assert.equal(coordinator.getStatus().state, 'blocked');
+  const recovering = coordinator.selectAccount('attached');
+  await assert.rejects(coordinator.selectAccount('attached'), { code: 'switch_in_progress' });
+  assert.equal(cancellations, 2, 'only the original failed cleanup and one retry own the ticket');
+  retry.resolve();
+  await recovering;
+  assert.equal(coordinator.getStatus().state, 'active');
+  assert.equal(calls.filter(call => call[0] === 'release').length, 1);
+  assert.equal(calls.some(call => call[0] === 'commitSwitch'), false);
+});

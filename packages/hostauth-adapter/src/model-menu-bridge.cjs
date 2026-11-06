@@ -4,7 +4,7 @@ const { ComponentError } = require('./component-client.cjs');
 const { loopbackOrigin } = require('./submission-gate.cjs');
 const path = require('node:path');
 const CHANNEL = 'antigravity-accounts:model-menu';
-const ACTIONS = new Set(['getState', 'getPreferences', 'setPreferences', 'renameAccount', 'selectAccount', 'cancelSwitch', 'beginLogin', 'setPrimaryAccount', 'removeAccount', 'confirmModelSelection']);
+const ACTIONS = new Set(['getState', 'getPreferences', 'setPreferences', 'renameAccount', 'selectAccount', 'cancelSwitch', 'beginLogin', 'cancelLogin', 'setPrimaryAccount', 'removeAccount', 'confirmModelSelection']);
 
 function publicState(status, accounts) {
   const pick = (source, names) => Object.fromEntries(names.filter(name => source?.[name] !== undefined).map(name => [name, source[name]]));

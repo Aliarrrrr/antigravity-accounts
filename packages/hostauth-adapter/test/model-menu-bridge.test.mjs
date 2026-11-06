@@ -39,6 +39,9 @@ test('model menu reads only public state and accepts bounded account actions', a
   assert(!JSON.stringify(state).includes('PRIVATE'));
   assert.deepEqual(await handle(h.event, { method: 'selectAccount', params: { id: 'b' } }), { accepted: true });
   assert.deepEqual(h.calls.at(-1), { method: 'selectAccount', params: { id: 'b' } });
+  assert.deepEqual(await handle(h.event, { method: 'cancelLogin', params: {} }), { accepted: true });
+  assert.deepEqual(h.calls.at(-1), { method: 'cancelLogin', params: {} });
+  await assert.rejects(handle(h.event, { method: 'cancelLogin', params: { id: 'b' } }), { code: 'unsupported_parameter' });
   assert.equal(h.preloads.size, 1);
   for (const request of [{ method: 'getToken' }, { method: 'commitSwitch' }, { method: 'getState', params: { token: 'x' } }, { method: 'selectAccount', params: {} }, { method: 'beginLogin', params: { label: 'x'.repeat(121) } }])
     await assert.rejects(handle(h.event, request));

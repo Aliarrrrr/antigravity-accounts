@@ -3,15 +3,24 @@ export function installAccountManagement({ document, window, operate, getState, 
   getError = () => '', onOpen = () => {}, onClose = () => {}, onRefresh = () => {} } = {}) {
   if (!document?.body || !window || typeof operate !== 'function' || typeof getState !== 'function') return null;
   const rows = new Map();
-  const buttonClass = 'inline-flex shrink-0 items-center justify-center rounded-md border border-border bg-transparent px-3 py-1.5 text-xs outline-none hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-50';
-  const inputClass = 'min-w-0 rounded-md border border-border bg-transparent px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50';
-  let dialog, content, accountList, message, addLabel, addButton, consent, closeButton, empty;
+  const buttonClass = 'accounts-button inline-flex shrink-0 items-center justify-center rounded-md text-xs disabled:cursor-default disabled:opacity-50';
+  const inputClass = 'accounts-input min-w-0 rounded-md border border-border bg-transparent text-xs disabled:opacity-50';
+  let dialog, content, accountList, accountCount, message, addLabel, addButton, cancelLogin, consent, closeButton, empty;
   let stopped = false, opened = false, returnFocus, pendingRemoval;
 
   function element(tag, className = '', text = '') {
     const node = document.createElement(tag);
     node.className = className; node.textContent = text;
     return node;
+  }
+  function icon(name, size = 16) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    for (const [key, value] of Object.entries({ width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
+      'stroke-width': '1.7', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' })) svg.setAttribute(key, value);
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', { user: 'M20 21v-2a6 6 0 0 0-6-6h-4a6 6 0 0 0-6 6v2M16 6a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
+      close: 'M6 6l12 12M18 6 6 18', check: 'm5 12 4 4L19 6', plus: 'M12 5v14M5 12h14' }[name]);
+    svg.append(path); return svg;
   }
   function trusted(event, node) {
     return !stopped && opened && event.isTrusted === true && event.currentTarget === node &&
@@ -73,40 +82,74 @@ export function installAccountManagement({ document, window, operate, getState, 
     dialog.setAttribute('data-antigravity-accounts-management', '');
     dialog.setAttribute('aria-label', '账号设置与管理');
     dialog.setAttribute('aria-modal', 'true');
-    dialog.style.cssText = 'padding:0;margin:auto;width:min(42rem,calc(100vw - 2rem));max-width:calc(100vw - 2rem);max-height:calc(100dvh - 2rem);overflow:hidden;pointer-events:auto;font-family:inherit;color:var(--color-foreground,CanvasText);background-color:var(--color-background,Canvas);';
+    dialog.style.cssText = 'padding:0;margin:auto;width:min(40rem,calc(100vw - 2rem));max-width:calc(100vw - 2rem);max-height:calc(100dvh - 2rem);overflow:hidden;pointer-events:auto;font-family:inherit;color:var(--color-foreground,CanvasText);background-color:var(--color-background,Canvas);';
     const theme = element('style');
-    theme.textContent = 'dialog[data-antigravity-accounts-management]::backdrop{background:var(--overlay-background,rgba(0,0,0,.45))}';
-    const header = element('div', 'flex items-center justify-between gap-4 border-b border-border px-5 py-4');
+    const scope = 'dialog[data-antigravity-accounts-management]';
+    theme.textContent = `${scope}::backdrop{background:var(--overlay-background,rgba(0,0,0,.45))}
+      ${scope} .accounts-button{min-height:30px;gap:6px;padding:5px 10px;border:1px solid transparent;line-height:18px;cursor:pointer;background:transparent}
+      ${scope} .accounts-button:hover:not(:disabled){background:var(--color-secondary,ButtonFace)}
+      ${scope} .accounts-button:disabled{cursor:default}
+      ${scope} .accounts-button[data-variant=secondary]{border-color:var(--color-border,ButtonBorder)}
+      ${scope} .accounts-button[data-variant=primary]{background:var(--color-primary,Highlight);color:var(--color-primary-foreground,HighlightText)!important}
+      ${scope} .accounts-button[data-variant=primary]:hover:not(:disabled){filter:brightness(.94)}
+      ${scope} .accounts-button[data-variant=danger]:not(:disabled){color:var(--color-error,CanvasText)!important}
+      ${scope} .accounts-input{height:32px;padding:5px 9px;line-height:20px;font-family:inherit;color:inherit}
+      ${scope} .accounts-button:focus-visible,${scope} .accounts-input:focus-visible{outline:2px solid var(--focus-ring-color,var(--color-primary,Highlight));outline-offset:2px}
+      ${scope} .accounts-close{width:30px;padding:5px;color:var(--color-muted-foreground,GrayText)!important}
+      ${scope} .accounts-list{border:1px solid var(--color-border,ButtonBorder);border-radius:8px;overflow:hidden}
+      ${scope} .accounts-row{padding:14px 16px}
+      ${scope} .accounts-row+.accounts-row{border-top:1px solid var(--color-border,ButtonBorder)}
+      ${scope} .accounts-avatar{display:flex;align-items:center;justify-content:center;flex:none;width:30px;height:30px;border-radius:50%;background:var(--color-secondary,ButtonFace);color:var(--color-muted-foreground,GrayText)}
+      ${scope} .accounts-avatar[data-current=true]{color:var(--color-primary,Highlight)}
+      ${scope} .accounts-badges{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+      ${scope} .accounts-badge{display:inline-flex;align-items:center;gap:3px;padding:1px 6px;border-radius:4px;background:var(--color-secondary,ButtonFace);color:var(--color-muted-foreground,GrayText);font-size:.6875rem;line-height:16px}
+      ${scope} .accounts-badge[data-current=true]{color:var(--color-primary,Highlight)}
+      ${scope} .accounts-label-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px;margin-top:12px;margin-inline-start:42px}
+      ${scope} .accounts-actions{display:flex;flex-wrap:wrap;gap:2px;margin-top:6px;margin-inline-start:32px}
+      ${scope} .accounts-explanation{margin:4px 0 0 42px;font-size:.75rem;color:var(--color-muted-foreground,GrayText)}
+      ${scope} .accounts-confirm{margin-top:10px;padding:10px 12px;border-radius:6px;background:var(--color-secondary,ButtonFace)}
+      ${scope} .accounts-status{padding:10px 12px;border-radius:6px;background:var(--color-secondary,ButtonFace);font-size:.75rem;line-height:1.5}
+      ${scope} .accounts-consent-label{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+      ${scope} .accounts-consent-label select{width:min(100%,17rem);height:34px;background-color:var(--color-background,Canvas)}
+      @media(max-width:480px){${scope} .accounts-row{padding:12px}${scope} .accounts-label-row{margin-inline-start:0}${scope} .accounts-actions,${scope} .accounts-explanation{margin-inline-start:0}${scope} .accounts-consent-label select{width:100%}}
+      @media(forced-colors:active){${scope} .accounts-badge{border:1px solid CanvasText}${scope} .accounts-avatar{border:1px solid CanvasText}}`;
+    const header = element('div', 'flex items-start justify-between gap-4 border-b border-border px-5 py-4');
+    const heading = element('div', 'space-y-1');
     const title = element('h2', 'text-sm font-semibold', '账号设置与管理'); title.style.margin = '0';
+    heading.append(title, element('div', 'text-xs text-muted-foreground', '管理已授权的 Google 账号'));
     closeButton = action('关闭', 'close', close); closeButton.setAttribute('aria-label', '关闭账号设置与管理');
-    header.append(title, closeButton);
+    closeButton.classList.add('accounts-close'); closeButton.replaceChildren(icon('close'));
+    header.append(heading, closeButton);
     content = element('div', 'space-y-6 px-5 py-4');
-    content.style.cssText = 'overflow-y:auto;overscroll-behavior:contain;max-height:calc(100dvh - 7rem);';
-    message = element('div', 'text-xs text-muted-foreground');
+    content.style.cssText = 'overflow-y:auto;overscroll-behavior:contain;max-height:calc(100dvh - 8rem);';
+    message = element('div', 'accounts-status');
     message.setAttribute('role', 'status'); message.setAttribute('aria-live', 'polite');
     const accountsSection = element('section', 'space-y-3');
     accountsSection.setAttribute('aria-label', '已添加的账号');
-    const accountsTitle = element('h3', 'text-sm font-medium', '账号');
-    accountList = element('div', 'space-y-3');
+    const accountsTitle = element('h3', 'flex items-center gap-2 text-xs font-medium', '已添加账号');
+    accountsTitle.style.margin = '0'; accountCount = element('span', 'text-muted-foreground'); accountsTitle.append(accountCount);
+    accountList = element('div', 'accounts-list');
     empty = element('div', 'rounded-md border border-border px-3 py-4 text-sm text-muted-foreground', '还没有添加账号。请在下方通过 Google 授权添加。');
     accountsSection.append(accountsTitle, accountList, empty);
     const addSection = element('section', 'space-y-2 border-t border-border pt-4');
-    const addTitle = element('h3', 'text-sm font-medium', '添加账号');
+    const addTitle = element('h3', 'text-xs font-medium', '添加账号'); addTitle.style.margin = '0';
     const addRow = element('div', 'flex flex-wrap items-center gap-2');
     addLabel = element('input', inputClass + ' flex-1'); addLabel.type = 'text'; addLabel.maxLength = 80;
     addLabel.placeholder = '账号标签（可选）'; addLabel.setAttribute('aria-label', '新账号标签');
     addLabel.style.cssText = 'min-width:10rem;font-family:inherit;color:inherit;';
     addButton = action('添加账号', 'add', () => run('beginLogin', { label: addLabel.value.trim() }));
+    addButton.setAttribute('data-variant', 'primary'); addButton.prepend(icon('plus', 14));
     addLabel.addEventListener('keydown', event => {
       if (!trusted(event, addLabel) || event.key !== 'Enter' || event.repeat || event.isComposing || event.keyCode === 229 || addButton.disabled) return;
       event.preventDefault(); event.stopPropagation(); void run('beginLogin', { label: addLabel.value.trim() });
     });
-    addRow.append(addLabel, addButton);
+    cancelLogin = action('取消授权', 'cancel-login', () => run('cancelLogin', {}));
+    cancelLogin.hidden = true;
+    addRow.append(addLabel, addButton, cancelLogin);
     addSection.append(addTitle, addRow, element('p', 'text-xs text-muted-foreground', '在 Google 官方网页完成授权。标签仅用于本机区分账号。'));
     const privacySection = element('section', 'space-y-2 border-t border-border pt-4');
-    const consentLabel = element('label', 'block text-sm font-medium', '数据使用授权');
-    consent = element('select', inputClass + ' w-full');
-    consent.style.cssText = 'width:100%;font-family:inherit;color:inherit;background-color:inherit;';
+    const consentLabel = element('label', 'accounts-consent-label text-xs font-medium', '数据使用授权');
+    consent = element('select', inputClass);
     consent.setAttribute('aria-label', '数据使用授权'); consent.setAttribute('data-account-action', 'consent');
     for (const [value, label] of [['off', '自动确认，不勾选（默认）'], ['on', '自动确认，并勾选'], ['manual', '每次手动处理']]) {
       const option = element('option', '', label); option.value = value; consent.append(option);
@@ -116,7 +159,7 @@ export function installAccountManagement({ document, window, operate, getState, 
       if (!trusted(event, consent) || consent.disabled || !['off', 'on', 'manual'].includes(consent.value)) return;
       void run('setPreferences', { dataUsageConsent: consent.value });
     });
-    privacySection.append(consentLabel, element('p', 'text-xs text-muted-foreground', '账号切换后出现数据使用授权时，按此设置处理。修改后用于后续授权；选择手动处理可保留原生弹窗。'));
+    privacySection.append(consentLabel, element('p', 'text-xs text-muted-foreground', '切换后出现授权提示时按此处理。修改用于后续提示，选择手动处理可保留原生弹窗。'));
     content.append(message, accountsSection, addSection, privacySection);
     dialog.append(theme, header, content); document.body.append(dialog);
     dialog.addEventListener('cancel', event => {
@@ -142,33 +185,38 @@ export function installAccountManagement({ document, window, operate, getState, 
     });
   }
   function accountRow(account) {
-    const row = element('div', 'space-y-2 rounded-md border border-border p-3');
+    const row = element('div', 'accounts-row');
     row.setAttribute('data-account-id', account.id);
-    const identity = element('div', 'flex flex-wrap items-center justify-between gap-2');
+    const identity = element('div', 'flex items-start gap-3');
+    const avatar = element('div', 'accounts-avatar'); avatar.setAttribute('aria-hidden', 'true'); avatar.append(icon('user'));
+    const details = element('div', 'min-w-0 flex-1');
     const name = element('div', 'min-w-0 text-sm font-medium'); name.style.overflowWrap = 'anywhere';
-    const badge = element('span', 'text-xs text-muted-foreground');
+    const badge = element('div', 'accounts-badges');
     const email = element('div', 'text-xs text-muted-foreground'); email.style.overflowWrap = 'anywhere';
-    identity.append(name, badge);
-    const labelRow = element('div', 'flex flex-wrap items-center gap-2');
-    const label = element('input', inputClass + ' flex-1');
-    label.type = 'text'; label.maxLength = 80; label.style.cssText = 'min-width:10rem;font-family:inherit;color:inherit;';
+    details.append(name, email, badge); identity.append(avatar, details);
+    const labelRow = element('div', 'accounts-label-row');
+    const label = element('input', inputClass);
+    label.type = 'text'; label.maxLength = 80; label.style.minWidth = '0';
     label.setAttribute('aria-label', `账号标签 ${account.email || account.id}`);
     label.setAttribute('data-account-id', account.id); label.setAttribute('data-account-action', 'label');
     let dirty = false;
     label.addEventListener('input', event => { if (trusted(event, label)) dirty = true; });
-    const rename = action('保存标签', 'rename', async () => {
+    const saveLabel = async () => {
       await run('renameAccount', { id: account.id, label: label.value.trim() });
       // Keep unsaved text after a rejected operation; successful state reads
       // are the authority for the persisted label.
       const current = getState()?.accounts?.find(item => item.id === account.id);
       if (current && (current.label === label.value.trim() || !label.value.trim() && current.label === current.email)) dirty = false;
-    }, account.id);
+    };
+    const rename = action('保存标签', 'rename', saveLabel, account.id);
+    rename.setAttribute('data-variant', 'secondary');
     label.addEventListener('keydown', event => {
       if (!trusted(event, label) || event.key !== 'Enter' || event.repeat || event.isComposing || event.keyCode === 229 || rename.disabled) return;
-      event.preventDefault(); event.stopPropagation(); void run('renameAccount', { id: account.id, label: label.value.trim() });
+      event.preventDefault(); event.stopPropagation(); void saveLabel();
     });
-    labelRow.append(label, rename);
-    const actions = element('div', 'flex flex-wrap items-center gap-2');
+    const labelCaption = element('span', 'text-xs text-muted-foreground', '标签'); labelCaption.setAttribute('aria-hidden', 'true');
+    labelRow.append(labelCaption, label, rename);
+    const actions = element('div', 'accounts-actions');
     const primary = action('设为主账号', 'primary', () => run('setPrimaryAccount', { id: account.id }), account.id);
     const reauthorize = action('重新授权', 'reauthorize', () => {
       const current = getState()?.accounts?.find(item => item.id === account.id);
@@ -182,10 +230,11 @@ export function installAccountManagement({ document, window, operate, getState, 
       void onRefresh();
     }, account.id);
     remove.setAttribute('data-testid', 'antigravity-accounts-remove');
+    remove.setAttribute('data-variant', 'danger');
     remove.setAttribute('aria-label', `删除账号 ${account.email || account.label || 'Google 账号'}`);
     actions.append(primary, reauthorize, remove);
-    const explanation = element('div', 'text-xs text-muted-foreground');
-    const confirmation = element('div', 'space-y-2 border-t border-border pt-2');
+    const explanation = element('div', 'accounts-explanation');
+    const confirmation = element('div', 'accounts-confirm space-y-2');
     confirmation.setAttribute('data-testid', 'antigravity-accounts-remove-confirmation');
     confirmation.setAttribute('role', 'group'); confirmation.setAttribute('aria-label', '确认删除账号');
     const description = element('div', 'text-xs'); description.style.overflowWrap = 'anywhere';
@@ -196,13 +245,23 @@ export function installAccountManagement({ document, window, operate, getState, 
           pendingRemoval.label !== current.label || removalReason(current)) return;
       return run('removeAccount', { id: account.id });
     }, account.id);
+    confirm.setAttribute('data-variant', 'danger');
     const cancel = action('取消', 'remove-cancel', () => { pendingRemoval = undefined; render(); focus(remove); }, account.id);
     confirmActions.append(cancel, confirm); confirmation.append(description, confirmActions);
-    row.append(identity, email, labelRow, actions, explanation, confirmation);
+    row.append(identity, labelRow, actions, explanation, confirmation);
     return { row, update(current) {
       const s = status();
       name.textContent = current.label || current.email || 'Google 账号'; email.textContent = current.email || '';
-      badge.textContent = [current.id === s.selectedAccountId ? '当前账号' : '', current.id === s.primaryAccountId ? '主账号' : '', current.disabled ? '需要重新授权' : ''].filter(Boolean).join(' · ');
+      email.hidden = !current.email || (current.label || '').trim().toLowerCase() === current.email.trim().toLowerCase();
+      avatar.setAttribute('data-current', String(current.id === s.selectedAccountId));
+      badge.replaceChildren();
+      for (const [shown, text, active] of [[current.id === s.selectedAccountId, '当前账号', true], [current.id === s.primaryAccountId, '主账号'], [current.disabled, '需要重新授权']]) {
+        if (!shown) continue;
+        const tag = element('span', 'accounts-badge', text);
+        if (active) { tag.setAttribute('data-current', 'true'); tag.prepend(icon('check', 12)); }
+        badge.append(tag);
+      }
+      badge.hidden = !badge.childElementCount;
       if (!dirty && document.activeElement !== label) label.value = current.label || '';
       rename.disabled = Boolean(unavailable());
       label.disabled = rename.disabled;
@@ -226,7 +285,11 @@ export function installAccountManagement({ document, window, operate, getState, 
     const state = getState(), accounts = state?.accounts || [], s = state?.status || {};
     if (pendingRemoval && !accounts.some(account => account.id === pendingRemoval.id && account.email === pendingRemoval.email && account.label === pendingRemoval.label)) pendingRemoval = undefined;
     const scrollTop = content.scrollTop;
-    for (const [id, row] of rows) if (!accounts.some(account => account.id === id)) { row.row.remove(); rows.delete(id); }
+    let removedFocusIndex;
+    for (const [id, row] of rows) if (!accounts.some(account => account.id === id)) {
+      if (row.row.contains(document.activeElement)) removedFocusIndex = [...accountList.children].indexOf(row.row);
+      row.row.remove(); rows.delete(id);
+    }
     accounts.forEach((account, index) => {
       let row = rows.get(account.id);
       if (!row) { row = accountRow(account); rows.set(account.id, row); }
@@ -234,15 +297,24 @@ export function installAccountManagement({ document, window, operate, getState, 
       if (accountList.children[index] !== row.row) accountList.insertBefore(row.row, accountList.children[index] || null);
     });
     empty.hidden = accounts.length !== 0;
+    accountList.hidden = !accounts.length; accountCount.textContent = String(accounts.length);
     addButton.disabled = Boolean(unavailable()); addLabel.disabled = addButton.disabled;
-    addButton.textContent = s.login?.state === 'pending' ? '等待 Google 授权…' : '添加账号';
+    addButton.replaceChildren(icon('plus', 14), document.createTextNode(s.login?.state === 'pending' ? '等待 Google 授权…' : '添加账号'));
+    const cancellingFocused = document.activeElement === cancelLogin;
+    cancelLogin.hidden = s.login?.state !== 'pending';
+    cancelLogin.disabled = Boolean(isBusy() || !s.configured || s.componentError);
+    if (cancellingFocused && cancelLogin.hidden) focus(!addButton.disabled ? addButton : closeButton);
     consent.disabled = isBusy();
     if (document.activeElement !== consent) consent.value = preferenceValue();
     const messages = { waiting: '正在等待原生任务结束后切换账号。', confirming: '正在确认所选账号、项目与用量。', blocked: '账号切换等待确认，请在模型列表查看状态。' };
     message.textContent = getError() || (state?.preferencesError ? '无法读取数据使用授权设置，暂按手动处理。请重新保存设置。' : '') || messages[s.switch?.state] || (s.componentError ? '本机账号组件尚未就绪。' :
-      s.login?.state === 'pending' ? '请在 Google 官方网页完成账号授权。' : s.login?.state === 'failed' ? 'Google 授权未完成，可重新添加账号。' :
+      s.login?.state === 'pending' ? '请在 Google 官方网页完成账号授权，也可取消本次等待。' : s.login?.state === 'cancelled' ? '已取消本次授权，已添加的账号保持不变。' : s.login?.state === 'failed' ? 'Google 授权未完成，可重新添加账号。' :
       s.activationRequired ? '账号已配置，重新打开 Antigravity 后启用。' : !state ? '正在读取本机账号…' : !s.primaryAccountId ? '添加账号后，选择一个账号设为主账号。' : '');
     message.hidden = !message.textContent; content.scrollTop = scrollTop;
+    if (removedFocusIndex !== undefined) {
+      const neighbor = accountList.children[Math.min(removedFocusIndex, accountList.children.length - 1)];
+      focus(neighbor?.querySelector('button:not(:disabled),input:not(:disabled)') || (!addButton.disabled ? addButton : closeButton));
+    }
   }
   return Object.freeze({
     open(trigger) {

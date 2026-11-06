@@ -14,8 +14,12 @@ export function verifiedNodeSidecarIds({ processes, installRoot, roamingRoot, us
   const shim = path.join(roamingRoot, 'Antigravity', 'bin', 'agy-node.cmd');
   const loader = path.join(userRoot, '.gemini', 'antigravity', 'lib', 'node_modules', 'sidecar_sdk', 'register_loader.js');
   const args = '--import=' + pathToFileURL(loader).href + ' dist/server.cjs';
-  const expected = '@echo off\nset ELECTRON_RUN_AS_NODE=1\n"' + executable + '" %*';
-  if (shimText.trim().replace(/\r\n/g, '\n') !== expected) return [];
+  const lines = shimText.trim().replace(/\r\n/g, '\n').split('\n');
+  if (lines.length !== 3 || lines[0] !== '@echo off' || lines[1] !== 'set ELECTRON_RUN_AS_NODE=1') return [];
+  const shimInvocation = /^"([^"\r\n]+)" %\*$/.exec(lines[2]);
+  // App startup may write a differently cased Windows path into its launcher.
+  // Only that path is case-insensitive; commands, quoting and %* stay exact.
+  if (!shimInvocation || shimInvocation[1].toLowerCase() !== executable.toLowerCase()) return [];
   const childPattern = new RegExp('^"' + escaped(executable) + '"\\s+' + escaped(args) + '\\s*$', 'i');
   const invocation = '(?:"' + escaped(shim) + '"|' + escaped(shim) + ')\\s+' + escaped(args);
   // cmd /c can enclose the entire quoted executable plus arguments in one

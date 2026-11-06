@@ -32,6 +32,32 @@ test('external sidecar exemption requires the exact launcher, parent and import'
   assert.throws(() => assertApplicationStopped({ tasklistText: '"Antigravity.exe","101","Console","1","1 K"\n"Antigravity.exe","102","Console","1","1 K"', sidecarIds: [101] }), /Exit all/);
 });
 
+test('launcher allows Windows executable path casing but keeps the wrapper commands exact', () => {
+  const base = path.resolve('Sidecar-Case-Test');
+  const options = { installRoot: path.join(base, 'App'), roamingRoot: path.join(base, 'Roaming'), userRoot: path.join(base, 'User'), systemRoot: path.join(base, 'Windows') };
+  const executable = path.join(options.installRoot, 'Antigravity.exe');
+  const cmd = path.join(options.systemRoot, 'System32', 'cmd.exe');
+  const shim = path.join(options.roamingRoot, 'Antigravity', 'bin', 'agy-node.cmd');
+  const args = '--import=' + pathToFileURL(path.join(options.userRoot, '.gemini/antigravity/lib/node_modules/sidecar_sdk/register_loader.js')).href + ' dist/server.cjs';
+  const parent = { ProcessId: 201, ExecutablePath: cmd, CommandLine: '"' + cmd + '" /c "' + shim + '" ' + args };
+  const child = { ProcessId: 101, ParentProcessId: 201, ExecutablePath: executable, CommandLine: '"' + executable + '" ' + args };
+  const wrapper = third => '@echo off\r\nset ELECTRON_RUN_AS_NODE=1\r\n' + third + '\r\n';
+  const check = shimText => verifiedNodeSidecarIds({ ...options, processes: [parent, child], shimText });
+  for (const value of [executable, executable.toLowerCase(), executable.toUpperCase()])
+    assert.deepEqual(check(wrapper('"' + value + '" %*')), [101]);
+  for (const third of [
+    '"' + path.join(options.installRoot, 'Other.exe') + '" %*',
+    '"' + executable.toLowerCase() + '" %* & echo extra',
+    'echo extra & "' + executable.toLowerCase() + '" %*',
+    '"' + executable.toLowerCase() + '" %*\r\necho extra',
+    '"' + executable.toLowerCase() + '" %1',
+    '"' + executable.toLowerCase() + '"  %*',
+    '"' + executable.toLowerCase() + '" "%*"',
+  ]) assert.deepEqual(check(wrapper(third)), []);
+  assert.deepEqual(check(wrapper('"' + executable + '" %*').replace('@echo off', '@ECHO OFF')), []);
+  assert.deepEqual(check(wrapper('"' + executable + '" %*').replace('set ELECTRON_RUN_AS_NODE=1', 'SET ELECTRON_RUN_AS_NODE=1')), []);
+});
+
 test('application guard excludes only its own official Node sidecar PID', () => {
   const self = '"Antigravity.exe","12000","Console","1","18,000 K"\r\n';
   assert.deepEqual(assertApplicationStopped({ tasklistText: self, ownPid: 12000, isNodeSidecar: true }), { processesStopped: true });

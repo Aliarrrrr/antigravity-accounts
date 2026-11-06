@@ -4,7 +4,7 @@
 
 **Use your authorized Google accounts from Antigravity’s native model picker.**
 
-![Preview 0.4.0-preview.10](https://img.shields.io/badge/preview-0.4.0--preview.10-8b5cf6)
+![Preview 0.4.0-preview.11](https://img.shields.io/badge/preview-0.4.0--preview.11-8b5cf6)
 ![Windows x64](https://img.shields.io/badge/platform-Windows%20x64-0078D4)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
@@ -12,7 +12,7 @@ Antigravity Accounts adds account groups to the existing model menu, with the ho
 
 This is an **unofficial Windows host-adapter preview**, distributed as a ZIP. It is not listed in the Antigravity Marketplace, and installing `plugin.json` alone does not enable account switching.
 
-[Download preview.10](https://github.com/Aliarrrrr/antigravity-accounts/releases/tag/accounts-v0.4.0-preview.10) · [Installation guide](docs/ACCOUNTS_PLUGIN.md) · [Changelog](CHANGELOG.md) · [Validation](docs/ACCOUNTS_VALIDATION.md)
+[Download preview.11](https://github.com/Aliarrrrr/antigravity-accounts/releases/tag/accounts-v0.4.0-preview.11) · [Installation guide](docs/ACCOUNTS_PLUGIN.md) · [Changelog](CHANGELOG.md) · [Validation](docs/ACCOUNTS_VALIDATION.md)
 
 ## Install
 
@@ -22,29 +22,29 @@ This is an **unofficial Windows host-adapter preview**, distributed as a ZIP. It
 | Antigravity App | Reviewed 2.29.0 and 2.28.2 program combinations |
 | Additional runtimes | None for the packaged release; .NET is self-contained and installer helpers use the installed Electron runtime |
 
-1. Download and fully extract [AntigravityAccounts-0.4.0-preview.10-win-x64.zip](https://github.com/Aliarrrrr/antigravity-accounts/releases/download/accounts-v0.4.0-preview.10/AntigravityAccounts-0.4.0-preview.10-win-x64.zip).
+1. Download and fully extract [AntigravityAccounts-0.4.0-preview.11-win-x64.zip](https://github.com/Aliarrrrr/antigravity-accounts/releases/download/accounts-v0.4.0-preview.11/AntigravityAccounts-0.4.0-preview.11-win-x64.zip).
 2. Exit Antigravity completely. If it stays in the system tray, choose **Exit** from the tray menu.
 3. Run `Install-Preview.cmd` from the extracted `AntigravityAccounts` directory, then start Antigravity normally.
 
 The installer checks the installed programs, preserves originals and applies the local adaptation. It does not modify `Antigravity.exe`. Keep the complete extracted package and its checksum file for recovery.
 
-When upgrading an existing Accounts installation, exit Antigravity and run the old package’s `Restore.cmd` before installing the new package. Saved account authorizations are retained. With Chinese localization, use this order: **restore the Chinese layer → restore old Accounts → install new Accounts → reapply the Chinese layer**. See the [detailed guide](docs/ACCOUNTS_PLUGIN.md#安装).
+When upgrading an existing Accounts installation, exit Antigravity and run `Restore.cmd` from the **newly extracted preview.11 package**, then run its `Install-Preview.cmd`. Restore reads the existing installation receipt and saved originals; account authorizations are retained. Older helpers can incorrectly treat a verified Node sidecar as a running App when Windows path casing differs. With Chinese localization, use this order: **restore the Chinese layer → restore existing Accounts with the new package → install new Accounts → reapply the Chinese layer**. See the [detailed guide](docs/ACCOUNTS_PLUGIN.md#安装).
 
 For a custom installation, set `ANTIGRAVITY_INSTALL_ROOT` to the directory containing `Antigravity.exe` before running the installer. This repository is private; downloads and issues require repository access.
 
 ## Features
 
-- **Native model menu:** account groups sit alongside the official model options, with the host’s styling and keyboard navigation.
+- **Native model menu:** compact account rows separate names and status, with dedicated selection, waiting, chevron and settings icons alongside the official model options.
 - **Account switching in one window:** subsequent switches do not require restarting the App or language service. The adapter waits for generation, tools and background work to finish before committing a switch.
 - **Model selection protection:** an available concrete model is preserved. If it is unavailable on the selected account, sending waits for an explicit choice in the native model list.
-- **Account settings and management:** one themed panel for adding, deleting, labeling and reauthorizing accounts, setting the primary account and choosing a data-use prompt preference.
+- **Account settings and management:** one themed panel with account-status labels, fewer repeated emails, consistent controls and narrow-window layout for adding, deleting, labeling and reauthorizing accounts, setting the primary account and choosing a data-use prompt preference.
 - **Update recovery:** cached adapter files and supported launch paths can reapply the adaptation after compatible program replacement.
 
 ## Use
 
-Management actions live in **账号设置与管理… (Account settings and management)**. The model picker keeps account selection and this single management entry.
+Management actions live in **账号设置… (Account settings)**. The model picker keeps account selection and this single management entry.
 
-1. Open the model picker, choose **账号设置与管理… (Account settings and management)**, then **添加账号 (Add account)**. Complete authorization in the official Google page.
+1. Open the model picker, choose **账号设置… (Account settings)**, then **添加账号 (Add account)**. Complete authorization in the official Google page.
 2. In the management panel, set one account as **主账号 (Primary account)**. After the first setup, exit and restart Antigravity once to activate the independent account provider.
 3. Select another account row in the model picker. The adapter waits for native work to become idle, commits the selection and confirms the account’s metadata.
 4. Continue with the official model options. If the previous model is unavailable, select an available model before sending.
@@ -53,7 +53,7 @@ The current group shows **正在使用 (Active)** after confirmation. Waiting ca
 
 To remove an inactive attached account, open the management panel, choose **删除账号 (Delete account)**, check the email, then choose **确认删除 (Confirm deletion)**. Switch away from the current account first. The primary account cannot be removed while the provider is running. Removal deletes the plugin’s local account record; it does not delete the Google account.
 
-The panel also edits labels and reauthorizes saved accounts. Its **数据使用授权 (Data-use consent)** setting offers three choices:
+The panel also edits labels and reauthorizes saved accounts. A pending Google authorization can be cancelled there without changing saved accounts. Its **数据使用授权 (Data-use consent)** setting offers three choices:
 
 | Choice | Behavior after an account change |
 | --- | --- |
@@ -73,11 +73,15 @@ Directly opening an EXE after an unknown update can bypass these launch checks. 
 
 ### Verification scope
 
+The preview.11 UI build was installed on Antigravity 2.29.0 with Chinese localization retained. The native menu, management dialog, current/primary status labels, removal of duplicate identity emails, Escape dismissal and return of the focus ring to the model trigger were observed. This visual check made **zero new model submissions, account switches or account edits**. Light/dark themes, a 390 × 620 viewport, long labels, Enter-to-save, login cancellation and Tab wrapping were checked separately with synthetic browser state.
+
 Preview.8 on installed Antigravity 2.29.0 completed a metadata-only **Account A → Account B → Account A** round trip while retaining the App and language-service processes, window, workspace and available concrete model.
 
 After installing preview.10 on 2.29.0, switching back to the original account was observed to uncheck the data-use option and close the prompt automatically. The original account and model were restored, and normal startup was checked after another restart. The agent initiated **zero model requests**. This does not establish a real-account switching result for 2.28.2.
 
-Generation, quota charging, cross-account generation continuation and a real NSIS upgrade have not been validated. See the [validation record](docs/ACCOUNTS_VALIDATION.md) for version-specific results.
+On 7 November, before the preview.11 visual changes, an authorized development-package check completed three pure-text submissions in one conversation across Account A → Account B → Account A. It retained the window, project, conversation ID, drafts, model and process identities; later replies recalled markers supplied only to Account A. This establishes that short text-context case, rather than a repeat of the final visual build. Exact quota charging, attachments, tool/subagent history, long-context continuation, expired-token renewal, sends queued during switching and a real NSIS upgrade remain unverified. See the [validation record](docs/ACCOUNTS_VALIDATION.md) and [implementation audit](docs/ACCOUNTS_AUDIT_2026-11-07.md).
+
+Native plugin discovery and persisted enabled preferences worked in an isolated service check. The Accounts HostAuth lifecycle is not yet controlled by the native plugin switch; see [integration feasibility](docs/ACCOUNTS_EXTENSION_INTEGRATION.md).
 
 ## Uninstall / restore
 

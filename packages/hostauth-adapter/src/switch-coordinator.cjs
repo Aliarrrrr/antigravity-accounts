@@ -159,20 +159,28 @@ class SwitchCoordinator {
 
   async confirm(operation) {
     this.setState({ state: 'confirming', targetAccountId: operation.targetId, cancellable: false });
-    const result = await this.taskAdapter.confirmIdentity({
-      accountId: operation.targetId,
-      generation: operation.generation,
-      tokenWasObserved: () => this.observedToken?.accountId === operation.targetId && this.observedToken?.generation === operation.generation,
-    });
-    const cacheCoverage = this.taskAdapter.confirmationCoverage;
-    const cachesMatched = Array.isArray(result?.caches) && cacheCoverage.every(name => result.caches.some(cache =>
-      cache?.name === name && cache.accountId === operation.targetId && cache.generation === operation.generation && cache.settled === true));
-    if (result?.confirmed !== true || result.projectMatched !== true || !cachesMatched || result.accountId !== operation.targetId || result.generation !== operation.generation ||
-        this.observedToken?.accountId !== operation.targetId || this.observedToken?.generation !== operation.generation) {
-      throw new ComponentError('native_identity_unconfirmed');
+    if (!operation.identityConfirmed) {
+      const result = await this.taskAdapter.confirmIdentity({
+        accountId: operation.targetId,
+        generation: operation.generation,
+        tokenWasObserved: () => this.observedToken?.accountId === operation.targetId && this.observedToken?.generation === operation.generation,
+      });
+      const cacheCoverage = this.taskAdapter.confirmationCoverage;
+      const cachesMatched = Array.isArray(result?.caches) && cacheCoverage.every(name => result.caches.some(cache =>
+        cache?.name === name && cache.accountId === operation.targetId && cache.generation === operation.generation && cache.settled === true));
+      if (result?.confirmed !== true || result.projectMatched !== true || !cachesMatched || result.accountId !== operation.targetId || result.generation !== operation.generation ||
+          this.observedToken?.accountId !== operation.targetId || this.observedToken?.generation !== operation.generation) {
+        throw new ComponentError('native_identity_unconfirmed');
+      }
+      // Cleanup may succeed in only some windows before another window fails.
+      // Keep the completed identity/model confirmation so retrying cleanup does
+      // not depend on capture records which have already been removed.
+      operation.identityConfirmed = true;
     }
-    await this.taskAdapter.clearModelSelection();
-    operation.modelCaptureStarted = false;
+    if (operation.modelCaptureStarted) {
+      await this.taskAdapter.clearModelSelection();
+      operation.modelCaptureStarted = false;
+    }
     await operation.pause.release();
     this.operation = undefined;
     this.setState({ state: 'active', accountId: operation.targetId, generation: operation.generation, cancellable: false });
@@ -187,6 +195,9 @@ class SwitchCoordinator {
   async recover() {
     const operation = this.operation;
     if (!operation || this.state.state !== 'blocked') throw new ComponentError('switch_in_progress');
+    // Claim recovery before its first await, including cancellation cleanup.
+    // Two native windows must not cancel the same ticket concurrently.
+    this.setState({ state: 'confirming', targetAccountId: operation.targetId, cancellable: false });
     try {
       if (!operation.committing && !operation.committed) { await this.releaseUncommitted(operation); return this.client.request('getStatus'); }
       return operation.committed ? await this.confirm(operation) : await this.reconcile(operation);
