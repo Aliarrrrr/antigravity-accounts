@@ -6,9 +6,25 @@ const { WORK_KINDS } = require('./switch-coordinator.cjs');
 const { readAgentState, AGENT_STATE_PATH } = require('./native-agent-state.cjs');
 
 const SERVICE = '/exa.language_server_pb.LanguageServerService/';
-const PROGRAM_SHA256 = 'a51a80eb1b355dc523dd9a6d7cec098ad450e3c9fb30d6001806cac86814f37b';
-const PATCHED_PROGRAM_SHA256 = '684a9ea0bbba226335feac69f9fc45d27980522fe172979fd58de07f35c52441';
-const PROVIDER_PROGRAM_SHA256 = 'c132ea0fc1688dfd614cae5ac5c47b89c6c36753375981a0600170cef896dfea';
+const NATIVE_PROGRAM_PROFILES = Object.freeze([
+  Object.freeze({ version: '2.29.0',
+    originalSha256: 'c98e7c331da5bcc37002a550e7d625b4c636f775fa2804f73777c6a500e1c3d5',
+    patchedSha256: '169355a713b8199f6fe91dd5eaf81bc7f366544b2808014425fc820ccdd04bfc',
+    providerSha256: '9a58d7ec73af4da1f60b9682d6632ed54a9f62dd2752372c8f53f8cbe116eb85' }),
+  Object.freeze({ version: '2.28.2',
+    originalSha256: 'a51a80eb1b355dc523dd9a6d7cec098ad450e3c9fb30d6001806cac86814f37b',
+    patchedSha256: '684a9ea0bbba226335feac69f9fc45d27980522fe172979fd58de07f35c52441',
+    providerSha256: 'c132ea0fc1688dfd614cae5ac5c47b89c6c36753375981a0600170cef896dfea' }),
+]);
+const { originalSha256: PROGRAM_SHA256, patchedSha256: PATCHED_PROGRAM_SHA256,
+  providerSha256: PROVIDER_PROGRAM_SHA256 } = NATIVE_PROGRAM_PROFILES[0];
+
+function resolveNativeProgram(nativeProgram) {
+  const profile = NATIVE_PROGRAM_PROFILES.find(value => nativeProgram &&
+    ['version', 'originalSha256', 'patchedSha256', 'providerSha256'].every(key => value[key] === nativeProgram[key]));
+  if (!profile) throw new ComponentError('native_program_unsupported');
+  return profile;
+}
 const CACHE_NAMES = Object.freeze(['peopleAPIUserInfo', 'availableModels', 'userInfo', 'loadCodeAssist', 'adminControls', 'businessAdminControls', 'quotaSummary']);
 // The pinned provider copy refreshes its project through HostAuth before returning
 // it to request construction. Native local A->B tests include a late request
@@ -17,6 +33,7 @@ const CACHE_NAMES = Object.freeze(['peopleAPIUserInfo', 'availableModels', 'user
 const AUTH_BOUNDARY_VERIFIED = true;
 const READ_METHODS = Object.freeze(['GetRemoteControlInfo', 'GetAllCascadeTrajectories', 'WaitForConversationFullyIdle', 'GetLoadCodeAssist', 'GetUserStatus', 'GetAuthStatus', 'GetAvailableModels', 'RetrieveUserQuotaSummary']);
 const MAX_BODY = 8 * 1024 * 1024;
+const MAX_ERROR_BODY = 16 * 1024;
 
 function fields(buffer) {
   let offset = 0;
@@ -131,8 +148,8 @@ function refreshActivity(text) {
   return { known: true, count };
 }
 
-async function readBody(response, max = MAX_BODY) {
-  if (!response.ok || response.status !== 200 || response.redirected) throw new ComponentError('native_request_failed');
+async function readBody(response, max = MAX_BODY, allowFailure = false) {
+  if (response.redirected || (!allowFailure && (!response.ok || response.status !== 200))) throw new ComponentError('native_request_failed');
   if (!response.body?.getReader) throw new ComponentError('native_protocol_invalid');
   const reader = response.body.getReader(), chunks = [];
   let bytes = 0;
@@ -141,23 +158,28 @@ async function readBody(response, max = MAX_BODY) {
       const item = await reader.read();
       if (item.done) break;
       bytes += item.value.byteLength;
-      if (bytes > max) throw new ComponentError('native_response_too_large');
+      if (bytes > max) {
+        reader.cancel().catch(() => {});
+        throw new ComponentError('native_response_too_large');
+      }
       chunks.push(Buffer.from(item.value));
     }
   } finally { reader.releaseLock(); }
   return Buffer.concat(chunks, bytes);
 }
 
-function createNativeTaskAdapter({ electron, baseUrl, csrf, client, nativeProgramSha256, fetchImpl, refreshNativeView, observationTimeoutMs = 5000, confirmationTimeoutMs = 120000 }) {
+function createNativeTaskAdapter({ electron, baseUrl, csrf, client, nativeProgramSha256, nativeProgram, fetchImpl, refreshNativeView, observationTimeoutMs = 5000, confirmationTimeoutMs = 120000 }) {
   const origin = loopbackOrigin(baseUrl);
   if (typeof csrf !== 'string' || csrf.length < 16 || /[\r\n]/.test(csrf)) throw new ComponentError('native_csrf_invalid');
   const session = electron?.session?.defaultSession;
   const fetchLocal = fetchImpl || ((url, options) => session.fetch(url, options));
   const gate = createSubmissionGate({ session, baseUrl: origin, allowedReadPaths: [...READ_METHODS.map(name => SERVICE + name), AGENT_STATE_PATH, '/debug/pprof/goroutine'] });
-  const authBoundarySafe = AUTH_BOUNDARY_VERIFIED && nativeProgramSha256 === PROVIDER_PROGRAM_SHA256;
+  let profile;
+  try { profile = resolveNativeProgram(nativeProgram); } catch { /* Unknown or mixed program sets cannot switch accounts. */ }
+  const authBoundarySafe = AUTH_BOUNDARY_VERIFIED && Boolean(profile) && nativeProgramSha256 === profile.providerSha256;
   let modelSelectionPending = false, modelSelectionAcknowledged = false, modelSelectionCaptured = false;
 
-  async function request(path, { body, proto = false, profile = false, signal, timeoutMs = observationTimeoutMs } = {}) {
+  async function request(path, { body, proto = false, profile = false, classifyReadError = false, signal, timeoutMs = observationTimeoutMs } = {}) {
     if (!path.startsWith('/') || path.startsWith('//')) throw new ComponentError('native_endpoint_invalid');
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -174,6 +196,20 @@ function createNativeTaskAdapter({ electron, baseUrl, csrf, client, nativeProgra
       if (proto && !/^application\/proto(?:;|$)/i.test(contentType)) throw new ComponentError('native_protocol_invalid');
       if (profile && !/^text\/plain(?:;|$)/i.test(contentType)) throw new ComponentError('native_refresh_observation_unavailable');
       if (!proto && !profile && !/^application\/json(?:;|$)/i.test(contentType)) throw new ComponentError('native_protocol_invalid');
+      if (classifyReadError && !proto && !profile && !response.redirected && response.status >= 400 && response.status <= 599) {
+        let verificationRequired = false;
+        try {
+          const failure = JSON.parse((await readBody(response, MAX_ERROR_BODY, true)).toString('utf8'));
+          // Inspect only the bounded Connect error message from a failed read
+          // RPC. Native wrappers may prefix this exact official 403 message;
+          // other fields, URLs and response text never reach ComponentError.
+          verificationRequired = failure?.code === 'internal' && typeof failure.message === 'string' &&
+            /^(?:[A-Za-z0-9_./() -]{1,160}: ){0,4}request failed \(code 403\): Verify your account to continue\.$/.test(failure.message.trim());
+        } catch { /* Invalid or oversized failure bodies remain a generic failure. */ }
+        if (signal?.aborted) throw new ComponentError('switch_cancelled');
+        if (verificationRequired) throw new ComponentError('native_account_verification_required');
+        throw new ComponentError('native_request_failed');
+      }
       const bytes = await readBody(response);
       if (proto) return bytes;
       return bytes.toString('utf8');
@@ -185,7 +221,13 @@ function createNativeTaskAdapter({ electron, baseUrl, csrf, client, nativeProgra
 
   async function rpc(name, body, options = {}) {
     if (!READ_METHODS.includes(name)) throw new ComponentError('method_not_allowed');
-    const text = await request(SERVICE + name, { ...options, body });
+    let text;
+    try { text = await request(SERVICE + name, { ...options, body, classifyReadError: true }); }
+    catch (error) {
+      if (name === 'RetrieveUserQuotaSummary' && error?.code === 'native_request_failed')
+        throw new ComponentError('native_quota_refresh_failed');
+      throw error;
+    }
     try { return JSON.parse(text); } catch { throw new ComponentError('native_protocol_invalid'); }
   }
 
@@ -307,4 +349,4 @@ function createNativeTaskAdapter({ electron, baseUrl, csrf, client, nativeProgra
   });
 }
 
-module.exports = { createNativeTaskAdapter, decodeActivity, decodeWait, decodeRemoteControl, refreshActivity, waitRequest, PROGRAM_SHA256, PATCHED_PROGRAM_SHA256, PROVIDER_PROGRAM_SHA256, CACHE_NAMES, AUTH_BOUNDARY_VERIFIED };
+module.exports = { createNativeTaskAdapter, decodeActivity, decodeWait, decodeRemoteControl, refreshActivity, waitRequest, PROGRAM_SHA256, PATCHED_PROGRAM_SHA256, PROVIDER_PROGRAM_SHA256, NATIVE_PROGRAM_PROFILES, resolveNativeProgram, CACHE_NAMES, AUTH_BOUNDARY_VERIFIED };

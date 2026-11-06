@@ -8,12 +8,12 @@ const { SwitchCoordinator } = require('./switch-coordinator.cjs');
 const { TokenBarrier } = require('./token-barrier.cjs');
 const { createModelMenuBridge } = require('./model-menu-bridge.cjs');
 const { refreshNativeViews } = require('./native-view.cjs');
-const { createNativeTaskAdapter, PROGRAM_SHA256, PATCHED_PROGRAM_SHA256, PROVIDER_PROGRAM_SHA256 } = require('./native-task-adapter.cjs');
+const { createNativeTaskAdapter, resolveNativeProgram } = require('./native-task-adapter.cjs');
 
 const PROVIDER_NATIVE_PATH = 'hostauth-addon/native/language_server.exe';
 
 const PUBLIC_METHODS = new Set(['getStatus', 'listAccounts', 'selectAccount', 'setPrimaryAccount', 'cancelSwitch', 'beginLogin', 'removeAccount', 'confirmModelSelection']);
-const LOCKED_METHODS = new Set(['setPrimaryAccount', 'configureOAuth', 'removeAccount']);
+const LOCKED_METHODS = new Set(['setPrimaryAccount', 'configureOAuth']);
 const STARTUP_ACCOUNT_ERRORS = new Set(['account_reauth_required', 'account_not_selected', 'oauth_request_failed',
   'oauth_response_invalid', 'oauth_refresh_token_missing', 'operation_cancelled', 'account_operation_failed']);
 
@@ -54,6 +54,24 @@ function providerStatePath(electron) {
   return path.join(root, 'AntigravityAccounts', 'host-provider.json');
 }
 
+function configuredAccountsRoot(resourcesPath, config) {
+  if (!Object.prototype.hasOwnProperty.call(config, 'accountsStateRoot')) return undefined;
+  const value = config.accountsStateRoot;
+  if (typeof value !== 'string' || !path.isAbsolute(value) || /[\0\r\n]/.test(value)) throw new ComponentError('accounts_state_root_invalid');
+  const root = path.resolve(value), install = path.resolve(resourcesPath, '..');
+  const inside = (child, parent) => {
+    const relative = path.relative(parent, child);
+    return relative === '' || relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative);
+  };
+  try {
+    if (!fs.statSync(root).isDirectory() || inside(root, install) || inside(fs.realpathSync(root), fs.realpathSync(install)))
+      throw new Error();
+  } catch { throw new ComponentError('accounts_state_root_invalid'); }
+  // The installer supplies the already resolved public state directory. Do not
+  // substitute the launching process's LOCALAPPDATA or resolve another vault.
+  return root;
+}
+
 function readProviderState(filename) {
   try {
     const value = JSON.parse(fs.readFileSync(filename, 'utf8'));
@@ -79,7 +97,18 @@ function rememberProvider(filename) {
 
 async function prepare({ electron, parent, resourcesPath = process.resourcesPath, wsl, headless, onFatal = () => {}, clientFactory, accountUI, taskAdapter, nativeProgramVerifier, activationStatePath } = {}) {
   if (wsl || headless) throw new ComponentError('host_mode_unsupported', 'This account adapter requires the local Windows desktop host.');
-  if (activationStatePath === undefined) activationStatePath = providerStatePath(electron);
+  let config, accountsStateRoot;
+  try {
+    config = JSON.parse(fs.readFileSync(path.join(resourcesPath, 'hostauth-addon', 'config.json'), 'utf8'));
+    if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error();
+    accountsStateRoot = configuredAccountsRoot(resourcesPath, config);
+  } catch {
+    // Without readable configuration the enabled marker's directory is also
+    // unknown. Starting the original provider here could change identities.
+    throw new ComponentError('account_setup_failed', 'Independent account setup did not finish; the language server was not started.');
+  }
+  if (accountsStateRoot) activationStatePath = path.join(accountsStateRoot, 'host-provider.json');
+  else if (activationStatePath === undefined) activationStatePath = providerStatePath(electron);
   // This file belongs to the plugin and contains only an enabled flag. Once an
   // independent provider has been used, a failed broker cannot silently switch
   // the native process back to the original account on a subsequent launch.
@@ -93,6 +122,7 @@ async function prepare({ electron, parent, resourcesPath = process.resourcesPath
   let componentReady = false;
   let locked = false;
   let ended = false;
+  let nativeProgram;
   let nativeProgramSha256;
   let selectedNativeProgramPath;
   let nativeEndpoint;
@@ -133,6 +163,22 @@ async function prepare({ electron, parent, resourcesPath = process.resourcesPath
         if (method === 'listAccounts') return [];
         throw new ComponentError(componentError || 'component_unavailable');
       }
+      if (method === 'removeAccount') {
+        if (typeof params?.id !== 'string' || !params.id || params.id.length > 128) throw new ComponentError('invalid_account');
+        const requireIdleSwitch = () => {
+          if (coordinator.operation || coordinator.getStatus().state !== 'active') throw new ComponentError('switch_in_progress');
+        };
+        requireIdleSwitch();
+        const status = await client.request('getStatus');
+        // A switch may have started while the public component status was read.
+        requireIdleSwitch();
+        if (status?.login?.state === 'pending') throw new ComponentError('login_pending');
+        if (locked && mode === 'native-provider' &&
+            (params.id === status?.selectedAccountId || params.id === status?.primaryAccountId)) throw new ComponentError('account_locked');
+        // The component's selection gate rechecks the active identity and
+        // pending transaction atomically with removal; no credential is read.
+        return client.request(method, params);
+      }
       if (locked && mode === 'native-provider' && method === 'selectAccount') return coordinator.selectAccount(params?.id);
       return client.request(method, params);
     },
@@ -142,10 +188,9 @@ async function prepare({ electron, parent, resourcesPath = process.resourcesPath
     isAccountWindow: window => ui.isAccountWindow(window),
   }) : undefined;
   try {
-    let config;
-    try { config = JSON.parse(fs.readFileSync(path.join(resourcesPath, 'hostauth-addon', 'config.json'), 'utf8')); }
-    catch { throw new ComponentError('adapter_config_invalid'); }
-    client = clientFactory ? clientFactory({ onFatal: componentFailed }) : new ComponentClient(componentPath(resourcesPath, config), { onFatal: componentFailed });
+    const componentOptions = { onFatal: componentFailed,
+      ...(accountsStateRoot ? { args: ['--stdio', '--data-root', accountsStateRoot] } : {}) };
+    client = clientFactory ? clientFactory(componentOptions) : new ComponentClient(componentPath(resourcesPath, config), componentOptions);
     const initialStatus = await client.request('getStatus');
     componentReady = true;
     if (initialStatus?.primaryAccountId) {
@@ -153,12 +198,13 @@ async function prepare({ electron, parent, resourcesPath = process.resourcesPath
       rememberProvider(activationStatePath);
     } else if (providerWasEnabled) throw new ComponentError('primary_account_required');
     if (!config.oauthClient) throw new ComponentError('oauth_configuration_missing');
+    nativeProgram = resolveNativeProgram(config.nativeProgram);
     // The project refresh adaptation is confined to independently authorized
     // provider mode. Registration keeps the original native executable and its
     // authentication path; it must never use the provider-specific copy.
     selectedNativeProgramPath = mode === 'native-provider' ? PROVIDER_NATIVE_PATH : undefined;
     const programPath = path.join(resourcesPath, selectedNativeProgramPath || 'bin/language_server.exe');
-    const acceptedSha256 = mode === 'native-provider' ? [PROVIDER_PROGRAM_SHA256] : [PROGRAM_SHA256, PATCHED_PROGRAM_SHA256];
+    const acceptedSha256 = mode === 'native-provider' ? [nativeProgram.providerSha256] : [nativeProgram.originalSha256, nativeProgram.patchedSha256];
     nativeProgramSha256 = nativeProgramVerifier ? await nativeProgramVerifier({ programPath, acceptedSha256: [...acceptedSha256] }) : createHash('sha256').update(await fs.promises.readFile(programPath)).digest('hex');
     if (!nativeProgramSha256 || !acceptedSha256.includes(nativeProgramSha256)) throw new ComponentError('native_program_unsupported');
     // Reapply the program-matched public OAuth client on every start. A vault
@@ -203,8 +249,9 @@ async function prepare({ electron, parent, resourcesPath = process.resourcesPath
     if (!options.baseUrl || !options.csrf) throw new ComponentError('native_endpoint_invalid');
     if (nativeEndpoint === options.baseUrl && coordinator.taskAdapter) return;
     coordinator.taskAdapter?.close?.();
-    coordinator.taskAdapter = createNativeTaskAdapter({ electron, baseUrl: options.baseUrl, csrf: options.csrf, client, nativeProgramSha256,
-      refreshNativeView: (userStatus, viewOptions) => refreshNativeViews({ electron, origin: options.baseUrl, userStatus, ...viewOptions }) });
+    coordinator.taskAdapter = createNativeTaskAdapter({ electron, baseUrl: options.baseUrl, csrf: options.csrf, client, nativeProgramSha256, nativeProgram,
+      refreshNativeView: (userStatus, viewOptions) => refreshNativeViews({ electron, origin: options.baseUrl, userStatus,
+        bindings: config.frontendBindings, ...viewOptions }) });
     nativeEndpoint = options.baseUrl;
   }
   return Object.freeze({

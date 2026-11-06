@@ -19,15 +19,19 @@ CORE_RUNTIME_REPORT.md
 GITHUB_SOLUTION_RESEARCH.md
 Antigravity Profile Hub — Codex Master Prompt.md
 
-# Build/test artifacts produced by hub.ps1 (SDK/runtime/NuGet scratch space)
+# Local build and dependency caches
 *.binlog
 .dotnet-home/
 .nuget/
 
-# Parallel Rust GUI development outputs
-**/target/
+**/node_modules/
 .worktrees/
 .superpowers/
+
+# Local account and native-client data must never enter the repository.
+*.dpapi
+*.vscdb
+*.vscdb.backup
 
 # Generated native program copies used during local adapter development.
 packages/hostauth-adapter/.local-validation/

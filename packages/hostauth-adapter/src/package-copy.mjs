@@ -2,13 +2,14 @@ import { cp, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readAsar, rewriteAsar, sha256 } from './asar.mjs';
-import { patchSources, SUPPORTED_VERSION, SOURCE_SHA256 } from './patch-plan.mjs';
+import { patchSources, inspectSourceCompatibility } from './patch-plan.mjs';
 import { modelMenuEntrySource } from './model-menu-entry.mjs';
-import { patchNativeDiagnostics, restoreNativeDiagnostics, ORIGINAL_NATIVE_SHA256, PATCHED_NATIVE_SHA256 } from './native-diagnostics-patch.mjs';
-import { patchNativeProjectRefresh, restoreNativeProjectRefresh, PROVIDER_NATIVE_SHA256 } from './native-project-refresh-patch.mjs';
+import { patchNativeDiagnostics, restoreNativeDiagnostics, inspectNativeDiagnostics } from './native-diagnostics-patch.mjs';
+import { patchNativeProjectRefresh, restoreNativeProjectRefresh } from './native-project-refresh-patch.mjs';
+import { extractNativeFrontend, inspectFrontendBindings } from './frontend-bindings.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const addonFiles = ['runtime.cjs', 'component-client.cjs', 'switch-coordinator.cjs', 'token-barrier.cjs', 'submission-gate.cjs', 'native-task-adapter.cjs', 'native-agent-state.cjs', 'model-menu-bridge.cjs', 'native-view.cjs'];
+const addonFiles = ['runtime.cjs', 'component-client.cjs', 'switch-coordinator.cjs', 'token-barrier.cjs', 'submission-gate.cjs', 'native-task-adapter.cjs', 'native-agent-state.cjs', 'model-menu-bridge.cjs', 'native-view.cjs', 'update-handoff.cjs'];
 const uiFiles = ['window.cjs'];
 
 function inside(child, parent) { const relative = path.relative(parent, child); return relative === '' || relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative); }
@@ -20,15 +21,32 @@ async function futureRealpath(filename) {
   return path.join(await realpath(existing), ...suffix);
 }
 
-export async function buildCopy({ sourceAsar, outputRoot, componentExecutable, uiDirectory, languageServerPath, nativeOAuthExtractor, allowMissingPayload = false }) {
+async function checkedAccountsRoot(accountsStateRoot, sourceInstall) {
+  if (accountsStateRoot === undefined) return undefined;
+  if (typeof accountsStateRoot !== 'string' || !path.isAbsolute(accountsStateRoot) || /[\0\r\n]/.test(accountsStateRoot))
+    throw new Error('The account state directory must be an absolute existing directory outside the installation');
+  const root = path.resolve(accountsStateRoot);
+  let physical;
+  try {
+    if (!(await stat(root)).isDirectory()) throw new Error();
+    physical = await realpath(root);
+  } catch { throw new Error('The account state directory must be an absolute existing directory outside the installation'); }
+  if (inside(root, sourceInstall) || inside(physical, sourceInstall))
+    throw new Error('The account state directory must be outside the installation');
+  return root;
+}
+
+export async function buildCopy({ sourceAsar, outputRoot, componentExecutable, uiDirectory, languageServerPath, nativeOAuthExtractor, accountsStateRoot, allowMissingPayload = false }) {
   sourceAsar = await realpath(sourceAsar);
   outputRoot = await futureRealpath(outputRoot);
   const sourceInstall = path.resolve(path.dirname(sourceAsar), '..');
+  accountsStateRoot = await checkedAccountsRoot(accountsStateRoot, sourceInstall);
   // The builder has no mode which writes the installed archive. Installation is
   // an explicit, separate action against an already reviewed prepared result.
   if (inside(outputRoot, sourceInstall) || inside(sourceAsar, outputRoot)) throw new Error('The output must be separate from the source installation');
   if (!await absent(outputRoot)) throw new Error('Output already exists; choose a new directory');
   const original = await readFile(sourceAsar);
+  const compatibility = inspectSourceCompatibility(readAsar(original));
   const replacements = patchSources(readAsar(original));
   replacements.set('dist/hostauth-addon/model-menu-preload.cjs', Buffer.from(modelMenuEntrySource()));
   for (const name of addonFiles) replacements.set('dist/hostauth-addon/' + name, await readFile(path.join(packageRoot, 'src', name)));
@@ -39,6 +57,7 @@ export async function buildCopy({ sourceAsar, outputRoot, componentExecutable, u
   const patched = rewriteAsar(original, replacements);
   const componentName = componentExecutable ? path.basename(componentExecutable) : 'ProfileHub.Accounts.exe';
   const config = { schemaVersion: 1, component: 'component/' + componentName };
+  if (accountsStateRoot !== undefined) config.accountsStateRoot = accountsStateRoot;
   let originalNative, patchedNative, nativeDiagnostics, providerNative, nativeProjectRefresh;
   if (languageServerPath) {
     const extractor = nativeOAuthExtractor || (await import(pathToFileURL(path.resolve(packageRoot, '../account-plugin/native-oauth.mjs')))).extractNativeOAuth;
@@ -50,15 +69,22 @@ export async function buildCopy({ sourceAsar, outputRoot, componentExecutable, u
     const providerResult = patchNativeProjectRefresh(patchedNative);
     providerNative = providerResult.buffer;
     nativeProjectRefresh = providerResult.report;
+    if (nativeDiagnostics.version !== compatibility.sourceContractVersion || nativeProjectRefresh.version !== compatibility.sourceContractVersion)
+      throw new Error('Native program and application source contracts differ');
+    config.nativeProgram = { version: nativeDiagnostics.version, originalSha256: sha256(originalNative),
+      patchedSha256: sha256(patchedNative), providerSha256: sha256(providerNative) };
+    config.frontendBindings = inspectFrontendBindings(extractNativeFrontend(originalNative));
   } else if (!allowMissingPayload) throw new Error('The installed language-server program is required to configure the matching desktop OAuth client');
   const manifest = {
-    schemaVersion: 3, adapterVersion: '0.4.0-preview.7', antigravityVersion: SUPPORTED_VERSION,
+    schemaVersion: 3, adapterVersion: '0.4.0-preview.8', antigravityVersion: compatibility.antigravityVersion,
     originalAsarSha256: sha256(original), patchedAsarSha256: sha256(patched),
-    originalSourceSha256: SOURCE_SHA256,
-    originalNativeSha256: originalNative ? ORIGINAL_NATIVE_SHA256 : undefined,
-    patchedNativeSha256: patchedNative ? PATCHED_NATIVE_SHA256 : undefined,
+    originalSourceSha256: compatibility.sourceSha256, compatibility,
+    originalNativeSha256: originalNative ? sha256(originalNative) : undefined,
+    patchedNativeSha256: patchedNative ? sha256(patchedNative) : undefined,
     nativeDiagnostics,
-    providerNativeSha256: providerNative ? PROVIDER_NATIVE_SHA256 : undefined,
+    providerNativeSha256: providerNative ? sha256(providerNative) : undefined,
+    frontendBindings: config.frontendBindings,
+    accountsStateRoot,
     nativeProjectRefresh,
     changedFiles: [...replacements].map(([name, bytes]) => ({ name, sha256: sha256(bytes) })),
     payloadComplete: Boolean(componentExecutable && uiDirectory && languageServerPath),
@@ -99,20 +125,31 @@ export async function buildCopy({ sourceAsar, outputRoot, componentExecutable, u
 
 async function validatePrepared(preparedRoot) {
   const manifest = JSON.parse(await readFile(path.join(preparedRoot, 'manifest.json'), 'utf8'));
-  if (manifest.schemaVersion !== 3 || manifest.antigravityVersion !== SUPPORTED_VERSION) throw new Error('Unsupported prepared adapter manifest');
+  if (manifest.schemaVersion !== 3) throw new Error('Unsupported prepared adapter manifest');
   const original = await readFile(path.join(preparedRoot, 'restore', 'app.asar'));
   const patched = await readFile(path.join(preparedRoot, 'resources', 'app.asar'));
   if (sha256(original) !== manifest.originalAsarSha256 || sha256(patched) !== manifest.patchedAsarSha256) throw new Error('Prepared archive contents differ from the manifest');
+  const compatibility = inspectSourceCompatibility(readAsar(original));
+  if (compatibility.antigravityVersion !== manifest.antigravityVersion) throw new Error('Prepared version differs from its original program');
   patchSources(readAsar(original));
   const originalNative = await readFile(path.join(preparedRoot, 'restore', 'bin', 'language_server.exe'));
   const patchedNative = await readFile(path.join(preparedRoot, 'resources', 'bin', 'language_server.exe'));
-  if (manifest.originalNativeSha256 !== ORIGINAL_NATIVE_SHA256 || manifest.patchedNativeSha256 !== PATCHED_NATIVE_SHA256 ||
-      sha256(originalNative) !== ORIGINAL_NATIVE_SHA256 || sha256(patchedNative) !== PATCHED_NATIVE_SHA256 ||
+  const native = inspectNativeDiagnostics(originalNative);
+  if (native.version !== compatibility.sourceContractVersion ||
+      manifest.originalNativeSha256 !== native.originalSha256 || manifest.patchedNativeSha256 !== native.patchedSha256 ||
+      sha256(originalNative) !== manifest.originalNativeSha256 || sha256(patchedNative) !== manifest.patchedNativeSha256 ||
       !restoreNativeDiagnostics(patchedNative).buffer.equals(originalNative)) throw new Error('Prepared native program differs from the reviewed patch');
   const providerNative = await readFile(path.join(preparedRoot, 'resources', 'hostauth-addon', 'native', 'language_server.exe'));
-  if (manifest.providerNativeSha256 !== PROVIDER_NATIVE_SHA256 || sha256(providerNative) !== PROVIDER_NATIVE_SHA256 ||
+  if (sha256(providerNative) !== manifest.providerNativeSha256 ||
       !restoreNativeProjectRefresh(providerNative).buffer.equals(patchedNative)) throw new Error('Prepared provider program differs from the reviewed project refresh patch');
-  return { manifest, original, patched, originalNative, patchedNative };
+  const config = JSON.parse(await readFile(path.join(preparedRoot, 'resources', 'hostauth-addon', 'config.json'), 'utf8'));
+  if (config.accountsStateRoot !== manifest.accountsStateRoot) throw new Error('Prepared account state directory differs from its manifest');
+  const expectedBindings = inspectFrontendBindings(extractNativeFrontend(originalNative));
+  if (JSON.stringify(config.frontendBindings) !== JSON.stringify(expectedBindings) ||
+      JSON.stringify(config.nativeProgram) !== JSON.stringify({ version: native.version, originalSha256: native.originalSha256,
+        patchedSha256: native.patchedSha256, providerSha256: sha256(providerNative) }))
+    throw new Error('Prepared frontend or native bindings differ from the original program');
+  return { manifest, original, patched, originalNative, patchedNative, config };
 }
 
 async function replaceFile(filename, bytes) {
@@ -133,7 +170,8 @@ export async function applyPrepared({ preparedRoot, resourcesRoot, backupRoot, p
   backupRoot = await futureRealpath(backupRoot);
   if (inside(backupRoot, resourcesRoot) || inside(resourcesRoot, backupRoot) || inside(preparedRoot, resourcesRoot) || inside(resourcesRoot, preparedRoot)) throw new Error('Prepared files, resources and recovery directory must be separate');
   if (!await absent(backupRoot) || !await absent(path.join(resourcesRoot, 'hostauth-addon'))) throw new Error('An adapter or recovery directory already exists');
-  const { manifest, original, patched, originalNative, patchedNative } = await validatePrepared(preparedRoot);
+  const { manifest, original, patched, originalNative, patchedNative, config } = await validatePrepared(preparedRoot);
+  await checkedAccountsRoot(config.accountsStateRoot, path.resolve(resourcesRoot, '..'));
   if (!manifest.payloadComplete) throw new Error('Prepared account component or UI payload is incomplete');
   const destination = path.join(resourcesRoot, 'app.asar');
   const nativeDestination = path.join(resourcesRoot, 'bin', 'language_server.exe');
@@ -180,11 +218,12 @@ export async function restorePrepared({ resourcesRoot, backupRoot, processesStop
   if (manifest.schemaVersion >= 2) {
     nativeDestination = path.join(resourcesRoot, 'bin', 'language_server.exe');
     originalNative = await readFile(path.join(backupRoot, 'language_server.exe'));
-    if (sha256(originalNative) !== ORIGINAL_NATIVE_SHA256 || manifest.originalNativeSha256 !== ORIGINAL_NATIVE_SHA256 || manifest.patchedNativeSha256 !== PATCHED_NATIVE_SHA256) throw new Error('Original native recovery program is invalid');
+    const native = inspectNativeDiagnostics(originalNative);
+    if (native.state !== 'original' || manifest.originalNativeSha256 !== native.originalSha256 || manifest.patchedNativeSha256 !== native.patchedSha256) throw new Error('Original native recovery program is invalid');
     currentNative = sha256(await readFile(nativeDestination));
-    if (![ORIGINAL_NATIVE_SHA256, PATCHED_NATIVE_SHA256].includes(currentNative)) throw new Error('The native program was updated or modified; refusing to overwrite it with an older program');
+    if (![native.originalSha256, native.patchedSha256].includes(currentNative)) throw new Error('The native program was updated or modified; refusing to overwrite it with an older program');
   }
-  if (originalNative && currentNative !== ORIGINAL_NATIVE_SHA256) await replaceFile(nativeDestination, originalNative);
+  if (originalNative && currentNative !== manifest.originalNativeSha256) await replaceFile(nativeDestination, originalNative);
   if (current !== manifest.originalAsarSha256) await replaceFile(destination, original);
   await rm(path.join(resourcesRoot, 'hostauth-addon'), { recursive: true, force: true });
   return { restored: true, originalAsarSha256: manifest.originalAsarSha256 };

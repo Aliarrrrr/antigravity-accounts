@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { connectEnvelope } = require('../src/native-agent-state.cjs');
-const { createNativeTaskAdapter, decodeActivity, decodeWait, decodeRemoteControl, refreshActivity, PROGRAM_SHA256, PATCHED_PROGRAM_SHA256, PROVIDER_PROGRAM_SHA256 } = require('../src/native-task-adapter.cjs');
-import { ORIGINAL_NATIVE_SHA256, PATCHED_NATIVE_SHA256 } from '../src/native-diagnostics-patch.mjs';
-import { PROVIDER_NATIVE_SHA256 } from '../src/native-project-refresh-patch.mjs';
+const { createNativeTaskAdapter, decodeActivity, decodeWait, decodeRemoteControl, refreshActivity, PROGRAM_SHA256, PATCHED_PROGRAM_SHA256, PROVIDER_PROGRAM_SHA256, NATIVE_PROGRAM_PROFILES, resolveNativeProgram } = require('../src/native-task-adapter.cjs');
+import { ORIGINAL_NATIVE_SHA256, PATCHED_NATIVE_SHA256, NATIVE_DIAGNOSTICS_PROFILES } from '../src/native-diagnostics-patch.mjs';
+import { PROVIDER_NATIVE_SHA256, PROJECT_REFRESH_PROFILES } from '../src/native-project-refresh-patch.mjs';
 
 function vint(value) { const bytes = []; do { const byte = value % 128; value = Math.floor(value / 128); bytes.push(byte | (value ? 128 : 0)); } while (value); return Buffer.from(bytes); }
 const scalar = (number, value) => Buffer.concat([vint(number * 8), vint(value)]);
@@ -27,6 +27,7 @@ function adapterWith(fetchImpl, options = {}) {
   return createNativeTaskAdapter({
     electron: { session: { defaultSession: { webRequest: { onBeforeRequest(_, handler) { listener = handler; } } } } },
     baseUrl: 'https://127.0.0.1:12345', csrf: 'new-local-process-csrf-value', nativeProgramSha256: PROGRAM_SHA256,
+    nativeProgram: NATIVE_PROGRAM_PROFILES[0],
     client: { request: async () => [] }, fetchImpl, ...options,
   });
 }
@@ -70,6 +71,37 @@ test('runtime switching is supported only by the exact independently authorized 
     const adapter = adapterWith(async () => assert.fail('capability checks do not call a service'), { nativeProgramSha256: sha256 });
     assert.equal(adapter.authBoundarySafe, sha256 === PROVIDER_PROGRAM_SHA256);
     adapter.close();
+  }
+});
+
+test('runtime trust sets match each inspected diagnostics and provider program without mixing versions', () => {
+  assert.equal(NATIVE_PROGRAM_PROFILES.length, NATIVE_DIAGNOSTICS_PROFILES.length);
+  for (const profile of NATIVE_PROGRAM_PROFILES) {
+    const diagnostics = NATIVE_DIAGNOSTICS_PROFILES.find(value => value.version === profile.version);
+    const project = PROJECT_REFRESH_PROFILES.find(value => value.version === profile.version);
+    assert.equal(profile.originalSha256, diagnostics.originalSha256);
+    assert.equal(profile.patchedSha256, diagnostics.patchedSha256);
+    assert.equal(profile.providerSha256, project.providerSha256);
+    assert.equal(resolveNativeProgram({ ...profile }), profile);
+    const adapter = adapterWith(async () => assert.fail('Trust validation does not use a service'), {
+      nativeProgram: profile, nativeProgramSha256: profile.providerSha256,
+    });
+    assert.equal(adapter.authBoundarySafe, true); adapter.close();
+    for (const other of NATIVE_PROGRAM_PROFILES.filter(value => value !== profile)) {
+      const mixed = { ...profile, providerSha256: other.providerSha256 };
+      assert.throws(() => resolveNativeProgram(mixed), { code: 'native_program_unsupported' });
+      const mismatch = adapterWith(async () => assert.fail('Trust validation does not use a service'), {
+        nativeProgram: profile, nativeProgramSha256: other.providerSha256,
+      });
+      assert.equal(mismatch.authBoundarySafe, false); mismatch.close();
+    }
+  }
+  for (const nativeProgram of [undefined, {}, { ...NATIVE_PROGRAM_PROFILES[0], version: 'future' }]) {
+    assert.throws(() => resolveNativeProgram(nativeProgram), { code: 'native_program_unsupported' });
+    const adapter = adapterWith(async () => assert.fail('Trust validation does not use a service'), {
+      nativeProgram, nativeProgramSha256: PROVIDER_PROGRAM_SHA256,
+    });
+    assert.equal(adapter.authBoundarySafe, false); adapter.close();
   }
 });
 
@@ -218,7 +250,7 @@ test('a profile-shaped response with an HTML content type remains unknown', asyn
   adapter.close();
 });
 
-function confirmationAdapter({ projects = ['project-b', 'project-b'], email = 'b@example.invalid', hasValidAuth = true, onRequest = () => {}, adapterOptions = {} } = {}) {
+function confirmationAdapter({ projects = ['project-b', 'project-b'], email = 'b@example.invalid', hasValidAuth = true, quotaFails = false, quotaResponse, onRequest = () => {}, adapterOptions = {} } = {}) {
   const calls = [];
   let loads = 0;
   const adapter = adapterWith(async (url, options) => {
@@ -233,6 +265,8 @@ function confirmationAdapter({ projects = ['project-b', 'project-b'], email = 'b
     if (method === 'GetLoadCodeAssist') result = { response: { cloudaicompanionProject: projects[loads++ % projects.length] } };
     if (method === 'GetUserStatus') result = { userStatus: { email } };
     if (method === 'GetAuthStatus') result = { authResult: { hasValidAuth } };
+    if (method === 'RetrieveUserQuotaSummary' && quotaResponse) return quotaResponse();
+    if (method === 'RetrieveUserQuotaSummary' && quotaFails) return Response.json({ code: 'internal', message: 'DO_NOT_EXPOSE_PROVIDER_RESPONSE' }, { status: 500 });
     return Response.json(result);
   }, { client: { async request(method) { assert.equal(method, 'listAccounts'); return [{ id: 'account-b', email: 'b@example.invalid', disabled: false }]; } }, ...adapterOptions });
   return { adapter, calls };
@@ -250,6 +284,92 @@ test('identity confirmation uses two matching native load projects and email wit
     assert.deepEqual(calls, ['GetLoadCodeAssist', 'goroutine', 'GetAvailableModels', 'RetrieveUserQuotaSummary', 'goroutine', 'GetLoadCodeAssist', 'goroutine', 'GetUserStatus', 'GetAuthStatus', 'goroutine']);
     assert.equal(adapter.authBoundarySafe, false);
   } finally { adapter.close(); }
+});
+
+test('a failed quota refresh identifies its stage and cannot confirm or replace the native view', async () => {
+  const { adapter, calls } = confirmationAdapter({ quotaFails: true });
+  try {
+    await assert.rejects(adapter.confirmIdentity({ accountId: 'account-b', generation: 2, tokenWasObserved: () => true }), { code: 'native_quota_refresh_failed' });
+    assert.equal(calls.at(-1), 'RetrieveUserQuotaSummary');
+    assert.equal(calls.includes('GetUserStatus'), false);
+  } finally { adapter.close(); }
+});
+
+const verificationMessage = 'request failed (code 403): Verify your account to continue.';
+
+test('an official verification error has a fixed code without exposing its response or completing confirmation', async () => {
+  for (const prefix of ['', 'retrieve user quota summary: ']) {
+    const views = [];
+    const { adapter, calls } = confirmationAdapter({
+      quotaResponse: () => Response.json({ code: 'internal', message: prefix + verificationMessage,
+        details: [{ url: 'https://example.invalid/DO_NOT_EXPOSE_PROVIDER_RESPONSE', token: 'DO_NOT_EXPOSE_PROVIDER_TOKEN' }] }, { status: 500 }),
+      adapterOptions: { refreshNativeView(...args) { views.push(args); } },
+    });
+    try {
+      await assert.rejects(adapter.confirmIdentity({ accountId: 'account-b', generation: 2, tokenWasObserved: () => true }), error => {
+        assert.equal(error.code, 'native_account_verification_required');
+        assert.equal(error.message, 'The independent account component could not complete this operation.');
+        assert.equal(JSON.stringify(error).includes('DO_NOT_EXPOSE'), false);
+        assert.equal(error.cause, undefined);
+        return true;
+      });
+      assert.equal(calls.at(-1), 'RetrieveUserQuotaSummary');
+      assert.equal(calls.includes('GetUserStatus'), false);
+      assert.deepEqual(views, []);
+    } finally { adapter.close(); }
+  }
+});
+
+test('other quota failures and text outside the bounded Connect error message cannot claim account verification', async () => {
+  const failures = [
+    () => Response.json({ code: 'permission_denied', message: 'Permission denied.' }, { status: 403 }),
+    () => Response.json({ code: 'internal', message: 'request failed (code 403): Permission denied.' }, { status: 500 }),
+    () => Response.json({ code: 'internal', message: 'Verify your account to continue.' }, { status: 500 }),
+    () => Response.json({ code: 'internal', message: 'request failed (code 401): Verify your account to continue.' }, { status: 500 }),
+    () => Response.json({ code: 'internal', message: 'unrelated', details: [{ message: verificationMessage }] }, { status: 500 }),
+    () => Response.json({ code: 'unrelated', message: verificationMessage }, { status: 500 }),
+    () => Response.json({ code: 'internal', message: verificationMessage + ' Example text.' }, { status: 500 }),
+    () => Response.json({ code: 'internal', message: 'example text\n' + verificationMessage }, { status: 500 }),
+    () => new Response(verificationMessage, { status: 500, headers: { 'Content-Type': 'application/json' } }),
+    () => new Response('{"code":"internal","message":' + JSON.stringify(verificationMessage), { status: 500, headers: { 'Content-Type': 'application/json' } }),
+    () => Response.json({ code: 'internal', message: verificationMessage, padding: 'x'.repeat(16384) }, { status: 500 }),
+  ];
+  for (const quotaResponse of failures) {
+    const { adapter, calls } = confirmationAdapter({ quotaResponse });
+    try {
+      await assert.rejects(adapter.confirmIdentity({ accountId: 'account-b', generation: 2, tokenWasObserved: () => true }), { code: 'native_quota_refresh_failed' });
+      assert.equal(calls.at(-1), 'RetrieveUserQuotaSummary');
+    } finally { adapter.close(); }
+  }
+});
+
+test('an oversized failed read response cancels its stream and remains a generic quota failure', async () => {
+  let cancelled = false;
+  const { adapter } = confirmationAdapter({ quotaResponse: () => new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array(16385).fill(32));
+      controller.enqueue(new TextEncoder().encode(JSON.stringify({ code: 'internal', message: verificationMessage })));
+    },
+    cancel() { cancelled = true; },
+  }), { status: 500, headers: { 'Content-Type': 'application/json' } }) });
+  try {
+    await assert.rejects(adapter.confirmIdentity({ accountId: 'account-b', generation: 2, tokenWasObserved: () => true }), { code: 'native_quota_refresh_failed' });
+    assert.equal(cancelled, true);
+  } finally { adapter.close(); }
+});
+
+test('success, non-JSON errors and redirected responses never activate verification classification', async () => {
+  const success = confirmationAdapter({ quotaResponse: () => Response.json({ code: 'internal', message: verificationMessage }) });
+  try { assert.equal((await success.adapter.confirmIdentity({ accountId: 'account-b', generation: 2, tokenWasObserved: () => true })).confirmed, true); }
+  finally { success.adapter.close(); }
+  for (const [quotaResponse, code] of [
+    [() => new Response(verificationMessage, { status: 500, headers: { 'Content-Type': 'text/plain' } }), 'native_protocol_invalid'],
+    [() => { const response = Response.json({ code: 'internal', message: verificationMessage }, { status: 500 }); Object.defineProperty(response, 'redirected', { value: true }); return response; }, 'native_quota_refresh_failed'],
+  ]) {
+    const { adapter } = confirmationAdapter({ quotaResponse });
+    try { await assert.rejects(adapter.confirmIdentity({ accountId: 'account-b', generation: 2, tokenWasObserved: () => true }), { code }); }
+    finally { adapter.close(); }
+  }
 });
 
 test('provider confirmation also updates the native view and waits for an explicit unavailable-model choice', async () => {

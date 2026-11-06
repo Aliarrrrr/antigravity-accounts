@@ -1,15 +1,18 @@
-# Antigravity 2.28.2 HostAuth adapter
+# Antigravity 2.29 / 2.28.2 HostAuth adapter
 
 Version-bound Electron adaptation for the Accounts plugin. The original LS
 contacts Google directly; original Google Authorization headers and official
 saved credentials never pass through the plugin. The HostBridge uses a fresh
 local capability and supplies only independently added accounts.
 
-`patch-plan.mjs` accepts four exact inspected 2.28.2 source digests and preserves
-the new Webview PAC initialization. `native-diagnostics-patch.mjs` accepts one exact LS
+`patch-plan.mjs` accepts complete inspected 2.29 / 2.28.2 source contracts and RPC
+dependencies, including a changed package version with unchanged contract files.
+It preserves async shell-environment prefetch and Webview PAC initialization.
+`native-diagnostics-patch.mjs` accepts the two inspected exact LS
 image and changes four instruction regions to register only
 `/debug/pprof/goroutine`. It does not enable dev mode or other pprof routes.
-Source drift is rejected before installation.
+Unknown source/native changes are rejected before installation. Frontend bindings
+are extracted by action/schema/Redux contracts instead of fixed compiler names.
 
 `native-project-refresh-patch.mjs` changes the existing getCAICProject cache call
 to its ABI-compatible native forceRefresh implementation. The combined provider
@@ -20,7 +23,7 @@ paths remain rooted in the official resources directory.
 ## Preparing, installing and restoring
 
 ```text
-node scripts/package-copy.mjs --source-asar <installed-resources/app.asar> --output <new-directory> --component <published-accounts/Accounts.exe> --ui <account-plugin-directory> --language-server <installed-language-server.exe>
+node scripts/package-copy.mjs --source-asar <installed-resources/app.asar> --output <new-directory> --component <published-accounts/Antigravity.Accounts.exe> --ui <account-plugin-directory> --language-server <installed-language-server.exe>
 ```
 
 `buildCopy` creates a local adapted archive, native program, component and their
@@ -65,19 +68,15 @@ modelPicked action is observed. Unknown frontend contracts, custom models and
 ambiguous aliases stay paused. The 2.28.2 bindings have been checked with extracted
 native definitions and synthetic account/model state in an offline browser.
 
-The exact provider image enables the local switch mechanism. Earlier program-copy
-runs covered invented-account A->B changes, a delayed metadata request and
-cancelling a wait while an owned command child continued. Preview.5 on 2.28.1 also
-completed two real metadata-only account changes. These are version-specific
-results, not a completed 2.28.2 account-switch test.
-
-Preview.7 has been installed on 2.28.2. Its native menu showed three account groups,
-scrollable native model options and View Usage. The upgrade restored the original
-project, conversation, model and tray preference. No account switch or model
-request was initiated during this check. New Google sign-in, expiry renewal,
-quota charging and conversation generation have not been verified for this version.
+Preview.8 on installed Antigravity 2.29.0 completed a real metadata-only
+Account A -> Account B -> Account A round trip while retaining the same App,
+language-service processes, window, workspace and available concrete model.
+No model requests were initiated. This does not verify generation, quota charging,
+cross-account generation continuation or an actual NSIS upgrade. See the
+[version-specific validation record](https://github.com/Aliarrrrr/antigravity-accounts/blob/master/docs/ACCOUNTS_VALIDATION.md).
 Other native images remain unsupported.
 
+`npm ci --ignore-scripts --no-audit --no-fund` installs locked test dependencies;
 `npm test` runs local transport, program-copy, protocol and simulated task tests.
 Program-copy checks require the reviewed unmodified official files; an already
 adapted or localized installation is not a valid input. Set

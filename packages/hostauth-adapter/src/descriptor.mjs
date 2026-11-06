@@ -1,5 +1,5 @@
 // Only the small FileDescriptorProto needed by the host bridge is generated.
-// Field numbers match the reviewed native 2.28.2 GetOAuthToken contract.
+// Field numbers match the reviewed native 2.28.2/2.29.0 GetOAuthToken contract.
 function varint(value) {
   const result = [];
   do { result.push((value & 127) | (value > 127 ? 128 : 0)); value = Math.floor(value / 128); } while (value);
@@ -30,7 +30,7 @@ export function descriptorBytes() {
 
 export function descriptorSource() {
   const names = ['GetUpdateStatusRequest', 'GetUpdateStatusResponse', 'UpdateStatus', 'ApplyUpdateRequest', 'ApplyUpdateResponse', 'GetOAuthTokenRequest', 'GetOAuthTokenResponse', 'OAuthTokenInfo'];
-  return '"use strict";\n// Local 2.28.2 host-auth descriptor extension. Original program retained in restore/app.asar.\n' +
+  return '"use strict";\n// Local host-auth descriptor extension. Original program retained in restore/app.asar.\n' +
     'Object.defineProperty(exports, "__esModule", { value: true });\n' +
     'const codegen = require("@bufbuild/protobuf/codegenv2");\n' +
     'const wkt = require("@bufbuild/protobuf/wkt");\n' +

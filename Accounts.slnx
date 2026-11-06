@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/Antigravity.Accounts/Antigravity.Accounts.csproj" />
+  <Project Path="tests/Antigravity.Accounts.Tests/Antigravity.Accounts.Tests.csproj" />
+</Solution>

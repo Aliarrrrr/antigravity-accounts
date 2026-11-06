@@ -1,8 +1,8 @@
-name: CI
+name: Accounts CI
 
 on:
   push:
-    branches: [master, main]
+    branches: [master, main, 'codex/**']
   pull_request:
     branches: [master, main]
 
@@ -24,22 +24,28 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
-      - name: Build contracts and system tests
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: packages/hostauth-adapter/package-lock.json
+      - name: Install DOM test dependency
+        shell: pwsh
+        run: npm ci --prefix packages/hostauth-adapter --ignore-scripts --no-audit --no-fund
+      - name: Build and test Accounts component
+        shell: pwsh
+        run: ./scripts/Build.ps1 -DotNet dotnet -LockedRestore -Test
+      - name: Test host adapter and installation logic
         shell: pwsh
         run: |
-          ./scripts/Test-NextBuildContract.ps1
-          ./scripts/Build.ps1 -LockedRestore -Test -IncludeSystemTests
-      - name: Install pinned Inno Setup
-        shell: pwsh
-        run: ./scripts/Install-InnoSetup.ps1
-      - name: Publish and smoke portable package and installer
+          node --test packages/hostauth-adapter/test/*.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Host adapter tests failed.' }
+          node --test packages/account-plugin/test/*.test.mjs packages/account-plugin/test/*.test.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Account plugin tests failed.' }
+      - name: Build and inspect portable package
         shell: pwsh
         run: |
-          ./scripts/Publish-Next.ps1 -Installer
-          $manifests = @(Get-ChildItem artifacts/next -Recurse -Filter package-manifest.json)
+          ./scripts/Publish-Accounts.ps1 -DotNet dotnet -OutputRoot artifacts/accounts/ci
+          $manifests = @(Get-ChildItem artifacts/accounts/ci -Recurse -Filter package-manifest.json)
           if ($manifests.Count -ne 1) { throw 'Expected exactly one built package.' }
-          $package = $manifests[0].Directory.FullName
-          ./scripts/Test-NextPackage.ps1 -PackageRoot $package
-          $setups = @(Get-ChildItem (Split-Path $package -Parent) -Filter 'AGProfileHubNext-Setup-*.exe')
-          if ($setups.Count -ne 1) { throw 'Expected exactly one installer.' }
-          ./scripts/Test-NextInstaller.ps1 -Installer $setups[0].FullName
+          ./scripts/Test-AccountsPackage.ps1 -PackageRoot $manifests[0].Directory.FullName

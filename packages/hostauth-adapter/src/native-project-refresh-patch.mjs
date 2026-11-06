@@ -2,12 +2,13 @@ import { createHash } from 'node:crypto';
 import {
   ORIGINAL_NATIVE_SHA256,
   PATCHED_NATIVE_SHA256 as DIAGNOSTICS_NATIVE_SHA256,
+  NATIVE_DIAGNOSTICS_PROFILES,
 } from './native-diagnostics-patch.mjs';
 
 export { ORIGINAL_NATIVE_SHA256, DIAGNOSTICS_NATIVE_SHA256 };
-export const PROJECT_REFRESH_VERSION = '2.28.2';
-export const PROJECT_REFRESH_NATIVE_SHA256 = 'd728fa9d5ce8eb69a32acbb3b820d25b1c8df901d1cee435c2c2c13963f2871b';
-export const PROVIDER_NATIVE_SHA256 = 'c132ea0fc1688dfd614cae5ac5c47b89c6c36753375981a0600170cef896dfea';
+export const PROJECT_REFRESH_VERSION = '2.29.0';
+export const PROJECT_REFRESH_NATIVE_SHA256 = '3269e7df7f3b34aba7b087c6ea8055163c4ace072c72ed376314775439b7453c';
+export const PROVIDER_NATIVE_SHA256 = '9a58d7ec73af4da1f60b9682d6632ed54a9f62dd2752372c8f53f8cbe116eb85';
 
 // The existing getCAICProject call reads a cached LoadCodeAssist response before
 // its caller obtains the current HTTP client/token. An account change can then
@@ -16,19 +17,25 @@ export const PROVIDER_NATIVE_SHA256 = 'c132ea0fc1688dfd614cae5ac5c47b89c6c367533
 // Both methods take (cache, dictionary, context) and return (response, error).
 // forceRefresh returns its fetched response; it does not reload the cache after
 // fetching. No code, stack frames, auth provider, or cache layout is inserted.
-// In 2.28 the caller still reads this cache at CodeAssistClient+0x50.
-// The constructor still binds that member to fetchLoadCodeAssistResponse;
-// the cache methods and dictionary ABI retain the reviewed instruction flow.
-const address = 0x1420bb593n;
-const originalTarget = 0x1420ce620n;
-const refreshedTarget = 0x1420cea20n;
-const dictionaryAddress = 0x143d7fd80n;
-const before = Buffer.from('e888300100', 'hex');
-const after = Buffer.from('e888340100', 'hex');
-const variants = Object.freeze([
-  { beforeSha256: ORIGINAL_NATIVE_SHA256, afterSha256: PROJECT_REFRESH_NATIVE_SHA256, diagnostics: false },
-  { beforeSha256: DIAGNOSTICS_NATIVE_SHA256, afterSha256: PROVIDER_NATIVE_SHA256, diagnostics: true },
+// Both reviewed callers load CodeAssistClient+0x50. In 2.29 the cache internals
+// changed (failure backoff and member offsets); its exact native forceRefresh
+// implementation was reviewed separately instead of assuming a relocation.
+export const PROJECT_REFRESH_PROFILES = Object.freeze([
+  Object.freeze({ version: PROJECT_REFRESH_VERSION, projectSha256: PROJECT_REFRESH_NATIVE_SHA256, providerSha256: PROVIDER_NATIVE_SHA256,
+    address: 0x142114b73n, originalTarget: 0x142128540n, refreshedTarget: 0x1421289e0n, dictionaryAddress: 0x143ece9e0n,
+    before: 'e8c8390100', after: 'e8683e0100' }),
+  Object.freeze({ version: '2.28.2', projectSha256: 'd728fa9d5ce8eb69a32acbb3b820d25b1c8df901d1cee435c2c2c13963f2871b',
+    providerSha256: 'c132ea0fc1688dfd614cae5ac5c47b89c6c36753375981a0600170cef896dfea',
+    address: 0x1420bb593n, originalTarget: 0x1420ce620n, refreshedTarget: 0x1420cea20n, dictionaryAddress: 0x143d7fd80n,
+    before: 'e888300100', after: 'e888340100' }),
 ]);
+const variants = Object.freeze(PROJECT_REFRESH_PROFILES.flatMap(profile => {
+  const diagnostics = NATIVE_DIAGNOSTICS_PROFILES.find(item => item.version === profile.version);
+  return [
+    { ...profile, beforeSha256: diagnostics.originalSha256, afterSha256: profile.projectSha256, diagnostics: false },
+    { ...profile, beforeSha256: diagnostics.patchedSha256, afterSha256: profile.providerSha256, diagnostics: true },
+  ];
+}));
 const digest = buffer => createHash('sha256').update(buffer).digest('hex');
 function fail() { throw new Error('unsupported_native_project_refresh_program'); }
 
@@ -60,6 +67,8 @@ function checkedImage(buffer, requiredState) {
   const sha256 = digest(buffer);
   const variant = variants.find(value => requiredState === 'original' ? value.beforeSha256 === sha256 : value.afterSha256 === sha256);
   if (!variant) fail();
+  const { address, originalTarget, refreshedTarget, dictionaryAddress } = variant;
+  const before = Buffer.from(variant.before, 'hex'), after = Buffer.from(variant.after, 'hex');
   const offset = addressOffset(buffer, address, before.length);
   const instruction = requiredState === 'original' ? before : after;
   if (!buffer.subarray(offset, offset + instruction.length).equals(instruction)) fail();
@@ -72,9 +81,11 @@ function checkedImage(buffer, requiredState) {
 }
 
 function report(state, { variant, offset }) {
+  const { address, originalTarget, refreshedTarget } = variant;
+  const before = Buffer.from(variant.before, 'hex'), after = Buffer.from(variant.after, 'hex');
   return {
     schemaVersion: 1,
-    version: PROJECT_REFRESH_VERSION,
+    version: variant.version,
     state,
     diagnostics: variant.diagnostics,
     originalSha256: variant.beforeSha256,
@@ -85,7 +96,7 @@ function report(state, { variant, offset }) {
       before: before.toString('hex'), after: after.toString('hex'),
       originalTarget: `0x${originalTarget.toString(16)}`,
       patchedTarget: `0x${refreshedTarget.toString(16)}`,
-      changedByteOffsets: [offset + 2],
+      changedByteOffsets: Array.from(before, (byte, index) => byte === after[index] ? undefined : offset + index).filter(value => value !== undefined),
       purpose: 'refresh account project before returning it to request construction',
     }],
   };
@@ -100,7 +111,7 @@ export function inspectNativeProjectRefresh(buffer) {
 export function patchNativeProjectRefresh(buffer) {
   const checked = checkedImage(buffer, 'original');
   const output = Buffer.from(buffer);
-  after.copy(output, checked.offset);
+  Buffer.from(checked.variant.after, 'hex').copy(output, checked.offset);
   checkedImage(output, 'patched');
   return { buffer: output, report: report('patched', checked) };
 }
@@ -108,7 +119,7 @@ export function patchNativeProjectRefresh(buffer) {
 export function restoreNativeProjectRefresh(buffer) {
   const checked = checkedImage(buffer, 'patched');
   const output = Buffer.from(buffer);
-  before.copy(output, checked.offset);
+  Buffer.from(checked.variant.before, 'hex').copy(output, checked.offset);
   checkedImage(output, 'original');
   return { buffer: output, report: report('original', checked) };
 }

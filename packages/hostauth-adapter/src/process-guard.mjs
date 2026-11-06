@@ -17,7 +17,10 @@ export function verifiedNodeSidecarIds({ processes, installRoot, roamingRoot, us
   const expected = '@echo off\nset ELECTRON_RUN_AS_NODE=1\n"' + executable + '" %*';
   if (shimText.trim().replace(/\r\n/g, '\n') !== expected) return [];
   const childPattern = new RegExp('^"' + escaped(executable) + '"\\s+' + escaped(args) + '\\s*$', 'i');
-  const parentPattern = new RegExp('^(?:"' + escaped(cmd) + '"|' + escaped(cmd) + ')\\s+/c\\s+(?:"' + escaped(shim) + '"|' + escaped(shim) + ')\\s+' + escaped(args) + '\\s*$', 'i');
+  const invocation = '(?:"' + escaped(shim) + '"|' + escaped(shim) + ')\\s+' + escaped(args);
+  // cmd /c can enclose the entire quoted executable plus arguments in one
+  // additional quote pair. Accept that exact form, not arbitrary trailing input.
+  const parentPattern = new RegExp('^(?:"' + escaped(cmd) + '"|' + escaped(cmd) + ')\\s+/c\\s+(?:"' + invocation + '"|' + invocation + ')\\s*$', 'i');
   const equal = (a, b) => typeof a === 'string' && a.toLowerCase() === b.toLowerCase();
   return processes.filter(entry => {
     if (!equal(entry.ExecutablePath, executable) || !childPattern.test(entry.CommandLine || '')) return false;

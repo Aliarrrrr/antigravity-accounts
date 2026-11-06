@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 const { updateNativeView, refreshNativeViews } = createRequire(import.meta.url)('../src/native-view.cjs');
 
 const config = (value, label = `Model ${value}`) => ({ value, label });
-function harness({ selected = 2, path = '/c/conversation', geminiOnly = false, overrideModel, contextWindow, ignoreRestore = false } = {}) {
+function harness({ selected = 2, path = '/c/conversation', geminiOnly = false, overrideModel, contextWindow, ignoreRestore = false, cloneStatus = false } = {}) {
   const schema = { typeName: 'exa.codeium_common_pb.UserStatus' };
   let state = { userStatus: { $typeName: schema.typeName, models: [config(1), config(2)] },
     modelSelection: { default: { model: 1, contextWindow }, byConversation: { conversation: { model: selected, contextWindow } } },
@@ -19,7 +19,7 @@ function harness({ selected = 2, path = '/c/conversation', geminiOnly = false, o
     }
     actions.push(action);
     if (action.type === 'userStatus/setUserStatus') {
-      state = { ...state, userStatus: action.payload };
+      state = { ...state, userStatus: cloneStatus ? structuredClone(action.payload) : action.payload };
       // Native RCa may synchronously dispatch defaultOverrideApplied when the
       // incoming account supplies a new default model configuration version.
       if (overrideModel !== undefined) state = { ...state, modelSelection: { ...state.modelSelection, default: { model: overrideModel } } };
@@ -56,12 +56,12 @@ function harness({ selected = 2, path = '/c/conversation', geminiOnly = false, o
     capture() { return execute(null, false, 'capture'); },
     clear() { return execute(null, false, 'clear'); },
     refresh(raw, explicit = false) { return execute(raw, explicit, 'refresh'); },
-    run(raw, explicit = false) {
+    run(raw, explicit = false, bindings) {
       if (!store[Symbol.for('antigravity.accounts.native-model-picks.v1')]?.capture) {
         const captured = execute(null, false, 'capture');
         if (captured.captured !== true) return { updated: false, errorCode: captured.errorCode };
       }
-      return execute(raw, explicit, 'refresh');
+      return bindings ? vm.runInNewContext(`(${updateNativeView.toString()})(raw, explicit, 'refresh', bindings)`, { ...context, raw, explicit, bindings }) : execute(raw, explicit, 'refresh');
     }, choose(model) { store.dispatch(CCa({ ...(path === '/' ? {} : { conversationId: 'conversation' }), model })); },
     overwriteSelection(model) { state.modelSelection.byConversation.conversation.model = model; },
     listenerCount() { return modelListeners.size; } };
@@ -76,6 +76,16 @@ test('native action updates model options with the native decoder and leaves dra
   assert.equal(h.store.getState().modelSelection, before.modelSelection);
   assert.equal(h.store.getState().navigation, before.navigation);
   assert.equal(h.store.getState().draft, before.draft);
+});
+
+test('a native reducer may recreate equivalent protobuf status without failing account refresh', () => {
+  const h = harness({ cloneStatus: true });
+  const bindings = { schema: h.context.B, decoder: h.context.Ve, setStatus: h.context.ft,
+    modelPicked: h.context.cCa, addListener: h.context.Ula, filter: h.context.Dma, feature: h.context.qka,
+    redux: h.context.gl, catalog: h.context.Ys, resolveModel: h.context.Zs, findModel: h.context.Cma,
+    equals(schema, left, right) { assert.equal(schema, h.context.B.UserStatusSchema); return JSON.stringify(left) === JSON.stringify(right); } };
+  assert.equal(h.run({ email: 'synthetic@example.invalid', models: [config(2), config(3)] }, false, bindings).selectionReady, true);
+  assert.equal(h.store.getState().userStatus.email, 'synthetic@example.invalid');
 });
 
 test('an unavailable original model cannot silently become the native fallback', () => {

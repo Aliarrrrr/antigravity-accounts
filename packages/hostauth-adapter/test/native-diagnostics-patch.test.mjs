@@ -21,7 +21,7 @@ test('unrecognized native images are rejected before any patch or restoration', 
   }
 });
 
-test('reviewed 2.28.2 image changes only the route instructions and restores byte-for-byte', { skip: !hasProgram }, async () => {
+test('reviewed 2.29.0 image changes only the route instructions and restores byte-for-byte', { skip: !hasProgram }, async () => {
   const original = await readFile(programPath);
   assert.equal(digest(original), ORIGINAL_NATIVE_SHA256);
   assert.equal(inspectNativeDiagnostics(original).state, 'original');
@@ -29,7 +29,7 @@ test('reviewed 2.28.2 image changes only the route instructions and restores byt
   assert.equal(digest(original), ORIGINAL_NATIVE_SHA256, 'source buffer is never mutated');
   assert.equal(digest(patched), PATCHED_NATIVE_SHA256);
   assert.equal(report.route, '/debug/pprof/goroutine');
-  assert.equal(report.version, '2.28.2');
+  assert.equal(report.version, '2.29.0');
   assert.equal(report.devModeEnabled, false);
   assert.equal(report.runtimeValidated, false);
   const allowed = new Set(report.changes.flatMap(change => Array.from({ length: change.before.length / 2 }, (_, index) => change.offset + index)));
@@ -40,13 +40,13 @@ test('reviewed 2.28.2 image changes only the route instructions and restores byt
     assert.equal(allowed.has(index), true, `unexpected program change at ${index}`);
   }
   assert.equal(changed, 16);
-  assert.deepEqual(report.changes.map(change => change.address), ['0x142f9b582', '0x142f9b5c4', '0x142f9b5cb', '0x142f9b5dc']);
+  assert.deepEqual(report.changes.map(change => change.address), ['0x1430ba6d7', '0x1430ba719', '0x1430ba720', '0x1430ba731']);
   // Verify relative branch destinations and the pre-existing literal they use.
   const [entry, literal, length, exit] = report.changes;
-  assert.equal(0x142f9b582 + 5 + patched.readInt32LE(entry.offset + 1), 0x142f9b5bc);
-  assert.equal(0x142f9b5c4 + 7 + patched.readInt32LE(literal.offset + 3), 0x14359e538);
+  assert.equal(0x1430ba6d7 + 5 + patched.readInt32LE(entry.offset + 1), 0x1430ba711);
+  assert.equal(0x1430ba719 + 7 + patched.readInt32LE(literal.offset + 3), 0x1436d189c);
   assert.equal(patched.readUInt32LE(length.offset + 1), 22);
-  assert.equal(0x142f9b5dc + 5 + patched.readInt32LE(exit.offset + 1), 0x142f9b65c);
+  assert.equal(0x1430ba731 + 5 + patched.readInt32LE(exit.offset + 1), 0x1430ba7b1);
   assert.equal(inspectNativeDiagnostics(patched).state, 'patched');
   assert.throws(() => patchNativeDiagnostics(patched), /unsupported_native_diagnostics_program/);
   assert.throws(() => restoreNativeDiagnostics(original), /unsupported_native_diagnostics_program/);

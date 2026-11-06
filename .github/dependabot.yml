@@ -4,12 +4,10 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    # System.Management / System.CodeDom move with the .NET 10 release train;
-    # Review each bump together with both the default and win-x64 locks.
-    groups:
-      dotnet-packages:
-        patterns:
-          - "System.*"
+  - package-ecosystem: "npm"
+    directory: "/packages/hostauth-adapter"
+    schedule:
+      interval: "weekly"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

@@ -16,6 +16,11 @@ test('external sidecar exemption requires the exact launcher, parent and import'
   const child = { ProcessId: 101, ParentProcessId: 201, ExecutablePath: executable, CommandLine: '"' + executable + '" ' + args };
   const check = (processes, wrapper = shimText) => verifiedNodeSidecarIds({ ...options, processes, shimText: wrapper });
   assert.deepEqual(check([parent, child]), [101]);
+  const wrappedParent = { ...parent, CommandLine: cmd + ' /c ""' + shim + '" ' + args + '"' };
+  assert.deepEqual(check([wrappedParent, child]), [101]);
+  for (const command of [wrappedParent.CommandLine + ' & echo extra', wrappedParent.CommandLine.slice(0, -1),
+    cmd + ' /c """' + shim + '" ' + args + '""', wrappedParent.CommandLine.replace('server.cjs', 'other.cjs')])
+    assert.deepEqual(check([{ ...wrappedParent, CommandLine: command }, child]), []);
   assert.deepEqual(check([child]), []);
   assert.deepEqual(check([parent, { ...child, CommandLine: child.CommandLine + ' --type=renderer' }]), []);
   assert.deepEqual(check([{ ...parent, CommandLine: parent.CommandLine.replace('agy-node.cmd', 'other.cmd') }, child]), []);

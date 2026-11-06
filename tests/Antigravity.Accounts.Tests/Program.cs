@@ -13,6 +13,7 @@ var cases = new (string Name, Func<Task> Run)[]
     ("official credential imports are rejected", RejectImports),
     ("direct selection freezes after token request", FrozenSelection),
     ("primary identity and attached account deletion are constrained", PrimaryIdentity),
+    ("deleting an inactive attached account preserves both remaining identities and switches", RemoveInactiveAttached),
     ("switch commit changes quota identity without restarting service", SwitchCommit),
     ("pending switch blocks all token requests until cancellation", SwitchCancellation),
     ("failed target refresh preserves prior selected account", FailedSwitch),
@@ -143,6 +144,37 @@ async Task SwitchCommit()
     var back = await service.BeginSwitchAsync(a.Id, after.Generation);
     await service.CommitSwitchAsync(back.Ticket);
     Check((await service.GetTokenResponseAsync()).AccountId == a.Id, "Switching back required another service instance.");
+}
+async Task RemoveInactiveAttached()
+{
+    var primary = Account(); var current = Account(); var attached = Account();
+    var primaryToken = primary.Token; var attachedToken = attached.Token;
+    var primaryClient = primary.Client; var attachedClient = attached.Client;
+    var oauth = new FakeOAuth(now);
+    var store = new MemoryStore(new() { PrimaryAccountId = primary.Id, SelectedAccountId = current.Id, Accounts = [primary, current, attached] });
+    await using var service = Service(store, oauth);
+    var original = await service.GetTokenResponseAsync();
+    await Expect("account_locked", () => service.RemoveAccountAsync(current.Id));
+    var prepared = await service.BeginSwitchAsync(attached.Id, original.Generation);
+    await Expect("switch_in_progress", () => service.RemoveAccountAsync(current.Id));
+    await service.CommitSwitchAsync(prepared.Ticket);
+    var selected = await service.GetTokenResponseAsync();
+    await service.RemoveAccountAsync(current.Id);
+    var status = await service.GetStatusAsync();
+    var remaining = await store.ReadAsync();
+    Check(status.SelectedAccountId == attached.Id && status.PrimaryAccountId == primary.Id && status.Generation == selected.Generation &&
+        remaining.Accounts.Count == 2 && remaining.Accounts.All(a => a.Id != current.Id) &&
+        remaining.Accounts.Single(a => a.Id == primary.Id).Token == primaryToken && remaining.Accounts.Single(a => a.Id == primary.Id).Client == primaryClient &&
+        remaining.Accounts.Single(a => a.Id == attached.Id).Token == attachedToken && remaining.Accounts.Single(a => a.Id == attached.Id).Client == attachedClient,
+        "Deleting an inactive account changed a remaining identity, credential, or generation.");
+    foreach (var target in new[] { primary.Id, attached.Id })
+    {
+        var before = await service.GetStatusAsync();
+        var ticket = await service.BeginSwitchAsync(target, before.Generation);
+        await service.CommitSwitchAsync(ticket.Ticket);
+        Check((await service.GetTokenResponseAsync()).AccountId == target, "The remaining account switch was affected by deletion.");
+    }
+    Check(oauth.Refreshes == 0 && oauth.Logins == 0 && oauth.BrowserOpens == 0, "Deleting an inactive account triggered authentication.");
 }
 async Task SwitchCancellation()
 {

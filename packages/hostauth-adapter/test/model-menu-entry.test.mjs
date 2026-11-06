@@ -4,12 +4,7 @@ import vm from 'node:vm';
 import { createRequire } from 'node:module';
 import { installModelMenuEntry, modelMenuEntrySource } from '../src/model-menu-entry.mjs';
 
-let JSDOM;
-for (const anchor of [import.meta.url, process.env.ACCOUNTS_DOM_TEST_PACKAGE,
-  new URL('../../../../../tools/antigravity-zh-cn/package.json', import.meta.url)]) {
-  if (!anchor) continue;
-  try { ({ JSDOM } = createRequire(anchor)('jsdom')); break; } catch { /* No download in offline checks. */ }
-}
+const { JSDOM } = createRequire(process.env.ACCOUNTS_DOM_TEST_PACKAGE || import.meta.url)('jsdom');
 const settle = () => new Promise(setImmediate);
 const html = '<button data-testid="model-selector-trigger" aria-expanded="true">Current model</button>' +
   '<div role="menu"><div data-testid="model-selector-panel"><div class="models"><button role="menuitem" data-testid="model-selector-item">Native option</button></div><div class="usage"><button role="menuitem">View Usage</button></div></div></div>';
@@ -21,9 +16,12 @@ const initial = () => ({ status: {
   { id: 'b', label: 'Personal', email: 'personal@example.invalid', selected: false },
 ] });
 
-function harness({ source = html, onRequest } = {}) {
+function harness({ source = html, onRequest, ownedSectionHeight } = {}) {
   const dom = new JSDOM(source, { url: 'https://127.0.0.1:43123/', pretendToBeVisual: true });
   const { window } = dom, { document } = window;
+  if (ownedSectionHeight !== undefined) window.HTMLElement.prototype.getBoundingClientRect = function () {
+    return { height: this.matches('[data-antigravity-accounts-menu]') ? ownedSectionHeight : 0 };
+  };
   const calls = [], listeners = new WeakMap(), timers = new Map();
   let state = initial(), timerId = 0;
   const original = window.EventTarget.prototype.addEventListener;
@@ -51,9 +49,9 @@ function harness({ source = html, onRequest } = {}) {
       for (const listener of listeners.get(button)?.get('click') || [])
         listener.call(button, { isTrusted: true, currentTarget: button, preventDefault() {}, stopPropagation() {} });
     },
-    trustedKey(button, key) {
+    trustedKey(button, key, extra = {}) {
       for (const listener of listeners.get(button)?.get('keydown') || [])
-        listener.call(button, { isTrusted: true, currentTarget: button, key, repeat: false, preventDefault() {}, stopPropagation() {} });
+        listener.call(button, { isTrusted: true, currentTarget: button, key, repeat: false, preventDefault() {}, stopPropagation() {}, ...extra });
     },
     trustedNativePick(option) {
       for (const listener of listeners.get(document)?.get('click') || [])
@@ -65,6 +63,102 @@ function harness({ source = html, onRequest } = {}) {
 }
 const current = document => document.querySelector('[data-testid="antigravity-accounts-current-group"]');
 const groupButton = (document, id = 'b') => document.querySelector(`[data-testid="antigravity-accounts-collapsed-group"] button[data-account-id="${id}"]`);
+const accountAction = (document, id, action) => [...document.querySelectorAll('button[data-account-id]')].find(button =>
+  button.getAttribute('data-account-id') === id && button.getAttribute('data-account-action') === action);
+
+test('an inactive attached account can be removed during native use only after explicit confirmation', { skip: !JSDOM }, async () => {
+  const h = harness({ onRequest(method, params, state) {
+    if (method === 'getState') return state;
+    assert.equal(method, 'removeAccount'); assert.deepEqual(params, { id: 'b' });
+    state.accounts = state.accounts.filter(account => account.id !== params.id);
+    return {};
+  } });
+  h.state().accounts.push({ id: 'c', label: 'Other attached', email: 'other@example.invalid' });
+  try {
+    await settle();
+    const native = h.document.querySelector('[data-testid="model-selector-item"]');
+    const remove = accountAction(h.document, 'b', 'remove');
+    assert.equal(remove.disabled, false);
+    h.trustedClick(remove); await settle();
+    const confirmation = h.document.querySelector('[data-testid="antigravity-accounts-remove-confirmation"]');
+    assert.match(confirmation.textContent, /personal@example.invalid.*仅删除本机插件保存的授权/);
+    assert.equal(h.document.activeElement, accountAction(h.document, 'b', 'remove-cancel'));
+    assert.deepEqual(h.calls.filter(call => call.method !== 'getState'), []);
+    accountAction(h.document, 'b', 'remove-confirm').click(); await settle();
+    assert.deepEqual(h.calls.filter(call => call.method !== 'getState'), [], 'Synthetic page clicks cannot confirm deletion');
+    h.trustedClick(accountAction(h.document, 'b', 'remove-cancel')); await settle();
+    assert.equal(h.document.querySelector('[data-testid="antigravity-accounts-remove-confirmation"]'), null);
+    assert.equal(h.document.activeElement, accountAction(h.document, 'b', 'remove'));
+    h.trustedClick(accountAction(h.document, 'b', 'remove')); await settle();
+    h.trustedClick(accountAction(h.document, 'b', 'remove-confirm')); await settle();
+    assert.deepEqual(h.calls.filter(call => call.method !== 'getState'), [{ method: 'removeAccount', params: { id: 'b' } }]);
+    assert.deepEqual(h.state().accounts.map(account => account.id), ['a', 'c']);
+    assert.equal(h.state().status.selectedAccountId, 'a'); assert.equal(h.state().status.primaryAccountId, 'a');
+    assert.equal(accountAction(h.document, 'b', 'select'), undefined);
+    assert.equal(h.document.querySelector('[data-testid="model-selector-item"]'), native);
+    assert.match(h.document.querySelector('.usage').textContent, /View Usage/);
+  } finally { h.close(); }
+});
+
+test('current, primary, switching and pending-login accounts explain why deletion is unavailable', { skip: !JSDOM }, async () => {
+  for (const mode of ['active', 'waiting', 'confirming', 'blocked', 'login']) {
+    const h = harness();
+    h.state().status.selectedAccountId = 'b';
+    h.state().accounts.push({ id: 'c', email: 'other@example.invalid' });
+    if (mode === 'login') h.state().status.login.state = 'pending';
+    else h.state().status.switch.state = mode;
+    try {
+      await settle();
+      const currentRemove = accountAction(h.document, 'b', 'remove');
+      const primaryRemove = accountAction(h.document, 'a', 'remove');
+      assert.equal(currentRemove.disabled, true); assert.equal(primaryRemove.disabled, true);
+      assert.equal(accountAction(h.document, 'c', 'remove').disabled, mode !== 'active');
+      if (mode === 'active') {
+        assert.match(currentRemove.title, /先切换到其他账号/);
+        assert.match(primaryRemove.title, /主账号不能在运行中删除/);
+      }
+      h.trustedClick(currentRemove); h.trustedClick(primaryRemove);
+      assert.deepEqual(h.calls.filter(call => call.method !== 'getState'), []);
+      assert.equal(h.document.querySelector('[data-testid="antigravity-accounts-remove-confirmation"]'), null);
+    } finally { h.close(); }
+  }
+});
+
+test('confirmation refresh prevents deletion when another window has selected that account', { skip: !JSDOM }, async () => {
+  const h = harness();
+  try {
+    await settle();
+    const remove = accountAction(h.document, 'b', 'remove');
+    h.state().status.selectedAccountId = 'b';
+    h.trustedClick(remove);
+    const staleConfirm = accountAction(h.document, 'b', 'remove-confirm');
+    await settle();
+    const currentConfirm = accountAction(h.document, 'b', 'remove-confirm');
+    assert.equal(currentConfirm.disabled, true);
+    assert.match(h.document.querySelector('[data-testid="antigravity-accounts-remove-confirmation"]').textContent, /先切换到其他账号/);
+    h.trustedClick(staleConfirm); h.trustedClick(currentConfirm); await settle();
+    assert.deepEqual(h.calls.filter(call => call.method !== 'getState'), []);
+  } finally { h.close(); }
+});
+
+test('failed or detached removal confirmation cannot hide an account or silently repeat deletion', { skip: !JSDOM }, async () => {
+  const h = harness({ onRequest(method, params, state) {
+    if (method === 'getState') return state;
+    assert.equal(method, 'removeAccount'); throw Error('account_locked');
+  } });
+  try {
+    await settle();
+    h.trustedClick(accountAction(h.document, 'b', 'remove')); await settle();
+    h.trustedClick(accountAction(h.document, 'b', 'remove-confirm')); await settle();
+    assert.match(h.document.querySelector('[role="status"]').textContent, /删除未完成/);
+    assert(accountAction(h.document, 'b', 'select'));
+    h.trustedClick(accountAction(h.document, 'b', 'remove')); await settle();
+    const confirm = accountAction(h.document, 'b', 'remove-confirm');
+    h.document.querySelector('[data-testid="model-selector-panel"]').remove(); await settle();
+    h.trustedClick(confirm); await settle();
+    assert.equal(h.calls.filter(call => call.method === 'removeAccount').length, 1);
+  } finally { h.close(); }
+});
 
 test('unavailable model requires a trusted choice in the native model list', { skip: !JSDOM }, async () => {
   const h = harness();
@@ -154,7 +248,7 @@ test('chat streaming and unrelated updates do not rescan closed or open model me
       const original = h.document.querySelectorAll.bind(h.document);
       let menuScans = 0;
       h.document.querySelectorAll = selector => {
-        if (['div[data-testid="model-selector-panel"]', 'button[data-testid="model-selector-trigger"]'].includes(selector)) menuScans++;
+        if (['[data-testid="model-selector-panel"]', '[data-testid="model-selector-trigger"]'].includes(selector)) menuScans++;
         return original(selector);
       };
       const calls = h.calls.length;
@@ -336,7 +430,7 @@ test('committed blocked account can be reconfirmed from its current group', { sk
 });
 
 test('a failed account operation cannot mask a blocked model choice or bounded failure code', { skip: !JSDOM }, async () => {
-  for (const code of ['native_model_selection_required', 'native_view_provider_unavailable', 'PRIVATE: token=secret']) {
+  for (const code of ['native_model_selection_required', 'native_account_verification_required', 'native_quota_refresh_failed', 'native_view_provider_unavailable', 'PRIVATE: token=secret']) {
     const h = harness({ onRequest(method, params, state) {
       if (method === 'getState') return state;
       state.status.selectedAccountId = params.id;
@@ -349,6 +443,8 @@ test('a failed account operation cannot mask a blocked model choice or bounded f
       assert(!message.includes('操作未完成')); assert(!message.includes('PRIVATE'));
       assert.match(message, code === 'native_model_selection_required' ? /请选择上方可用模型/ : /新的发送已暂停/);
       if (code === 'native_view_provider_unavailable') assert(message.includes(code));
+      if (code === 'native_account_verification_required') assert.match(message, /Google.*身份验证.*新的发送已暂停.*亲自.*官方页面.*重新确认/);
+      if (code === 'native_quota_refresh_failed') assert.match(message, /额度信息刷新失败.*服务权限/);
     } finally { h.close(); }
   }
 });
@@ -413,11 +509,109 @@ test('native model replacement is preserved and stopped or detached controls can
     const nextModels = h.document.createElement('div');
     nextModels.innerHTML = '<button data-testid="model-selector-item">Updated native model</button>';
     oldModels.replaceWith(nextModels); await settle();
-    assert.equal(current(h.document).parentElement.nextElementSibling, nextModels);
+    assert.equal(current(h.document).closest('[data-antigravity-accounts-menu]').nextElementSibling, nextModels);
     assert.equal(h.document.querySelectorAll('[data-testid="model-selector-item"]').length, 1);
     groupButton(h.document).focus(); h.trustedKey(groupButton(h.document), 'End');
     assert.equal(h.document.activeElement.textContent, 'View Usage');
     h.controller.stop(); h.trustedClick(stale); await settle();
     assert.deepEqual(h.calls.map(c => c.method), ['getState']);
+  } finally { h.close(); }
+});
+
+test('native test IDs survive host element tag changes while hidden triggers cannot activate a panel', { skip: !JSDOM }, async () => {
+  const h = harness({ source: html.replace('<button data-testid="model-selector-trigger" aria-expanded="true">Current model</button>',
+    '<div role="button" data-testid="model-selector-trigger" aria-expanded="true">Current model</div>')
+    .replace('<div data-testid="model-selector-panel">', '<section data-testid="model-selector-panel">')
+    .replace('</div></div></div>', '</div></section></div>') });
+  try {
+    await settle();
+    assert.match(current(h.document).textContent, /Work/);
+    const trigger = h.document.querySelector('[data-testid="model-selector-trigger"]');
+    trigger.hidden = true; await settle();
+    assert.equal(current(h.document), null);
+    trigger.hidden = false; await settle();
+    assert.match(current(h.document).textContent, /Work/);
+  } finally { h.close(); }
+});
+
+test('Chinese input confirmation does not start account authorization before composition ends', { skip: !JSDOM }, async () => {
+  const h = harness();
+  try {
+    await settle();
+    const input = h.document.querySelector('input'); input.value = '工作';
+    h.trustedKey(input, 'Enter', { isComposing: true });
+    h.trustedKey(input, 'Enter', { keyCode: 229 });
+    await settle();
+    assert.equal(h.calls.some(call => call.method === 'beginLogin'), false);
+    h.trustedKey(input, 'Enter'); await settle();
+    assert.deepEqual(h.calls.find(call => call.method === 'beginLogin').params, { label: '工作' });
+  } finally { h.close(); }
+});
+
+test('status updates keep the same account action focused and preserve account list scroll', { skip: !JSDOM }, async () => {
+  let reads = 0, finishRead;
+  const h = harness({ onRequest(method, params, state) {
+    assert.equal(method, 'getState');
+    if (++reads === 2) return new Promise(resolve => { finishRead = () => resolve(state); });
+    return state;
+  } });
+  try {
+    const state = h.state();
+    await settle();
+    const remove = h.document.querySelector('[data-account-id="b"][data-account-action="remove"]');
+    assert(remove && !remove.disabled);
+    const scroller = remove.closest('[data-antigravity-accounts-menu]'); scroller.scrollTop = 72;
+    h.trustedClick(remove); await settle();
+    state.accounts[0].label = 'Renamed Work'; finishRead(); await settle();
+    assert.equal(h.document.activeElement.getAttribute('data-account-action'), 'remove-cancel');
+    assert.equal(h.document.activeElement.getAttribute('data-account-id'), 'b');
+    assert.equal(scroller.scrollTop, 72);
+    assert.equal(scroller.style.maxHeight, 'min(32vh, 12rem)');
+    assert(scroller.classList.contains('overflow-y-auto'));
+  } finally { h.close(); }
+});
+
+test('account sections retain native text sizing and extend only the owned panel height allowance', { skip: !JSDOM }, async () => {
+  const source = '<style>body{font:16px/24px Arial}.text-xs,.native-option{font-size:12px;line-height:16px}</style>' +
+    html.replace('data-testid="model-selector-panel"', 'style="max-height:320px!important" data-testid="model-selector-panel"')
+      .replace('role="menuitem" data-testid="model-selector-item"', 'class="native-option" role="menuitem" data-testid="model-selector-item"');
+  const h = harness({ source, ownedSectionHeight: 30 });
+  try {
+    h.state().status.login.state = 'pending';
+    h.state().accounts.push({ id: 'c', label: 'Another account', email: 'another@example.invalid' });
+    await settle();
+    const panel = h.document.querySelector('[data-testid="model-selector-panel"]');
+    const native = panel.querySelector('[data-testid="model-selector-item"]');
+    const button = groupButton(h.document), input = panel.querySelector('input');
+    assert.equal(h.window.getComputedStyle(button).fontSize, h.window.getComputedStyle(native).fontSize);
+    assert.equal(h.window.getComputedStyle(input).fontSize, h.window.getComputedStyle(native).fontSize);
+    assert.equal(button.style.fontSize, ''); assert.equal(input.style.fontSize, '');
+    assert.equal(button.style.lineHeight, ''); assert.equal(input.style.lineHeight, '');
+    const accounts = button.closest('[data-antigravity-accounts-menu]');
+    assert(accounts.classList.contains('shrink-0'), 'A small account list must not shrink to hide one of its rows');
+    assert.equal(accounts.style.maxHeight, 'min(32vh, 12rem)', 'A long list keeps its own scroll limit');
+    const fitted = panel.style.maxHeight;
+    assert.match(fitted, /320px/); assert.match(fitted, /90px/); assert.match(fitted, /--available-height/);
+    assert.equal(panel.style.getPropertyPriority('max-height'), 'important');
+    h.state().accounts[1].label = 'Updated account'; h.tick(); await settle();
+    assert.equal(panel.style.maxHeight, fitted, 'Repeated status updates cannot add the account height twice');
+    assert.equal(native.style.cssText, '', 'Native model styles stay untouched');
+    h.controller.stop();
+    assert.equal(panel.style.maxHeight, '320px');
+    assert.equal(panel.style.getPropertyPriority('max-height'), 'important');
+  } finally { h.close(); }
+});
+
+test('removing account controls preserves a later native panel height change', { skip: !JSDOM }, async () => {
+  const h = harness({ source: html.replace('data-testid="model-selector-panel"', 'style="max-height:320px" data-testid="model-selector-panel"'),
+    ownedSectionHeight: 20 });
+  try {
+    await settle();
+    const panel = h.document.querySelector('[data-testid="model-selector-panel"]');
+    assert.match(panel.style.maxHeight, /--available-height/);
+    panel.style.setProperty('max-height', '500px', 'important');
+    h.controller.stop();
+    assert.equal(panel.style.maxHeight, '500px');
+    assert.equal(panel.style.getPropertyPriority('max-height'), 'important');
   } finally { h.close(); }
 });

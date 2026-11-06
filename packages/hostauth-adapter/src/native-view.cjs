@@ -2,9 +2,9 @@
 
 const { ComponentError } = require('./component-client.cjs');
 
-// Executed in the pinned 2.28 main world. These are the native protobuf decoder,
+// Executed in the inspected native main world. These are the native protobuf decoder,
 // Redux action and selectors, rather than a second copy of model definitions.
-function updateNativeView(rawStatus, requireExplicitSelection = false, phase = 'refresh') {
+function updateNativeView(rawStatus, requireExplicitSelection = false, phase = 'refresh', bindings) {
   const picksKey = Symbol.for('antigravity.accounts.native-model-picks.v1');
   const captureStoreKey = Symbol.for('antigravity.accounts.native-model-capture-store.v1');
   if (!['capture', 'refresh', 'clear'].includes(phase)) return { errorCode: 'native_view_phase_invalid' };
@@ -21,20 +21,24 @@ function updateNativeView(rawStatus, requireExplicitSelection = false, phase = '
     }
     return { cleared: true };
   }
-  const Ee = typeof Ve === 'function' ? Ve : undefined;
-  const Ms = typeof ft === 'function' ? ft : undefined;
-  const CCa = typeof cCa === 'function' ? cCa : undefined;
-  const Lla = typeof Ula === 'function' ? Ula : undefined;
-  const lma = typeof Dma === 'function' ? Dma : undefined;
-  const kka = typeof qka === 'object' ? qka : undefined;
-  const Ks = typeof Ys === 'function' ? Ys : undefined;
-  const Ls = typeof Zs === 'function' ? Zs : undefined;
-  const Sk = typeof Cma === 'function' ? Cma : undefined;
-  if (typeof B !== 'object' || B.UserStatusSchema?.typeName !== 'exa.codeium_common_pb.UserStatus' ||
+  const schema = bindings?.schema ?? (typeof B === 'object' ? B : undefined);
+  const Ee = bindings?.decoder ?? (typeof Ve === 'function' ? Ve : undefined);
+  const Ms = bindings?.setStatus ?? (typeof ft === 'function' ? ft : undefined);
+  const CCa = bindings?.modelPicked ?? (typeof cCa === 'function' ? cCa : undefined);
+  const Lla = bindings?.addListener ?? (typeof Ula === 'function' ? Ula : undefined);
+  const lma = bindings?.filter ?? (typeof Dma === 'function' ? Dma : undefined);
+  const kka = bindings?.feature ?? (typeof qka === 'object' ? qka : undefined);
+  const redux = bindings?.redux ?? (typeof gl === 'object' ? gl : undefined);
+  const Ks = bindings?.catalog ?? (typeof Ys === 'function' ? Ys : undefined);
+  const Ls = bindings?.resolveModel ?? (typeof Zs === 'function' ? Zs : undefined);
+  const Sk = bindings?.findModel ?? (typeof Cma === 'function' ? Cma : undefined);
+  const equals = bindings?.equals;
+  if (typeof schema !== 'object' || schema.UserStatusSchema?.typeName !== 'exa.codeium_common_pb.UserStatus' ||
       typeof Ee !== 'function' || typeof Ms !== 'function' || Ms.type !== 'userStatus/setUserStatus' ||
       typeof CCa !== 'function' || CCa.type !== 'modelSelection/modelPicked' ||
       typeof Lla !== 'function' || Lla.type !== 'listenerMiddleware/add' ||
-      typeof lma !== 'function' || typeof gl !== 'object' || typeof kka !== 'object' ||
+      typeof lma !== 'function' || typeof redux !== 'object' || typeof kka !== 'object' ||
+      bindings && typeof equals !== 'function' ||
       typeof Ks !== 'function' || typeof Ls !== 'function' || typeof Sk !== 'function') return { updated: false, errorCode: 'native_view_symbols_changed' };
   const excluded = 'pre,code,textarea,[contenteditable],[data-message-role],[data-message-id],.markdown,.prose,[data-user-content],iframe,[hidden],[aria-hidden="true"]';
   const triggers = [...document.querySelectorAll('button[data-testid="model-selector-trigger"]')]
@@ -49,7 +53,7 @@ function updateNativeView(rawStatus, requireExplicitSelection = false, phase = '
     if (visited.has(fiber) || visited.size >= 256) return { updated: false, errorCode: 'native_view_provider_unavailable' };
     visited.add(fiber);
     const value = fiber.memoizedProps?.value;
-    if (!store && (fiber.type === gl || fiber.type === gl.Provider) && value?.store &&
+    if (!store && (fiber.type === redux || fiber.type === redux.Provider) && value?.store &&
         typeof value.store.dispatch === 'function' && typeof value.store.getState === 'function') store = value.store;
     if (!feature && (fiber.type === kka || fiber.type === kka.Provider) && typeof value?.get === 'function') feature = value;
     fiber = fiber.return;
@@ -66,9 +70,9 @@ function updateNativeView(rawStatus, requireExplicitSelection = false, phase = '
     return { model: selection?.model, contextWindow: selection?.contextWindow, customLabel: selection?.customLabel };
   };
   const sameConcreteModel = (left, right) => Boolean(left && right && !left.isCustom && !right.isCustom &&
-    !left.modelAlias && !right.modelAlias && Number.isSafeInteger(left.value) && left.value !== B.Model.UNSPECIFIED && left.value === right.value);
+    !left.modelAlias && !right.modelAlias && Number.isSafeInteger(left.value) && left.value !== schema.Model.UNSPECIFIED && left.value === right.value);
   const before = store.getState();
-  if (before?.userStatus?.$typeName !== B.UserStatusSchema.typeName || !before.modelSelection) return { updated: false, errorCode: 'native_view_status_invalid' };
+  if (before?.userStatus?.$typeName !== schema.UserStatusSchema.typeName || !before.modelSelection) return { updated: false, errorCode: 'native_view_status_invalid' };
   let picks = store[picksKey];
   if (phase === 'capture') {
     if (picks || document[captureStoreKey]) return { errorCode: 'native_view_capture_in_progress' };
@@ -78,7 +82,7 @@ function updateNativeView(rawStatus, requireExplicitSelection = false, phase = '
     picks = { count: 0, suppress: false, lastPick: undefined, capture: {
       conversationId, selection,
       model: sameConcreteModel(previous, previous) && selection.model === previous.value &&
-        selection.model !== B.Model.GOOGLE_GEMINI_INTERNAL_BYOM ? previous.value : undefined,
+        selection.model !== schema.Model.GOOGLE_GEMINI_INTERNAL_BYOM ? previous.value : undefined,
       pickCount: 0, requiredAfter: null,
     } };
     const unsubscribe = store.dispatch(Lla({ type: CCa.type, effect(action) {
@@ -112,13 +116,13 @@ function updateNativeView(rawStatus, requireExplicitSelection = false, phase = '
   const expectedSelection = userPick ? userPick.selection : captured.selection;
   const expectedModel = userPick ? userPick.selection?.model : captured.model;
   const expectedContextWindow = expectedSelection?.contextWindow;
-  const parsed = lma(Ee(B.UserStatusSchema, rawStatus), feature.get('models')?.geminiModelsOnly === true);
-  if (parsed?.$typeName !== B.UserStatusSchema.typeName) return { updated: false, errorCode: 'native_view_status_invalid' };
+  const parsed = lma(Ee(schema.UserStatusSchema, rawStatus), feature.get('models')?.geminiModelsOnly === true);
+  if (parsed?.$typeName !== schema.UserStatusSchema.typeName) return { updated: false, errorCode: 'native_view_status_invalid' };
   store.dispatch(Ms(parsed));
   let after = store.getState();
-  if (after.userStatus !== parsed) return { updated: false, errorCode: 'native_view_update_failed' };
+  if (after.userStatus !== parsed && !(equals && equals(schema.UserStatusSchema, after.userStatus, parsed))) return { updated: false, errorCode: 'native_view_update_failed' };
   let catalog = Ks(after), actualSelection = selected(after), next = Ls(catalog, actualSelection);
-  const available = Number.isSafeInteger(expectedModel) && expectedModel !== B.Model.UNSPECIFIED && expectedModel !== B.Model.GOOGLE_GEMINI_INTERNAL_BYOM
+  const available = Number.isSafeInteger(expectedModel) && expectedModel !== schema.Model.UNSPECIFIED && expectedModel !== schema.Model.GOOGLE_GEMINI_INTERNAL_BYOM
     ? Sk(expectedModel, catalog.visibleModelConfigs) : undefined;
   const expected = available && !available.isCustom && !available.modelAlias ? { value: expectedModel } : undefined;
   // Use the model captured before credentials change, or a later actual native
@@ -141,7 +145,14 @@ function updateNativeView(rawStatus, requireExplicitSelection = false, phase = '
   return { updated: true, selectionReady };
 }
 
-async function refreshNativeViews({ electron, origin, userStatus, requireExplicitSelection = false, phase = 'refresh' }) {
+function nativeBindingsExpression(bindings) {
+  const keys = ['schema', 'decoder', 'equals', 'setStatus', 'modelPicked', 'addListener', 'filter', 'catalog', 'resolveModel', 'findModel', 'feature', 'redux'];
+  if (!bindings || bindings.schemaVersion !== 1 || !bindings.symbols || Object.keys(bindings.symbols).length !== keys.length ||
+      keys.some(key => !/^[$A-Z_a-z][$\w]*$/.test(bindings.symbols[key]))) throw new ComponentError('native_view_bindings_invalid');
+  return '{' + keys.map(key => JSON.stringify(key) + ':' + bindings.symbols[key]).join(',') + '}';
+}
+
+async function refreshNativeViews({ electron, origin, userStatus, requireExplicitSelection = false, phase = 'refresh', bindings }) {
   const windows = electron?.BrowserWindow?.getAllWindows?.().filter(window => {
     if (window.isDestroyed()) return false;
     try { return new URL(window.webContents.getURL()).origin === origin; } catch { return false; }
@@ -153,7 +164,8 @@ async function refreshNativeViews({ electron, origin, userStatus, requireExplici
   }
   if (phase === 'refresh' && (!userStatus || typeof userStatus !== 'object')) throw new ComponentError('native_view_unavailable');
   const data = JSON.stringify(JSON.stringify(phase === 'refresh' ? userStatus : null));
-  const source = `(${updateNativeView.toString()})(JSON.parse(${data}), ${requireExplicitSelection === true}, ${JSON.stringify(phase)})`;
+  const bindingSource = bindings ? nativeBindingsExpression(bindings) : 'undefined';
+  const source = `(${updateNativeView.toString()})(JSON.parse(${data}), ${requireExplicitSelection === true}, ${JSON.stringify(phase)}, ${bindingSource})`;
   let results;
   try { results = await Promise.all(windows.map(window => window.webContents.executeJavaScript(source))); }
   catch { throw new ComponentError('native_view_execution_failed'); }
@@ -166,4 +178,4 @@ async function refreshNativeViews({ electron, origin, userStatus, requireExplici
     : { selectionReady: results.every(result => result.selectionReady === true) };
 }
 
-module.exports = { updateNativeView, refreshNativeViews };
+module.exports = { updateNativeView, refreshNativeViews, nativeBindingsExpression };

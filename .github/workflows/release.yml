@@ -1,14 +1,14 @@
-name: Release Next
+name: Release Accounts
 
 on:
   push:
-    tags: ['v*']
+    tags: ['accounts-v*']
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-next-${{ github.ref }}
+  group: release-accounts-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -28,39 +28,42 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
-      - name: Build contracts and system tests
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: packages/hostauth-adapter/package-lock.json
+      - name: Install DOM test dependency
+        shell: pwsh
+        run: npm ci --prefix packages/hostauth-adapter --ignore-scripts --no-audit --no-fund
+      - name: Build and run offline tests
         shell: pwsh
         run: |
-          ./scripts/Test-NextBuildContract.ps1
-          ./scripts/Build.ps1 -LockedRestore -Test -IncludeSystemTests
-      - name: Install pinned Inno Setup
-        shell: pwsh
-        run: ./scripts/Install-InnoSetup.ps1
-      - name: Build and validate release
+          ./scripts/Build.ps1 -DotNet dotnet -LockedRestore -Test
+          node --test packages/hostauth-adapter/test/*.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Host adapter tests failed.' }
+          node --test packages/account-plugin/test/*.test.mjs packages/account-plugin/test/*.test.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Account plugin tests failed.' }
+      - name: Build and inspect tagged release
         id: package
         shell: pwsh
         run: |
-          ./scripts/Publish-Next.ps1 -Release -Installer
-          $manifests = @(Get-ChildItem artifacts/next -Recurse -Filter package-manifest.json)
+          ./scripts/Publish-Accounts.ps1 -DotNet dotnet -OutputRoot artifacts/accounts/release -Release
+          $manifests = @(Get-ChildItem artifacts/accounts/release -Recurse -Filter package-manifest.json)
           if ($manifests.Count -ne 1) { throw 'Expected exactly one built package.' }
-          $package = $manifests[0].Directory.FullName
           $manifest = Get-Content $manifests[0].FullName -Raw | ConvertFrom-Json
-          if ($env:GITHUB_REF_NAME -cne "v$($manifest.version)" -or $manifest.provenance.commit -cne $env:GITHUB_SHA -or $manifest.provenance.dirty) { throw 'Release provenance does not match tag/commit.' }
-          ./scripts/Test-NextPackage.ps1 -PackageRoot $package
-          $setups = @(Get-ChildItem (Split-Path $package -Parent) -Filter 'AGProfileHubNext-Setup-*.exe')
-          if ($setups.Count -ne 1) { throw 'Expected exactly one installer.' }
-          ./scripts/Test-NextInstaller.ps1 -Installer $setups[0].FullName
+          if ($env:GITHUB_REF_NAME -cne "accounts-v$($manifest.version)" -or $manifest.provenance.commit -cne $env:GITHUB_SHA -or $manifest.provenance.dirty) { throw 'Release source does not match tag and commit.' }
+          ./scripts/Test-AccountsPackage.ps1 -PackageRoot $manifests[0].Directory.FullName
           "version=$($manifest.version)" | Out-File $env:GITHUB_OUTPUT -Append
-      - name: Upload only validated release assets
+      - name: Upload validated release assets
         id: artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: validated-next-win-x64
+          name: validated-accounts-win-x64
           path: |
-            artifacts/next/*/*/AGProfileHubNext-*-win-x64.zip
-            artifacts/next/*/*/AGProfileHubNext-*-win-x64.zip.sha256.json
-            artifacts/next/*/*/AGProfileHubNext-Setup-win-x64-*.exe
-            artifacts/next/*/*/AGProfileHubNext-Setup-win-x64-*.exe.sha256.json
+            artifacts/accounts/release/AntigravityAccounts-*-win-x64.zip
+            artifacts/accounts/release/AntigravityAccounts-*-win-x64.zip.sha256.json
+            artifacts/accounts/release/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 7
   publish:
@@ -70,30 +73,30 @@ jobs:
     permissions:
       contents: write
     steps:
-      # No checkout, SDK, compiler, source scripts, or rebuild in the writable job.
+      # Only validated assets enter the writable job; no source checkout or rebuild.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           artifact-ids: ${{ needs.validate.outputs.artifact-id }}
           path: validated
           merge-multiple: true
-      - name: Verify approved assets and create experimental release
+      - name: Verify assets and publish preview
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           VALIDATED_VERSION: ${{ needs.validate.outputs.version }}
         run: |
-          if ($env:GITHUB_REF_NAME -cne "v$env:VALIDATED_VERSION") { throw 'Validated version/tag mismatch.' }
+          if ($env:GITHUB_REF_NAME -cne "accounts-v$env:VALIDATED_VERSION") { throw 'Validated version/tag mismatch.' }
           $files = @(Get-ChildItem validated -Recurse -File)
-          $names = @("AGProfileHubNext-$env:VALIDATED_VERSION-win-x64.zip", "AGProfileHubNext-Setup-win-x64-$env:VALIDATED_VERSION.exe")
-          if ($files.Count -ne 4) { throw 'Unexpected validated asset count.' }
-          foreach ($name in $names) {
-            $asset = @($files | Where-Object Name -CEQ $name)
-            $proof = @($files | Where-Object Name -CEQ ($name + '.sha256.json'))
-            if ($asset.Count -ne 1 -or $proof.Count -ne 1) { throw 'Validated asset missing or duplicated.' }
-            $hash = Get-Content $proof[0].FullName -Raw | ConvertFrom-Json
-            if ($hash.file -cne $name -or $hash.algorithm -cne 'SHA256' -or $hash.hash -cne (Get-FileHash $asset[0].FullName -Algorithm SHA256).Hash) { throw 'Validated asset digest mismatch.' }
-          }
+          $name = "AntigravityAccounts-$env:VALIDATED_VERSION-win-x64.zip"
+          $asset = @($files | Where-Object Name -CEQ $name)
+          $proof = @($files | Where-Object Name -CEQ ($name + '.sha256.json'))
+          $sums = @($files | Where-Object Name -CEQ 'SHA256SUMS.txt')
+          if ($files.Count -ne 3 -or $asset.Count -ne 1 -or $proof.Count -ne 1 -or $sums.Count -ne 1) { throw 'Unexpected release assets.' }
+          $hash = Get-Content $proof[0].FullName -Raw | ConvertFrom-Json
+          $actual = (Get-FileHash $asset[0].FullName -Algorithm SHA256).Hash
+          if ($hash.file -cne $name -or $hash.sha256 -ine $actual) { throw 'ZIP checksum mismatch.' }
+          if ((Get-Content $sums[0].FullName -Raw).Trim() -ine "$actual  $name") { throw 'SHA256SUMS mismatch.' }
           $assets = @($files | ForEach-Object FullName)
-          $notes = 'Experimental Windows x64 Next package. Automated package and installer smoke checks passed. Manual acceptance remains incomplete; local fingerprint-bound compatibility proof is required. Workspace paths are metadata only. See the bundled validation documentation before use.'
-          gh release create $env:GITHUB_REF_NAME @assets --repo $env:GITHUB_REPOSITORY --title "Antigravity Profile Hub Next $env:GITHUB_REF_NAME" --prerelease --latest=false --verify-tag --notes $notes
+          $notes = 'Windows x64 preview of Antigravity Accounts, with account groups in the native model menu, local account removal, and update recovery for reviewed host layouts. Includes a self-contained component and host adapter; no official program files or account credentials are bundled. Automated offline and package checks passed. Native metadata switching was checked separately on Antigravity 2.29.0; model generation, quota charging, credential expiry renewal, and a real vendor-installer upgrade are not validated by this release build. See README and VALIDATION.md before installation.'
+          gh release create $env:GITHUB_REF_NAME @assets --repo $env:GITHUB_REPOSITORY --title "Antigravity Accounts $env:VALIDATED_VERSION" --prerelease --latest=false --verify-tag --notes $notes
           if ($LASTEXITCODE -ne 0) { throw 'GitHub release publication failed.' }

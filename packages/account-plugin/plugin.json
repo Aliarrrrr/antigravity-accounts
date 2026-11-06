@@ -1,8 +1,8 @@
 {
   "$schema": "https://antigravity.google/schemas/v1/plugin.json",
   "name": "antigravity-accounts",
-  "displayName": "Accounts（本机宿主适配）",
-  "version": "0.4.0-preview.7",
+  "displayName": "Antigravity Accounts",
+  "version": "0.4.0-preview.8",
   "description": "在原生模型列表按账号选择用量。需要另行安装匹配的 HostAuth 宿主适配；此清单本身不加载账号切换功能。",
   "logo": "assets/accounts.svg",
   "suggestedPrompts": [],
@@ -10,7 +10,13 @@
     "name": "Aliarrrrr (Independent developer)",
     "url": "https://github.com/Aliarrrrr"
   },
-  "homepage": "https://gist.github.com/Aliarrrrr/a2070ce7fb58c2f05c308ec64096990e",
+  "homepage": "https://github.com/Aliarrrrr/antigravity-accounts",
   "license": "MIT",
-  "keywords": ["accounts", "model-selector", "quota", "windows"]
+  "keywords": [
+    "accounts",
+    "model-selector",
+    "quota",
+    "windows"
+  ],
+  "repository": "https://github.com/Aliarrrrr/antigravity-accounts"
 }

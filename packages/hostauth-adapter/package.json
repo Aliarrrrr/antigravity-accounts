@@ -1,8 +1,9 @@
 {
-  "name": "@profilehub/hostauth-adapter",
-  "version": "0.4.0-preview.7",
+  "name": "@antigravity-accounts/hostauth-adapter",
+  "version": "0.4.0-preview.8",
   "private": true,
   "type": "module",
   "engines": { "node": ">=22" },
-  "scripts": { "test": "node --test test/*.test.mjs" }
+  "scripts": { "test": "node --test test/*.test.mjs" },
+  "devDependencies": { "jsdom": "26.1.0" }
 }

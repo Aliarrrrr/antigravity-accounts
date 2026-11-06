@@ -1,7 +1,17 @@
-# Accounts（本机宿主适配）
+# Antigravity Accounts
 
-将独立授权的 Google 账号分组放在 Antigravity 原生模型列表中，使用官方模型选项及主题样式。没有独立账号页面。
+Group independently authorized Google accounts inside Antigravity's native model selector. Keep native model choices, the host theme and View Usage, and select which account the native language server uses. Each account retains its own quota; quotas are not pooled or transferred.
 
-当前预览需要完整 Windows x64 分发包及匹配 Antigravity 2.28.2 的 HostAuth 宿主适配。仅通过标准插件入口安装本目录，不会加载账号分组或切换功能；它只提供插件元数据。完整包的安装、独立 Google 网页授权和恢复方式见包根目录 `README.md`。
+## Requirements and installation
 
-当前未在 Marketplace 上架，也不能保证未来宿主版本自动兼容。[公开技术说明及接口请求](https://gist.github.com/Aliarrrrr/a2070ce7fb58c2f05c308ec64096990e)记录了 preview.5 的实现及检查范围。preview.6调整了菜单监听；preview.7适配2.28.2，当前检查范围见包根目录 `VALIDATION.md`。
+This Windows x64 preview requires the complete [Accounts 0.4.0-preview.8 distribution](https://github.com/Aliarrrrr/antigravity-accounts/releases/tag/accounts-v0.4.0-preview.8) and a locally installed, reviewed Antigravity 2.29.0 or 2.28.2 program. Follow the distribution's root `README.md`: exit Antigravity completely, run `Install-Preview.cmd`, then launch through `Start-With-Accounts.cmd`.
+
+Installing this plugin directory alone supplies metadata; it does not install the required Electron/HostAuth adaptation or enable switching. The preview is not Marketplace-listed. Unknown native-program or checked-interface changes are refused.
+
+## Usage
+
+Open the native model menu, choose Add account and complete authorization on Google's website. Set a unique primary account, select an account and fully restart once to enable independent HostAuth. Later selections wait for native work to finish and confirm identity/project/model/quota metadata without restarting the app. If a model is unavailable or confirmation fails, sending remains paused until resolved. A non-selected secondary account can be removed from the same menu with confirmation.
+
+The component encrypts independently added credentials with Windows DPAPI CurrentUser. It does not import the official login database, Cookie store or Windows Credential Manager. The native language server sends model requests directly to Google. See the distribution's `VALIDATION.md` for checked behavior and limits; actual generation, quota charging, expired-token renewal and cross-account generation have not been verified.
+
+Run `Restore.cmd` after fully exiting Antigravity to restore matching original programs. Account authorizations are retained locally. For documentation, source, support and the MIT license, see [the project](https://github.com/Aliarrrrr/antigravity-accounts).

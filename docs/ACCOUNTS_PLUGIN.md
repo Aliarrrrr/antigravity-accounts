@@ -1,64 +1,54 @@
-# Antigravity Accounts · 0.4.0-preview.7
+# Antigravity Accounts · 0.4.0-preview.8
 
-Windows x64 的账号插件，针对已核对程序内容的 Antigravity App 2.28.2。保留一个官方工作界面，由独立 .NET 组件管理用户主动授权的账号；原生 LS 直接向 Google 请求模型。插件不接收原账号的 Google Authorization，也不转发推理请求。
+Windows x64 账号插件：将独立授权的 Google 账号分组放入 Antigravity 原生模型列表，保留官方模型选项、主题和 View Usage。各账号分别使用自己的额度；插件不合并或转移额度。模型请求仍由原生语言服务直接发往 Google。
 
-本版将账号操作嵌入原生模型列表，组件采用单文件压缩，无需另外安装运行时。沿用preview.6减少无关页面扫描的修改，更新2.28.2精确程序映射；账号切换逻辑未改。2026-10-31已安装到2.28.2并恢复中文：原生模型列表显示3个账号分组，模型列表可滚动，View Usage保留；原项目、会话、Gemini 3.8 Flash High、空白输入框及托盘设置已恢复。本轮没有账号切换，模型请求为0。preview.5在2.28.1中的两次真实账号元数据切换属于旧版本结果，preview.7不继承该通过标记。当前检查范围见VALIDATION.md；真实模型生成、实际扣额、到期续期及会话继续生成内容仍未验证。各账号额度分别使用。
+当前支持已检查的 Antigravity 2.29.0 和 2.28.2 程序。需要完整分发包与本机宿主适配；仅安装 `plugin.json` 不会启用切换。当前未在 Marketplace 上架，也不保证未知版本兼容。运行检查范围见包根目录 `VALIDATION.md`。
 
-## 安装与使用
+## 安装
 
-1. 解压完整 ZIP，正常退出 agy 后运行 `Install-Preview.cmd`。安装器检查版本和程序内容，保留原始 `app.asar` 与 `language_server.exe` 后写入适配。已确认启动方式的外部 Node sidecar 可继续运行；桌面、LS、更新器和未知进程会阻止安装。
-2. 正常启动agy，打开原生模型列表。当前账号标题位于官方模型选项上方，其他账号为折叠分组；点击其他账号先等待原生任务结束并确认身份。原有模型选项及“View Usage”保留。托盘“额度账号…”和`Start-With-Accounts.cmd`打开同一模型菜单，不另建账号窗口。未配置独立账号时继续使用原有官方登录。
-3. 在模型菜单输入可选标签并点击“添加账号”，在官方Google网页完成授权。首次添加后在同一菜单设定唯一主账号，后续账号作为附属账号。主账号不可在运行中替换或删除。确认失败会显示具体错误代码；查明原因后可在目标账号组选择“重新确认此账号”；取消切换等待不取消原任务。
-4. 配置独立主账号和所选账号后，下次启动启用独立 HostAuth 路径。这次首次启用需要完全退出后重新启动 agy；开启“常驻系统托盘”时，从托盘菜单选择“退出”，仅关闭工作窗口不会退出进程。以后选择附属账号用量不重启 App 或 LS。若当前程序内容不匹配、工作状态未知，或远程控制/定时工作仍在执行，切换不会提交。
+1. 解压完整 ZIP，保留其中目录结构。
+2. 正常退出 Antigravity。启用“常驻系统托盘”时，请从托盘选择“退出”；仅关闭窗口不会退出进程。
+3. 运行 `Install-Preview.cmd`。安装器检查当前程序，保留原始 `app.asar` 和 `language_server.exe` 后写入适配。桌面、语言服务、更新器或无法识别的相关进程仍在运行时，安装会停止。
+4. 运行 `Start-With-Accounts.cmd`，启动并打开原生模型菜单。
 
-启动时所选账号已失效或首次续期失败，用系统对话框选择已添加的可用账号，或在Google网页重新授权当前账号；取消则停止本次启动。没有独立账号HTML页面。工作服务已经取得凭据后，续期失败不会解除运行中的账号选择锁，也不会自动改用其他账号。
+无需另装 .NET、Node、Python 或 PowerShell 7。安装辅助脚本使用本机官方 Electron 的 Node 模式。自定义安装位置时，将 `ANTIGRAVITY_INSTALL_ROOT` 设置为包含 `Antigravity.exe` 的目录。`Prepare.cmd` 只生成本机程序副本，不应用到安装目录。
 
-`Prepare.cmd` 只生成本机程序副本。自定义安装位置时设置 `ANTIGRAVITY_INSTALL_ROOT` 为包含 `Antigravity.exe` 的目录。无需另外安装 .NET、Node、Python 或 PowerShell 7；安装辅助进程使用本机官方 Electron 的 Node 模式。
+## 添加和切换账号
 
-## 授权与数据
+在原生模型菜单中输入可选标签并点击“添加账号”，亲自在 Google 网页完成授权。添加后明确设定唯一主账号，其余账号作为附属账号。未配置独立账号时，应用继续使用原官方登录。
 
-- OAuth 配置从匹配 LS 程序的公开桌面客户端常量读取，不从官方用户登录文件读取。组件拒绝已有账号与客户端配置不一致的情况。
-- 授权端点是 `accounts.google.com`，交换与续期端点是 `oauth2.googleapis.com`，独立账号身份查询是 `openidconnect.googleapis.com/v1/userinfo`。组件不调用模型。
-- 作用域是 `openid` 及 `https://www.googleapis.com/auth/` 下的 `cloud-platform`、`userinfo.email`、`userinfo.profile`、`cclog`、`experimentsandconfigs`。实际许可由 Google 决定。2.27移除了aicode；已有账号保留各自原授权与刷新凭据，新登录采用当前六项作用域。相同客户端减少作用域不要求删除已有账号，扩大作用域或更换客户端仍会拒绝。
-- 独立账号存于 `%LOCALAPPDATA%/AntigravityAccounts`，以 DPAPI CurrentUser 加密。UI 和公开状态不返回 token；宿主与组件通过子进程 stdio 通信。
-- HostBridge 使用主进程新生成的本地桥凭据。原生 LS 接收独立选择的 access/refresh token；原官方账号的 Authorization 不经过插件。
-- 不复制项目、会话、Cookie、原生认证数据库或 Windows 凭据管理器数据。旧 Profile Hub 的兼容代码保留，但不随插件发布。
-- 首次独立启用后保留一个不含账号资料的启用标记。后续组件故障会停止独立路径，不会退回原官方身份。
+首次启用独立主账号和所选账号后，需要完全退出并重新启动 Antigravity。之后点击其他账号分组即可请求切换，无需重启 App 或语言服务。切换会暂停新的提交，等待原生任务结束，再确认目标身份、项目、模型和额度元数据。取消等待只取消切换，不取消原有任务。
 
-## 切换逻辑
+切换前会保存原模型。新账号仍可用时保留该模型；不可用时，须在原生列表明确选择可用模型后才能发送。确认失败或任务状态无法读取时，新的发送保持暂停。查明原因后可在目标分组选择“重新确认此账号”。托盘“额度账号…”打开同一模型菜单。
 
-实现已包含：暂停新的页面提交；等待生成、工具、子代理和后台工作结束；暂缓新的 HostAuth 回调；提交所选账号；确认 LS 已取到新凭据并刷新身份和项目；然后恢复提交。取消等待只取消切换，不取消任务。
+Google 的 Security Notice & Data Use 由用户亲自选择。出现 `Verify your account to continue.` 时，请在 Google 官方流程处理账号验证，再重新确认；重新授权不能替代这项验证。参见 [Google 账号验证说明](https://support.google.com/accounts/answer/15437069)。
 
-本版还使用已核对的2.28原生protobuf解码和Redux操作更新前端模型状态，避免只换后台账号而让菜单继续显示旧模型。切换凭据前保存各窗口的原模型；即使官方后台先刷新账号状态并覆盖默认模型，仍恢复可用的原选择。新账号没有原模型时，新的发送继续暂停，须在原生列表明确选取可用模型。当前不支持把自定义模型或模型别名推测成另一模型，无法确认时保持暂停。该前端机制已在离线页面以原生JavaScript、React、Redux与合成状态检查；preview.5在2.28.1已完成上述两次真实账号元数据切换及原生菜单检查；模型缺失与后台覆盖的失败处理由离线原生代码检查覆盖。
+## 删除账号
 
-前版2.26原生程序曾检查同进程切换、凭据提交前新请求等待、提交后项目与账号一致和取消等待保留外部子进程。2.28.1已完成程序副本状态读取、假账号元数据、原生前端离线检查和两次真实账号元数据切换。生成、工具代理和定时工作的全部组合没有逐一运行，真实额度归属也未验证。
+点击附属账号右侧“删除”，核对确认行中的邮箱，再点击“确认删除”。这会移除本机插件保存的授权，再次使用需重新添加；不删除 Google 账号。正在使用的账号须先切换到其他账号，主账号不能在运行中删除。授权或切换尚未结束时，删除入口不可用。删除其他附属账号不改变当前选择及其余账号。
 
-独立账号模式的程序副本仅修改诊断路由和一个项目缓存调用点；原登录模式继续使用原 LS 路径，只含诊断路由适配。项目查询先刷新元数据，再使用返回项目构造请求。没有启用全局 `dev_mode`、metrics 或其他 pprof 路由。
+## 授权与本机数据
 
-## 恢复与更新
+- 账号通过 `accounts.google.com` 授权，`oauth2.googleapis.com` 交换或续期，`openidconnect.googleapis.com/v1/userinfo` 查询独立账号身份。模型及项目/额度元数据由原生服务向 Google 请求。
+- OAuth 桌面客户端配置取自匹配的本机语言服务公开常量，不读取官方保存的登录。当前授权范围为 `openid`，以及 `https://www.googleapis.com/auth/` 下的 `cloud-platform`、`userinfo.email`、`userinfo.profile`、`cclog`、`experimentsandconfigs`。实际许可由 Google 决定。
+- 账号默认存于 `%LOCALAPPDATA%/AntigravityAccounts`，使用 Windows DPAPI CurrentUser 加密。安装器登记实际目录，组件、启用标记和修复均使用该位置，避免不同启动环境读取空目录。
+- 组件和宿主通过子进程 stdio 通信；界面只接收账号摘要和状态，不接收 token。独立账号凭据交给原生语言服务使用，原官方账号的 Authorization 不经过插件。
+- 不导入 Cookie、原生认证数据库或 Windows 凭据管理器数据，不复制项目和会话。启用独立路径后，组件故障不会悄悄退回原官方身份。
 
-正常退出 agy 后运行 `Restore.cmd`。主安装收据为 `%LOCALAPPDATA%/AntigravityAccounts/adapter-installation.json`，原程序备份及恢复清单位于同一目录下的 `restore-*`。恢复原程序并移除插件运行文件，保留主动添加的独立账号资料。
+本项目不代表 Google。采用本机官方桌面客户端公开 OAuth 配置的第三方分发方式仍待 Google 确认；相关申请不等于批准。
 
-恢复前同时检查当前归档与 LS 程序；官方更新或其他修改造成内容不同，会拒绝覆盖。不要删除备份再尝试旧版覆盖新版。插件不安装自动重打补丁服务。
+## 更新与恢复
 
-官方更新留下旧安装记录时，只有当前两个官方程序均符合本版适配要求，安装器才会开始新安装。旧记录另存；遗留插件目录须与旧准备目录完全相同才会移到旧恢复目录内保存。新安装单独保存当前2.28原程序，恢复时不写回旧版本。
+使用 `Start-With-Accounts.cmd` 可在启动前检查并修复已支持的更新。安装会把独立修复文件缓存到账号状态目录的 `recovery-package-*`，因此原解压目录移除后仍可修复。版本号变化而相关完整脚本、RPC 依赖和原生程序仍兼容时可以继续使用；未知接口或原生程序变化会停止修改，等待新版插件。
 
-叠加中文适配时，升级或恢复账号插件前须先恢复中文适配；账号插件操作完成后再应用中文适配。两者各自检查安装记录，遇到另一层修改时会拒绝覆盖。模型菜单入口使用独立的Session preload，保留官方和中文适配的preload。
+应用内“重启安装更新”会先准备外部等待进程，待旧 App、安装器退出且文件停止变化后，调用登记的修复与启动入口。真实 NSIS 升级尚未验证。直接双击更新后的官方 EXE 会绕过启动前检查。
 
-## 检查范围与源码构建
+恢复时正常退出 Antigravity，再运行 `Restore.cmd`。安装收据为账号状态目录中的 `adapter-installation.json`，原程序及恢复清单位于同目录的 `restore-*`。恢复会移除插件运行文件并保留主动添加的账号资料。当前程序与收据不匹配时会拒绝覆盖；不要删除恢复文件后尝试用旧程序覆盖新版本。
 
-见`VALIDATION.md`。本地组件、模拟账号、协议和程序副本检查不证明真实额度扣减。本版不沿用前版的真实账号通过标记；本轮模型调用为0，没有观察或导出凭据内容。
+若叠加外部中文适配，手动升级或恢复 Accounts 前须先恢复中文层，完成 Accounts 操作后再应用中文层。支持的中文启动入口可协调启动修复；中文工具本身不在本包中。
 
-## 标准插件与市场状态
+## 源码、支持和许可
 
-`plugin.json`按官方[清单格式](https://antigravity.google/schemas/v1/plugin.json)填写名称、版本和依赖说明。preview.6补充已确认的发布者、公开技术说明链接、本地图标、许可证及搜索关键词；未设置会启动对话的推荐提示。清单自身不会启动Electron适配或注册HostAuth。当前需要本机安装脚本，尚不是市场安装后即可使用全部功能的标准插件。
+[项目与问题反馈](https://github.com/Aliarrrrr/antigravity-accounts) · [当前版本](https://github.com/Aliarrrrr/antigravity-accounts/releases/tag/accounts-v0.4.0-preview.8) · [源码构建说明](https://github.com/Aliarrrrr/antigravity-accounts#development)
 
-截至2026-10-31已检查的[插件文档](https://www.antigravity.google/docs/plugins/)和[市场说明](https://www.antigravity.google/docs/marketplace/)没有提供原生模型菜单或模型额度身份的公开注册接口。2.28.2中的多账号插件接口仍属于插件/提供者范围的MCP或命令认证，不能据此选择原生模型额度身份。2026-10-29已通过官方 Plugin Interest Form 提交收录与标准接口申请，表单显示“您的回复已记录”。[公开技术说明](https://gist.github.com/Aliarrrrr/a2070ce7fb58c2f05c308ec64096990e)与批准稿一致。当前尚未获准收录，申请提交不代表所需接口或未来兼容性已获得支持。
-
-未来更新仍须检查官方程序内容。版本或内容不匹配时安装器拒绝修改，不自动把旧程序写回新版。现阶段不能保证未来版本自动兼容。
-
-```powershell
-./scripts/Publish-Accounts.ps1 -DotNet '<SDK目录>/dotnet.exe'
-```
-
-固定 SDK 为 .NET 10.0.400。组件在 `src/Antigravity.Accounts`，面板在 `packages/account-plugin`，宿主适配在 `packages/hostauth-adapter`。分发包不包含官方程序或个人账号资料；程序副本在安装时生成。
+MIT 许可，详见包内 `LICENSE`。真实模型生成、实际扣额、到期续期及跨账号继续生成仍未验证；此次已完成的真实账号检查只涉及元数据，代理模型请求为 0。反馈时请提供版本、操作步骤和错误代码，勿附凭据、账号数据文件或未经处理的个人日志。

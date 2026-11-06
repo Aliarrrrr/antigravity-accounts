@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { readAsar, rewriteAsar, sha256 } from '../src/asar.mjs';
 import { descriptorBytes, descriptorSource } from '../src/descriptor.mjs';
-import { exactReplace, patchSources, SUPPORTED_VERSION } from '../src/patch-plan.mjs';
+import { exactReplace, patchSources, inspectSourceCompatibility, SUPPORTED_VERSION } from '../src/patch-plan.mjs';
 import { buildCopy, applyPrepared, restorePrepared } from '../src/package-copy.mjs';
 
 function emptyArchive() {
@@ -50,7 +50,7 @@ test('ASAR rewriting preserves unrelated file data and writes valid content inte
   assert.throws(() => readAsar(Buffer.alloc(16)));
 });
 
-test('patching refuses unsupported versions and non-unique exact anchors', () => {
+test('patching refuses missing source contracts and non-unique exact anchors', () => {
   for (const version of ['2.24.0', '2.28.1', '2.28.3']) {
     const metadata = Buffer.from(JSON.stringify({ name: 'antigravity', version, main: 'dist/main.js' }));
     assert.throws(() => patchSources(readAsar(rewriteAsar(emptyArchive(), new Map([['package.json', metadata]])))), /Unsupported/);
@@ -77,6 +77,51 @@ const programAsar = process.env.ANTIGRAVITY_PROGRAM_ASAR || path.join(process.en
 const programNative = process.env.ANTIGRAVITY_LANGUAGE_SERVER || path.join(path.dirname(programAsar), 'bin', 'language_server.exe');
 let hasProgram = false;
 try { await access(programAsar); hasProgram = true; } catch { /* CI need not have Antigravity installed. */ }
+const previousAsar = new URL('../../../artifacts/accounts/original-program-fixture-2.28.2/resources/app.asar', import.meta.url);
+let hasPreviousProgram = false;
+try { await access(previousAsar); hasPreviousProgram = true; } catch { /* Optional previous-version input. */ }
+
+test('the previous 2.28.2 source contract still uses its original synchronous environment path', { skip: !hasPreviousProgram }, async () => {
+  const archive = readAsar(await readFile(previousAsar));
+  const compatibility = inspectSourceCompatibility(archive);
+  assert.equal(compatibility.antigravityVersion, '2.28.2');
+  assert.equal(compatibility.sourceContractVersion, '2.28.2');
+  assert.equal(compatibility.match, 'reviewed-version');
+  const patched = patchSources(archive);
+  assert.match(patched.get('dist/languageServer.js').toString(), /shellEnvSync/);
+  assert.doesNotMatch(patched.get('dist/languageServer.js').toString(), /loginShellEnv/);
+  for (const [name, bytes] of patched) new vm.Script(bytes.toString(), { filename: name });
+});
+
+test('package updates retain compatibility only with complete unchanged source and RPC contracts', { skip: !hasProgram }, async () => {
+  const original = await readFile(programAsar);
+  const archive = readAsar(original);
+  const metadata = JSON.parse(archive.read('package.json'));
+  const initial = inspectSourceCompatibility(archive);
+  const changed = readAsar(rewriteAsar(original, new Map([
+    ['package.json', Buffer.from(JSON.stringify({ ...metadata, version: '2.99.1' }))],
+    ['dist/unrelated-update.js', Buffer.from('module.exports = "new host behavior";')],
+  ])));
+  const report = inspectSourceCompatibility(changed);
+  assert.equal(report.antigravityVersion, '2.99.1');
+  assert.equal(report.sourceContractVersion, initial.sourceContractVersion);
+  assert.equal(report.match, 'unchanged-source-contract');
+  assert.deepEqual([...patchSources(changed)], [...patchSources(archive)]);
+  const updated = readAsar(rewriteAsar(original, new Map([
+    ['package.json', Buffer.from(JSON.stringify({ ...metadata, version: '2.99.1' }))],
+    ['dist/main.js', Buffer.concat([archive.read('dist/main.js'), Buffer.from('\nvoid changedStartupBehavior;')])],
+  ])));
+  assert.throws(() => patchSources(updated), /Unsupported exact program source/);
+  const dependency = 'node_modules/@connectrpc/connect/package.json';
+  const changedDependency = readAsar(rewriteAsar(original, new Map([
+    [dependency, Buffer.from(JSON.stringify({ ...JSON.parse(archive.read(dependency)), version: '3.0.0' }))],
+  ])));
+  assert.throws(() => patchSources(changedDependency), /Unsupported host RPC dependency/);
+  const malformed = readAsar(rewriteAsar(original, new Map([
+    ['package.json', Buffer.from(JSON.stringify({ ...metadata, version: '2.99.1-dev' }))],
+  ])));
+  assert.throws(() => patchSources(malformed), /Unsupported Antigravity/);
+});
 
 test('actual native launch selects HostAuth only for an activated independent provider', { skip: !hasProgram }, async () => {
   const archive = readAsar(await readFile(programAsar));
@@ -91,7 +136,7 @@ test('actual native launch selects HostAuth only for an activated independent pr
   const overrides = {
     child_process: { spawn(command, args, options) { captures.push({ command, args, options }); throw sentinel; } },
     electron: { app: { isPackaged: true, getVersion: () => SUPPORTED_VERSION } },
-    'shell-env': { shellEnvSync: () => ({ AICODE_DEV_PROJECT: 'test-shell-project' }) },
+    'shell-env': { shellEnvSync: () => ({ AICODE_DEV_PROJECT: 'test-shell-project' }), shellEnv: async () => ({ AICODE_DEV_PROJECT: 'test-shell-project' }) },
     fs: { createWriteStream: () => ({}), statSync(filename) {
       assert.equal(filename, path.join(resourcesPath, nativeProgramPath));
       if (!providerNativeExists) throw new Error('ENOENT');
@@ -165,10 +210,15 @@ test('local supported program copy is patched, survives restore, and rejects lat
       await mkdir(path.dirname(path.join(ui, name)), { recursive: true });
       await writeFile(path.join(ui, name), 'offline-test-file');
     }
-    const output = path.join(root, 'prepared');
-    const manifest = await buildCopy({ sourceAsar: programAsar, outputRoot: output, componentExecutable: component, uiDirectory: ui, languageServerPath: programNative, nativeOAuthExtractor: async () => ({ clientId: 'public-test-client', clientSecret: 'public-test-constant', scopes: ['test'] }) });
+    const output = path.join(root, 'prepared'), accountsStateRoot = path.join(root, 'account-state');
+    await mkdir(accountsStateRoot);
+    const manifest = await buildCopy({ sourceAsar: programAsar, outputRoot: output, componentExecutable: component, uiDirectory: ui, languageServerPath: programNative, accountsStateRoot, nativeOAuthExtractor: async () => ({ clientId: 'public-test-client', clientSecret: 'public-test-constant', scopes: ['test'] }) });
     assert.equal(manifest.runtimeVerified, false);
     assert.equal(manifest.payloadComplete, true);
+    assert.equal(manifest.accountsStateRoot, accountsStateRoot);
+    const configPath = path.join(output, 'resources/hostauth-addon/config.json');
+    const configBytes = await readFile(configPath);
+    assert.equal(JSON.parse(configBytes).accountsStateRoot, accountsStateRoot);
     assert.deepEqual(await readdir(path.join(output, 'resources/hostauth-addon/component')), ['Accounts.exe']);
     const providerProgram = await readFile(path.join(output, 'resources', 'hostauth-addon', 'native', 'language_server.exe'));
     assert.equal(sha256(providerProgram), manifest.providerNativeSha256);
@@ -196,6 +246,9 @@ test('local supported program copy is patched, survives restore, and rejects lat
     await writeFile(path.join(resources, 'bin', 'language_server.exe'), originalNative);
     const backup = path.join(root, 'recovery');
     await assert.rejects(applyPrepared({ preparedRoot: output, resourcesRoot: resources, backupRoot: backup }), /shutdown/);
+    await writeFile(configPath, JSON.stringify({ ...JSON.parse(configBytes), accountsStateRoot: path.dirname(accountsStateRoot) }));
+    await assert.rejects(applyPrepared({ preparedRoot: output, resourcesRoot: resources, backupRoot: backup, processesStopped: true, acknowledgeUnverifiedRuntime: true }), /state directory differs/);
+    await writeFile(configPath, configBytes);
     // The native file is replaced first. Refuse the second replacement and
     // check that the first is restored, with the complete originals retained.
     const unfinished = path.join(resources, 'app.asar.hostauth-new');
@@ -221,6 +274,19 @@ test('local supported program copy is patched, survives restore, and rejects lat
     await writeFile(path.join(resources, 'app.asar'), Buffer.from('later updater version'));
     await assert.rejects(restorePrepared({ resourcesRoot: resources, backupRoot: backup, processesStopped: true }), /updated or modified/);
     assert.deepEqual(await readFile(programAsar), original);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('account state paths must exist outside the source installation and remain optional for legacy builds', { skip: !hasProgram }, async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'hostauth-state-path-'));
+  try {
+    for (const accountsStateRoot of ['', 'relative-state', path.join(root, 'missing'), path.dirname(programAsar)]) {
+      await assert.rejects(buildCopy({ sourceAsar: programAsar, outputRoot: path.join(root, 'invalid-copy'), accountsStateRoot, allowMissingPayload: true }), /account state directory/);
+    }
+    const output = path.join(root, 'legacy-copy');
+    const manifest = await buildCopy({ sourceAsar: programAsar, outputRoot: output, allowMissingPayload: true });
+    assert.equal(manifest.accountsStateRoot, undefined);
+    assert.equal(Object.hasOwn(JSON.parse(await readFile(path.join(output, 'resources/hostauth-addon/config.json'), 'utf8')), 'accountsStateRoot'), false);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

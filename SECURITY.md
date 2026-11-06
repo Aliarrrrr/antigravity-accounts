@@ -1,49 +1,51 @@
-# Next 安全与隐私边界
+# Security policy
 
-Next 分离 Antigravity 的应用状态，不提供操作系统沙箱。同一 Windows 用户的进程仍可访问其他可读文件。新建默认关闭 Git / SSH 桥接；明确开启后会共享宿主配置及整个密钥目录。已有明确 `on` 记录保持兼容，可执行 `bridge <profile> off` 撤销本工具拥有的共享项。
+Antigravity Accounts is an unofficial Windows host adapter. It modifies reviewed local Antigravity program files and runs an independent account component as the current Windows user. The supported preview and client combinations are listed in [README.md](README.md#compatibility-and-updates).
 
-## 登录与敏感数据
+## Report a vulnerability
 
-共享工作空间不提供凭据存储、捕获或替换接口，也不自动获取账号邮箱。组登记只保存原 Profile 引用与用户手填标签；工作内容按明确选择导入。官方客户端自行保管登录状态，Hub 不把它复制到共享组。尚无满足这些约束的无感切换适配，当前入口保持禁用。
+For a suspected credential exposure, account-identity mix-up or unsafe file replacement, arrange a private report before sharing technical details. Use GitHub private vulnerability reporting if it is available for this repository. Otherwise, open a minimal issue asking the [maintainer](https://github.com/Aliarrrrr) for a private reporting channel, without including the sensitive details.
 
-登录由用户在官方 Antigravity / Google 窗口完成。管理器不读取认证 token、Cookie、密码、认证数据库、浏览器会话、SSH 私钥内容或 Windows Credential Manager 秘密。账号标签手填。
+For an ordinary installation or compatibility issue, include only:
 
-Next 的结构化诊断记录生命周期结果、回调接收阶段和固定故障码。完整回调 URI、子进程 argv 和厂商原始输出不持久化到 Hub 日志。管理器会在内存中解析进程命令行以检查归属，并只从本次启动的日志中识别固定的文件令牌存储标记。
+- Antigravity and Accounts versions.
+- Reproduction steps and the expected versus observed result.
+- A bounded error code or a small, redacted excerpt that contains no credentials, account identifiers or conversation content.
 
-提交问题时只提供版本、操作步骤、通过 / 失败结果和非敏感故障码。不要上传完整数据根目录、回调链接、认证文件、原始语言服务器日志、密钥或浏览器资料。
+Do not upload an Accounts state directory, encrypted account store, OAuth callback URL, access or refresh token, Cookie, official authentication database, full language-service log, or personal project/session files. Redact personal paths and email addresses from screenshots.
 
-## 兼容与进程控制
+## Account and credential flow
 
-自动探测证明绑定安装版本、运行组件摘要和探测策略修订号；应用更新后必须重新探测。通过探测仅允许实验启动。人工验收单独记录，不由自动测试、安装或目录创建推断。
+Accounts are added by the owner through Google's official OAuth page. The independent component stores these credentials with Windows DPAPI CurrentUser encryption and uses them for the selected account. The menu and public component state expose presentation metadata rather than tokens.
 
-每次冷启动都检查本次日志标记、受管根进程与语言服务器子进程。启动证明缺失时，只停止本次能够确认归属的进程。进程列表不可用时保持未知，并拒绝破坏性操作。
+The local HostBridge supplies the selected independent account's credentials to the native language service. That service sends model requests directly to Google. The account component has no prompt-submission method, and the adapter does not proxy inference requests or import the official login database, Cookies or Windows Credential Manager entries.
 
-进程归属联合检查精确参数路径、可执行镜像、创建时间及父子关系。Next 入口没有按进程名称批量关闭、仅凭 PID 关闭或普通关闭失败后自动强杀的路径。普通关闭和显式强停分开；强停前应保存工作。
+The authorization flow uses `accounts.google.com`; token exchange and renewal use `oauth2.googleapis.com`; account identity lookup uses `openidconnect.googleapis.com`. Requested scopes and the installed-client configuration are described in [authorization and data](docs/ACCOUNTS_PLUGIN.md#授权与本机数据).
 
-## 路径与桥接
+DPAPI CurrentUser protects stored credentials for the Windows user. The component and native language service run with that user's permissions; this plugin does not provide process or operating-system isolation.
 
-受管路径检查目录穿越及重解析祖先。独立 home 中允许的受管目录链接只有明确记录的 SSH 桥接。撤销时核对所有权，删除链接自身，保留宿主目标；被用户替换的项目保留并报告冲突。
+Deleting an account removes its record from this plugin. It does not delete the Google account or revoke the server-side Google authorization. Use the Google account's access settings if revocation is also required.
 
-缺失桥接清单或开启字段按关闭处理，不会推断用户同意共享。损坏清单拒绝处理且不重写；缺失清单不能证明旧文件或链接的所有权，因此未知项目保留。关闭策略不能保证撤销未登记的旧链接，修复损坏/缺失记录前应核对现有项目。迁移不复制 SSH 或认证数据，新迁入 Profile 默认关闭，已有目标明确策略不覆盖。
+## Switching and task handling
 
-Git 桥接使用受管 include 文件。宿主 `.gitconfig` 引用的其他配置与整个 `.ssh` 目录都可能扩大共享范围，因此桥接是便利功能，不构成安全边界。`.gemini` 不共享。
+The adapter pauses new submissions, waits for native generation, tools and background work to finish, then commits the new account selection. It confirms account identity, project, model and quota metadata before allowing new submissions. An unconfirmed identity remains blocked; it does not silently select another account.
 
-## 配置继承与迁移
+An available concrete model is preserved. If the selected account lacks it, the user must choose an available model in the native list. Cancelling a pending switch leaves the original task running. The current account and primary account cannot be removed while the independent provider is running; inactive attached-account deletion requires confirmation.
 
-配置继承采用有限的语义允许项。未知设置、任意 keybindings 参数和 snippets 正文被跳过，不提供原样复制回退。JSONC 解析失败保留源和目的文件；冲突值保留目的版本。允许的写入使用备份、锁和原子替换。
+Google security and data-use prompts remain decisions for the account owner. The plugin does not complete these prompts on the owner's behalf.
 
-迁移只读取 Profile 元数据和允许的编辑器配置路径。应用前要求同一源注册文件的预览收据；不会初始化或修改源目录，不复制认证数据、运行记录或人工验收证明。
+## Installation, updates and recovery
 
-## 回调所有权
+The installer checks reviewed host scripts, RPC dependencies and native program profiles before changing the local installation. Originals are preserved for restore. Unknown relevant changes are refused, and old program backups are not written over a newer official installation.
 
-没有可靠的厂商关联证据时，一次只允许一个有效授权等待槽。多个候选、过期或未来时间的等待记录不能路由。交接检查协议仍属于 Next、安装证明有效、目标 Profile 进程仍存在。真实 Chrome 回调链尚未完成验证，当前发布保持完整人工验收未通过。
+The registered account directory is shared by the component, provider marker and update recovery. Public configuration stores that location so a different Windows launch context cannot silently substitute an empty default directory. Missing or conflicting explicit locations stop the affected startup or recovery path.
 
-协议注册保存原处理器命令，还原只在当前命令仍属于 Next 时执行。其他管理器的回调不会自动接管。搬迁或删除旧包前，应从保留的新包重新注册，避免处理器指向已删除的 CLI。
+Repair and launch use per-install locks and stopped-process checks. An App or installer that is still running defers file replacement. The update handoff uses an external helper so it can wait for the App and installer to exit before repair and relaunch.
 
-## 打包、卸载与本地清理
+The distribution contains the independent component and adapter files. It excludes personal account data and official Antigravity binaries; local adapted copies are produced during installation. Restoring the official programs retains account records unless the owner separately removes them.
 
-发行包只收集明确选择的程序和文档，不包含本机 Profile 数据、登录信息、探测证明或诊断输出。Next 使用独立安装 ID 和目录。
+## Validation limits
 
-卸载先请求普通回滚；无法关闭受管窗口时中止，要求用户保存工作并处理窗口。卸载保留 Profile 数据。清理构建目录或探针临时目录时，必须先确认目标路径和链接边界；已登录的真实 Profile、宿主 `.gitconfig` / `.ssh` 和正在使用的 Workspace 应保留。
+Metadata-only account switching has been checked in an installed Antigravity 2.29.0 window. This does not establish model generation, quota charging, cross-account generation continuation or an actual NSIS upgrade. Version-specific results are kept in [the validation record](docs/ACCOUNTS_VALIDATION.md).
 
-安全问题可通过仓库提供的私密漏洞报告入口报告；若该入口不可用，请勿在公开 issue 中附加秘密或可用于登录的材料。
+The earlier Profile Hub implementation remains in Git history. Its behavior and prior security notes should not be treated as the current Accounts contract.

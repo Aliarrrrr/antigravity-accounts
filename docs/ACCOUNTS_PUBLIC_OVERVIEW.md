@@ -1,3 +1,5 @@
+> Archive: this is the approved technical overview for the 29 October 2026 preview.5 submission, followed by its original text. It describes Antigravity 2.28.1 and is not current installation guidance. The published Gist was not updated during the preview.8 repository reorganization. See [current usage](ACCOUNTS_PLUGIN.md) and [validation scope](ACCOUNTS_VALIDATION.md).
+
 # Antigravity Accounts — independent developer preview
 
 Antigravity Accounts is a Windows x64 preview that groups separately authorized Google accounts inside Antigravity's native model selector. It uses the host's styling and keeps native model choices and View Usage. There is no separate account window. The official language server sends model requests directly to Google.

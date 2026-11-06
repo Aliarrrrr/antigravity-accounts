@@ -1,12 +1,17 @@
 import { readFile } from 'node:fs/promises';
 import { createHash, timingSafeEqual } from 'node:crypto';
 
-// Public installed-app OAuth defaults in the reviewed 2.25.0 to 2.28.2
+// Public installed-app OAuth defaults in the reviewed 2.25.0 to 2.29.0
 // programs. These are not account credentials. No user files, overrides,
 // keyrings or databases are read. In 2.27.0 HostAuthProvider.GetTokenSource
 // still calls getOAuth2Config; its instruction sequence differs only in
 // relocated addresses and the default client ID and secret are unchanged.
 const specifications = Object.freeze([
+  {
+    code: { address: 0x1420f77c0n, length: 1184, digest: '8f8f77b4a75c5e3e5f4a5754cd898d6ed2e27ffc10cdea864970d20637c54fc2' },
+    id: { address: 0x1437f90ecn, length: 73, digest: 'bf00c418024ba6bf606ccdc37120976e41bc429dd1d46ecf16a729aa532626ea' },
+    secret: { address: 0x143761911n, length: 35, digest: '1d2f041093fd95aa8995a038c711d50a7960da09a505381c09a745d6ad0ecc60' }
+  },
   {
     legacyScopes: true,
     code: { address: 0x141e85920n, length: 1184, digest: 'e68d7c2e7adce0f69d450f663de7c0c63dd1b85adf73e87989af530b6ae49434' },
