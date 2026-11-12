@@ -123,6 +123,20 @@ test('package updates retain compatibility only with complete unchanged source a
   assert.throws(() => patchSources(malformed), /Unsupported Antigravity/);
 });
 
+test('identical 2.31 source contracts retain each reviewed native-program version', { skip: !hasProgram }, async () => {
+  const original = await readFile(programAsar);
+  const archive = readAsar(original);
+  const metadata = JSON.parse(archive.read('package.json'));
+  for (const version of ['2.31.0', '2.31.2']) {
+    const versioned = readAsar(rewriteAsar(original, new Map([
+      ['package.json', Buffer.from(JSON.stringify({ ...metadata, version }))],
+    ])));
+    const compatibility = inspectSourceCompatibility(versioned);
+    assert.equal(compatibility.sourceContractVersion, version);
+    assert.equal(compatibility.match, 'reviewed-version');
+  }
+});
+
 test('actual native launch selects HostAuth only for an activated independent provider', { skip: !hasProgram }, async () => {
   const archive = readAsar(await readFile(programAsar));
   const patched = patchSources(archive);

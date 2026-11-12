@@ -1,9 +1,9 @@
 import { sha256 } from './asar.mjs';
 import { descriptorSource } from './descriptor.mjs';
 
-export const SUPPORTED_VERSION = '2.29.0';
+export const SUPPORTED_VERSION = '2.31.2';
 export const SOURCE_SHA256 = Object.freeze({
-  'dist/main.js': 'e5bf4ae92a586b222034c7de27e0e58dd8922deb0edc9649d290bc06182b2c6c',
+  'dist/main.js': '0d297f7b38f73777e61fdcde103f026b1ae69af91e37edc937c9b37d5fe73d6e',
   'dist/languageServer.js': '6f671aaf1a6812e75bb692e1def7a0b6eb3b2ac27b12cdc066e0b7f39ac723c4',
   'dist/hostBridgeServer.js': 'db4d7dc0e356828ac26ecf461c2c5d34c96612d69c7a9a765221513351378784',
   'dist/proto/host_bridge_pb.js': 'f80259dd94c70ce6befb46d6d9a08617e7ebee97e1e2975d60b657603bab417d',
@@ -22,6 +22,10 @@ const previousSourceSha256 = Object.freeze({
 });
 export const SOURCE_CONTRACTS = Object.freeze([
   Object.freeze({ version: SUPPORTED_VERSION, sourceSha256: SOURCE_SHA256, shellEnvironment: 'prefetched' }),
+  Object.freeze({ version: '2.31.0', sourceSha256: SOURCE_SHA256, shellEnvironment: 'prefetched' }),
+  Object.freeze({ version: '2.29.0', sourceSha256: Object.freeze({ ...SOURCE_SHA256,
+    'dist/main.js': 'e5bf4ae92a586b222034c7de27e0e58dd8922deb0edc9649d290bc06182b2c6c',
+  }), shellEnvironment: 'prefetched' }),
   Object.freeze({ version: '2.28.2', sourceSha256: previousSourceSha256, shellEnvironment: 'sync' }),
 ]);
 const dependencyVersions = Object.freeze({ '@bufbuild/protobuf': '2.11.0', '@connectrpc/connect': '2.2.0', '@connectrpc/connect-node': '2.2.0', 'electron-updater': '6.8.9' });
@@ -35,7 +39,8 @@ export function inspectSourceCompatibility(archive) {
   let sourceSha256;
   try { sourceSha256 = Object.fromEntries(Object.keys(SOURCE_SHA256).map(name => [name, sha256(archive.read(name))])); }
   catch { throw new Error('Unsupported exact program source: missing contract file'); }
-  const contract = SOURCE_CONTRACTS.find(candidate => Object.entries(candidate.sourceSha256).every(([name, expected]) => sourceSha256[name] === expected));
+  const matchingContracts = SOURCE_CONTRACTS.filter(candidate => Object.entries(candidate.sourceSha256).every(([name, expected]) => sourceSha256[name] === expected));
+  const contract = matchingContracts.find(candidate => candidate.version === packageInfo.version) || matchingContracts[0];
   if (!contract) throw new Error('Unsupported exact program source: no complete reviewed source contract matches');
   for (const [name, version] of Object.entries(dependencyVersions)) {
     let installed;

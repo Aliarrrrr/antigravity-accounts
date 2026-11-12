@@ -18,7 +18,7 @@ const pprofIdle = 'goroutine profile: total 2\n1 @ 0x1 0x2\n#\t0x1\truntime.gopa
 const pprofRefreshing = pprofIdle + '\n3 @ 0x4\n#\t0x4\tgoogle3/third_party/jetski/go_utils/cache/cache.(*Cache[go.shape.*uint8]).forceRefresh.func1+0x1\tcache.go:1\n';
 function nativeState({ tasks = 0, incomplete = false } = {}) {
   if (incomplete) return Buffer.from([0, 0, 0, 0, 4, 10]);
-  return connectEnvelope(bytes(1, Buffer.concat([scalar(18, 1), bytes(9, Buffer.alloc(0)), bytes(12, Buffer.alloc(0)),
+  return connectEnvelope(bytes(1, Buffer.concat([scalar(3, 1), scalar(4, 1), scalar(5, 1), scalar(18, 1), bytes(9, Buffer.alloc(0)), bytes(12, Buffer.alloc(0)),
     ...(incomplete ? [] : [bytes(17, tasks ? scalar(3, tasks) : Buffer.alloc(0))]), bytes(20, Buffer.alloc(0))])));
 }
 
@@ -142,6 +142,28 @@ test('real task adapter uses only local CSRF and protobuf state RPCs before it r
   assert.equal(adapter.authBoundarySafe, false);
   adapter.close();
 });
+
+for (const version of ['2.31.0', '2.31.2']) {
+test(`${version} native execution status blocks switching after idle summary and idle RPC responses`, async () => {
+  const state = connectEnvelope(bytes(1, Buffer.concat([
+    scalar(3, 1), scalar(4, 1), scalar(5, 1), scalar(18, 1), bytes(25, bytes(2, scalar(1, 1))),
+  ])));
+  const profile = NATIVE_PROGRAM_PROFILES.find(item => item.version === version);
+  const adapter = adapterWith(async url => {
+    if (url.endsWith('/GetRemoteControlInfo') || url.endsWith('/WaitForConversationFullyIdle')) return new Response(Buffer.alloc(0), { headers: { 'Content-Type': 'application/proto' } });
+    if (url.endsWith('/GetAllCascadeTrajectories')) return new Response(mapSummary('execution-pending', 1), { headers: { 'Content-Type': 'application/proto' } });
+    if (url.endsWith('/StreamAgentStateUpdates')) return new Response(state, { headers: { 'Content-Type': 'application/connect+proto' } });
+    if (url.includes('/debug/pprof/')) return new Response(pprofIdle, { headers: { 'Content-Type': 'text/plain' } });
+    throw Error('unexpected request');
+  }, { nativeProgram: profile, nativeProgramSha256: profile.originalSha256 });
+  try {
+    const result = await adapter.readActivity();
+    assert.equal(result.known, true);
+    assert.equal(result.fullyIdle, false);
+    assert.equal(result.active[0].executionActive, true);
+  } finally { adapter.close(); }
+});
+}
 
 test('native pending background work blocks a switch even when the cascade summary and idle RPC appear idle', async () => {
   for (const incomplete of [false, true]) {

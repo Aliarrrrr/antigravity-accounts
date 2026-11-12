@@ -29,7 +29,7 @@ Invoke-AccountsEnvironment -Root $root -DotNet $DotNet -Action {
             $target = Join-Path $package $name
             New-Item -ItemType Directory -Path $target | Out-Null
             $included = if ($name -eq 'account-plugin') {
-                @('plugin.json','README.md','assets','window.cjs','native-oauth.mjs','manage-install.mjs','update-recovery.mjs','recovery-and-launch.mjs','installer-lock.mjs','Hold-InstallLock.ps1','Update-Handoff.ps1')
+                @('plugin.json','README.md','assets','window.cjs','native-oauth.mjs','manage-install.mjs','update-recovery.mjs','recovery-and-launch.mjs','native-fallback.mjs','installer-lock.mjs','Hold-InstallLock.ps1','Update-Handoff.ps1','Process-WorkingDirectory.ps1')
             } else { @('src','scripts','README.md','package.json') }
             foreach ($item in $included) { Copy-Item -LiteralPath (Join-Path $source $item) -Destination $target -Recurse }
         }
@@ -55,10 +55,8 @@ Invoke-AccountsEnvironment -Root $root -DotNet $DotNet -Action {
             'if not defined ACCOUNTS_APP_ROOT set "ACCOUNTS_APP_ROOT=%LOCALAPPDATA%\Programs\antigravity"',
             'if not exist "%ACCOUNTS_APP_ROOT%\Antigravity.exe" (echo Antigravity installation not found. Set ANTIGRAVITY_INSTALL_ROOT. & exit /b 1)',
             'set "ELECTRON_RUN_AS_NODE=1"',
-            '"%ACCOUNTS_APP_ROOT%\Antigravity.exe" "%~dp0account-plugin\update-recovery.mjs" --install-root "%ACCOUNTS_APP_ROOT%" --package-root "%~dp0."',
-            'if errorlevel 1 (echo Accounts could not be prepared. Exit Antigravity fully or use the localized launcher when installed. & pause & exit /b 1)',
-            'set "ELECTRON_RUN_AS_NODE="',
-            'start "" "%ACCOUNTS_APP_ROOT%\Antigravity.exe" --accounts'
+            '"%ACCOUNTS_APP_ROOT%\Antigravity.exe" "%~dp0account-plugin\recovery-and-launch.mjs" --install-root "%ACCOUNTS_APP_ROOT%" --package-root "%~dp0." --show-accounts true',
+            'if errorlevel 1 (echo Accounts could not be prepared. Files were preserved; see README.md. & pause & exit /b 1)'
         )
         [IO.File]::WriteAllText((Join-Path $package 'Start-With-Accounts.cmd'), ($launch -join "`r`n") + "`r`n", [Text.Encoding]::ASCII)
         $manifest = [ordered]@{

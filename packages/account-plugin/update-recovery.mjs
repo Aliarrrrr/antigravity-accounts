@@ -4,6 +4,15 @@ import { fileURLToPath } from 'node:url';
 import { manageInstallation, withInstallationLock, resolveAccountsStateRoot, resolveRecoveryReceiptPaths } from './manage-install.mjs';
 import { sha256 } from '../hostauth-adapter/src/asar.mjs';
 import { assertApplicationStopped } from '../hostauth-adapter/src/process-guard.mjs';
+import { inspectNativeFallback } from './native-fallback.mjs';
+
+function compatibilityFailure(error) {
+  return typeof error?.message === 'string' && (
+    /^unsupported_native_(?:oauth_configuration|diagnostics_program|project_refresh_program|frontend(?:_archive|_contract)?)(?::|$)/.test(error.message) ||
+    /^Unsupported (?:exact program source:|host RPC dependency:)/.test(error.message) ||
+    ['Native program and application source contracts differ', 'Expected exactly one complete source anchor'].includes(error.message)
+  );
+}
 
 const comparable = value => process.platform === 'win32' ? value.toLowerCase() : value;
 const samePath = (left, right) => comparable(path.resolve(left)) === comparable(path.resolve(right));
@@ -27,7 +36,7 @@ function applicationBusy(error) {
 // the Accounts lock remains held. No account component is started here.
 export async function ensureAccounts({ installRoot, packageRoot, stateRoot,
   beforeApply, afterApply, checkStopped = assertApplicationStopped,
-  runLocked = withInstallationLock, manage = manageInstallation } = {}) {
+  runLocked = withInstallationLock, manage = manageInstallation, inspectFallback = inspectNativeFallback } = {}) {
   for (const target of [installRoot, packageRoot, stateRoot])
     if (!path.isAbsolute(target || '')) throw new Error('Installation, package and state paths must be absolute');
   const resourcesRoot = await realpath(path.join(installRoot, 'resources'));
@@ -96,7 +105,14 @@ export async function ensureAccounts({ installRoot, packageRoot, stateRoot,
           }
         }
       }
-      if (failure) throw failure;
+      if (failure) {
+        if (!compatibilityFailure(failure)) throw failure;
+        lock.assertHeld?.();
+        // A failed adaptation can leave the official update untouched. Only
+        // that complete, unadapted program may use its own native sign-in.
+        const program = await inspectFallback({ installRoot, receipt });
+        return { status: 'degraded', mode: 'native', reason: failure.message, program, credentialFilesRead: false };
+      }
       return { status: 'repaired', runtimeVerified: false, credentialFilesRead: false };
     });
   } catch (error) {

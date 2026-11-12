@@ -5,7 +5,7 @@ import { access, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   patchNativeDiagnostics, restoreNativeDiagnostics, inspectNativeDiagnostics,
-  ORIGINAL_NATIVE_SHA256, PATCHED_NATIVE_SHA256,
+  NATIVE_DIAGNOSTICS_PROFILES,
 } from '../src/native-diagnostics-patch.mjs';
 
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -21,15 +21,16 @@ test('unrecognized native images are rejected before any patch or restoration', 
   }
 });
 
-test('reviewed 2.29.0 image changes only the route instructions and restores byte-for-byte', { skip: !hasProgram }, async () => {
+test('reviewed image changes only the route instructions and restores byte-for-byte', { skip: !hasProgram }, async () => {
   const original = await readFile(programPath);
-  assert.equal(digest(original), ORIGINAL_NATIVE_SHA256);
+  const profile = NATIVE_DIAGNOSTICS_PROFILES.find(value => value.originalSha256 === digest(original));
+  assert.ok(profile, 'integration input must be a reviewed original program');
   assert.equal(inspectNativeDiagnostics(original).state, 'original');
   const { buffer: patched, report } = patchNativeDiagnostics(original);
-  assert.equal(digest(original), ORIGINAL_NATIVE_SHA256, 'source buffer is never mutated');
-  assert.equal(digest(patched), PATCHED_NATIVE_SHA256);
+  assert.equal(digest(original), profile.originalSha256, 'source buffer is never mutated');
+  assert.equal(digest(patched), profile.patchedSha256);
   assert.equal(report.route, '/debug/pprof/goroutine');
-  assert.equal(report.version, '2.29.0');
+  assert.equal(report.version, profile.version);
   assert.equal(report.devModeEnabled, false);
   assert.equal(report.runtimeValidated, false);
   const allowed = new Set(report.changes.flatMap(change => Array.from({ length: change.before.length / 2 }, (_, index) => change.offset + index)));
@@ -40,13 +41,14 @@ test('reviewed 2.29.0 image changes only the route instructions and restores byt
     assert.equal(allowed.has(index), true, `unexpected program change at ${index}`);
   }
   assert.equal(changed, 16);
-  assert.deepEqual(report.changes.map(change => change.address), ['0x1430ba6d7', '0x1430ba719', '0x1430ba720', '0x1430ba731']);
+  assert.deepEqual(report.changes.map(change => change.address), profile.changes.map(change => `0x${change.address.toString(16)}`));
   // Verify relative branch destinations and the pre-existing literal they use.
   const [entry, literal, length, exit] = report.changes;
-  assert.equal(0x1430ba6d7 + 5 + patched.readInt32LE(entry.offset + 1), 0x1430ba711);
-  assert.equal(0x1430ba719 + 7 + patched.readInt32LE(literal.offset + 3), 0x1436d189c);
+  const entryAddress = Number(profile.changes[0].address);
+  assert.equal(entryAddress + 5 + patched.readInt32LE(entry.offset + 1), entryAddress + 0x3a);
+  assert.equal(Number(profile.changes[1].address) + 7 + patched.readInt32LE(literal.offset + 3), Number(profile.routeAddress));
   assert.equal(patched.readUInt32LE(length.offset + 1), 22);
-  assert.equal(0x1430ba731 + 5 + patched.readInt32LE(exit.offset + 1), 0x1430ba7b1);
+  assert.equal(Number(profile.changes[3].address) + 5 + patched.readInt32LE(exit.offset + 1), entryAddress + 0xda);
   assert.equal(inspectNativeDiagnostics(patched).state, 'patched');
   assert.throws(() => patchNativeDiagnostics(patched), /unsupported_native_diagnostics_program/);
   assert.throws(() => restoreNativeDiagnostics(original), /unsupported_native_diagnostics_program/);

@@ -64,22 +64,7 @@ function Invoke-Hidden([string]$executable, [string[]]$arguments, [bool]$nodeMod
   } finally { $child.Dispose() }
 }
 function Sidecar-Ids($processes, [string]$installRoot) {
-  $executable=Join-Path $installRoot 'Antigravity.exe'
-  $cmd=Join-Path $env:SystemRoot 'System32\cmd.exe'
-  $shim=Join-Path $env:APPDATA 'Antigravity\bin\agy-node.cmd'
-  $loader=Join-Path $env:USERPROFILE '.gemini\antigravity\lib\node_modules\sidecar_sdk\register_loader.js'
-  $arguments='--import='+([Uri]::new($loader)).AbsoluteUri+' dist/server.cjs'
-  try { $text=[IO.File]::ReadAllText($shim).Trim() } catch { return }
-  $expected='@echo off'+"`n"+'set ELECTRON_RUN_AS_NODE=1'+"`n"+'"'+$executable+'" %*'
-  if ($text.Replace("`r`n","`n") -cne $expected) { return }
-  $childPattern='^"'+[regex]::Escape($executable)+'"\s+'+[regex]::Escape($arguments)+'\s*$'
-  $invocation='(?:"'+[regex]::Escape($shim)+'"|'+[regex]::Escape($shim)+')\s+'+[regex]::Escape($arguments)
-  $parentPattern='^(?:"'+[regex]::Escape($cmd)+'"|'+[regex]::Escape($cmd)+')\s+/c\s+(?:'+$invocation+'|"'+$invocation+'")\s*$'
-  foreach ($entry in $processes) {
-    if ($entry.ExecutablePath -ine $executable -or $entry.CommandLine -notmatch $childPattern) { continue }
-    $parent=$processes | Where-Object ProcessId -eq $entry.ParentProcessId | Select-Object -First 1
-    if ($parent -and $parent.ExecutablePath -ieq $cmd -and $parent.CommandLine -match $parentPattern) { [int]$entry.ProcessId }
-  }
+  Get-AccountsNodeSidecarIds -Processes $processes -InstallRoot $installRoot
 }
 function Updaters($processes, $request) {
   foreach ($entry in $processes) {
@@ -119,12 +104,13 @@ try {
   if (-not (Same-Path $PSScriptRoot (Join-Path $request.packageRoot 'account-plugin'))) { Fail 'update_handoff_cache_invalid' }
   $cache=Read-PublicJson (Join-Path $request.packageRoot 'package-manifest.json')
   if ($cache.role -ne 'accounts-recovery-package') { Fail 'update_handoff_cache_invalid' }
-  foreach ($relative in @('account-plugin/Update-Handoff.ps1','account-plugin/recovery-and-launch.mjs')) {
+  foreach ($relative in @('account-plugin/Update-Handoff.ps1','account-plugin/recovery-and-launch.mjs','account-plugin/Process-WorkingDirectory.ps1')) {
     $listed=@($cache.files | Where-Object path -CEQ $relative)
     $filename=Join-Path $request.packageRoot $relative
     [void](Regular-File $filename)
     if ($listed.Count -ne 1 -or $listed[0].sha256 -cne (Digest $filename)) { Fail 'update_handoff_cache_invalid' }
   }
+  . (Join-Path $PSScriptRoot 'Process-WorkingDirectory.ps1')
   [void](Regular-File $request.installerPath)
   if ((Digest $request.installerPath) -cne $request.installerSha256) { Fail 'update_handoff_installer_changed' }
   $processes=@(Get-CimInstance Win32_Process)

@@ -7,6 +7,14 @@ const { readAgentState, AGENT_STATE_PATH } = require('./native-agent-state.cjs')
 
 const SERVICE = '/exa.language_server_pb.LanguageServerService/';
 const NATIVE_PROGRAM_PROFILES = Object.freeze([
+  Object.freeze({ version: '2.31.2',
+    originalSha256: 'e40f0447109c43ece15e7025ca0864a138e0e16cb8864d4ccf64a00512a99e1a',
+    patchedSha256: 'b02168614d75b680cd8b0814b0d01bf91c66f5e310ff8d772516b920c8813b5f',
+    providerSha256: 'ff323094c41c50508bd4b9d8cc66230c36d2c245df68a0216010603725aa866c' }),
+  Object.freeze({ version: '2.31.0',
+    originalSha256: '77b76711786bd78b51a6879fa57e66f9f5d398ac5d369cf8b5b3e2fb5cfc741b',
+    patchedSha256: '0bdb872c8092002dafdf8ef44f1b3da77c2b71ef09eaec47ea169911766b2a2b',
+    providerSha256: 'ff0bfbb49bd798cd07d6add6f7eda235605285fa5ac25731f86d26e30ca7ff6e' }),
   Object.freeze({ version: '2.29.0',
     originalSha256: 'c98e7c331da5bcc37002a550e7d625b4c636f775fa2804f73777c6a500e1c3d5',
     patchedSha256: '169355a713b8199f6fe91dd5eaf81bc7f366544b2808014425fc820ccdd04bfc',
@@ -281,11 +289,12 @@ function createNativeTaskAdapter({ electron, baseUrl, csrf, client, nativeProgra
           // GetAllCascadeTrajectories omits live background aggregates, and
           // IsFullyIdle alone does not include pending background tasks. Read
           // their initial counts from a dedicated native state subscription.
-          const state = await readAgentState({ fetchLocal, baseUrl: origin, csrf, conversationId: summary.id, signal, timeoutMs: observationTimeoutMs });
+          const state = await readAgentState({ fetchLocal, baseUrl: origin, csrf, conversationId: summary.id, signal, timeoutMs: observationTimeoutMs,
+            nativeVersion: profile?.version });
           if (!state.known) return { known: false, fullyIdle: false, coverage, active: [], errorCode: state.errorCode || 'native_agent_state_incomplete' };
           if (!state.fullyIdle) return { known: true, fullyIdle: false, coverage, active: [{ id: summary.id, kind: 'nativeBackgroundWork',
             backgroundTasks: state.backgroundTasks, backgroundCommands: state.backgroundCommands, queuedSteps: state.queuedSteps,
-            pendingAgentMessages: state.pendingAgentMessages, hasActiveChildren: state.hasActiveChildren }] };
+            pendingAgentMessages: state.pendingAgentMessages, hasActiveChildren: state.hasActiveChildren, executionActive: state.executionActive }] };
         }
         const after = await readRefresh(signal);
         const remoteAfter = decodeRemoteControl(await request(SERVICE + 'GetRemoteControlInfo', { body: Buffer.alloc(0), proto: true, signal }));

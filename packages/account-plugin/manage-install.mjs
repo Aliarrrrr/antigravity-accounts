@@ -144,7 +144,7 @@ async function cacheRecoveryPackage({ stateRoot, suffix, packageRoot, preparedRo
   };
   // These are public installer sources. Neither the account state directory nor
   // the prepared copy's original ASAR/native-program directories are traversed.
-  for (const name of ['manage-install.mjs', 'update-recovery.mjs', 'recovery-and-launch.mjs', 'installer-lock.mjs', 'Hold-InstallLock.ps1', 'Update-Handoff.ps1', 'native-oauth.mjs'])
+  for (const name of ['manage-install.mjs', 'update-recovery.mjs', 'recovery-and-launch.mjs', 'native-fallback.mjs', 'installer-lock.mjs', 'Hold-InstallLock.ps1', 'Update-Handoff.ps1', 'Process-WorkingDirectory.ps1', 'native-oauth.mjs'])
     await copyPublicFile(path.join(sourceRoot, 'account-plugin', name), path.join('account-plugin', name));
   await copyPublicFile(path.join(packageRoot, 'account-plugin', 'window.cjs'), path.join('account-plugin', 'window.cjs'));
   await copyPublicFile(path.join(sourceRoot, 'hostauth-adapter', 'package.json'), path.join('hostauth-adapter', 'package.json'));

@@ -92,8 +92,46 @@ function lengthUpdate(buffer) {
   return totalLength;
 }
 
-function decodeAgentStateUpdate(buffer, { initial = false } = {}) {
+function decodeExecutionStateUpdate(update, initial) {
+  let fullyIdle = false, executionActive = false;
+  const seen = new Set(), counts = {}, statuses = [];
+  const countFields = new Map([[17, 'backgroundTasks'], [20, 'pendingAgentMessages']]);
+  visitFields(update, (number, wire, value) => {
+    if (![3, 4, 5, 18, 25].includes(number) && !countFields.has(number)) return;
+    if (seen.has(number)) throw invalid();
+    seen.add(number);
+    if ([3, 4, 5].includes(number)) {
+      if (wire !== 0 || ![1, 2, 3, 4].includes(value)) throw invalid();
+      statuses.push(value);
+    } else if (number === 18) {
+      if (wire !== 0 || ![0, 1].includes(value)) throw invalid();
+      fullyIdle = value === 1;
+    } else if (number === 25) {
+      if (wire !== 2) throw invalid();
+      // Initialization, active requests and retry waits use this message.
+      // Any present status, including an unfamiliar variant, blocks switching.
+      executionActive = true;
+    } else {
+      if (wire !== 2) throw invalid();
+      counts[countFields.get(number)] = lengthUpdate(value);
+    }
+  });
+  if (statuses.length !== 3) return { known: false, fullyIdle: false, errorCode: 'native_agent_state_incomplete' };
+  for (const name of countFields.values()) {
+    if (counts[name] !== undefined) continue;
+    if (!initial) return { known: false, fullyIdle: false, errorCode: 'native_agent_state_incomplete' };
+    counts[name] = 0;
+  }
+  // 2.31 publishes fully_idle from getActivitySnapshotLocked. That predicate
+  // includes the main run status, child activity and pending agent work. The
+  // removed queue/command aggregates cannot be reported as observed zeros.
+  return { known: true, fullyIdle: fullyIdle && statuses.every(value => value === 1) &&
+    !executionActive && Object.values(counts).every(value => value === 0), executionActive, ...counts };
+}
+
+function decodeAgentStateUpdate(buffer, { initial = false, nativeVersion = '2.29.0' } = {}) {
   if (typeof initial !== 'boolean') throw invalid();
+  if (!['2.28.2', '2.29.0', '2.31.0', '2.31.2'].includes(nativeVersion)) throw invalid();
   if (!Buffer.isBuffer(buffer) || buffer.length > MAX_MESSAGE_BYTES) throw invalid();
   let update;
   visitFields(buffer, (number, wire, value) => {
@@ -102,6 +140,7 @@ function decodeAgentStateUpdate(buffer, { initial = false } = {}) {
     update = value;
   });
   if (update === undefined) throw new ComponentError('native_agent_state_incomplete');
+  if (nativeVersion === '2.31.0' || nativeVersion === '2.31.2') return decodeExecutionStateUpdate(update, initial);
   let fullyIdle = false, hasActiveChildren = false;
   const seen = new Set(), counts = {};
   const countFields = new Map([[9, 'queuedSteps'], [12, 'backgroundCommands'], [17, 'backgroundTasks'], [20, 'pendingAgentMessages']]);
@@ -142,7 +181,7 @@ function endStreamError(buffer) {
   throw new ComponentError('native_agent_state_incomplete');
 }
 
-async function readInitialUpdate(reader, signal) {
+async function readInitialUpdate(reader, signal, nativeVersion) {
   let buffer = Buffer.alloc(0), totalBytes = 0;
   while (true) {
     if (signal.aborted) throw new ComponentError('native_agent_state_timeout');
@@ -154,7 +193,7 @@ async function readInitialUpdate(reader, signal) {
       if (buffer.length >= length + 5) {
         const message = buffer.subarray(5, length + 5);
         if (flags === 2) return endStreamError(message);
-        return decodeAgentStateUpdate(message, { initial: true });
+        return decodeAgentStateUpdate(message, { initial: true, nativeVersion });
       }
     }
     const result = await reader.read();
@@ -165,7 +204,7 @@ async function readInitialUpdate(reader, signal) {
   }
 }
 
-async function readAgentState({ fetchLocal, baseUrl, csrf, conversationId, signal, timeoutMs = 5000 }) {
+async function readAgentState({ fetchLocal, baseUrl, csrf, conversationId, signal, timeoutMs = 5000, nativeVersion = '2.29.0' }) {
   const origin = loopbackOrigin(baseUrl);
   if (typeof fetchLocal !== 'function') throw new ComponentError('native_request_failed');
   if (typeof csrf !== 'string' || csrf.length < 16 || /[\r\n]/.test(csrf)) throw new ComponentError('native_csrf_invalid');
@@ -185,7 +224,7 @@ async function readAgentState({ fetchLocal, baseUrl, csrf, conversationId, signa
     if (!response.ok || response.status !== 200 || response.redirected) throw new ComponentError('native_agent_state_failed');
     if (!/^application\/connect\+proto(?:;|$)/i.test(response.headers.get('content-type') || '') || !response.body?.getReader) throw invalid();
     reader = response.body.getReader();
-    return await readInitialUpdate(reader, controller.signal);
+    return await readInitialUpdate(reader, controller.signal, nativeVersion);
   } catch (error) {
     if (signal?.aborted) throw new ComponentError('switch_cancelled');
     return { known: false, fullyIdle: false, errorCode: timedOut ? 'native_agent_state_timeout' : error instanceof ComponentError ? error.code : 'native_agent_state_failed' };

@@ -9,8 +9,10 @@ import { extractNativeFrontend } from '../src/frontend-bindings.mjs';
 const { JSDOM } = createRequire(import.meta.url)('jsdom');
 const settle = () => new Promise(resolve => setTimeout(resolve, 25));
 
-function harness({ preference = 'off', initial = true, forceDisabled = false, reason = 'account_changed', mode = 'success', deferred, readFails = false } = {}) {
-  const dom = new JSDOM('<div role="dialog"><h2>Security Notice &amp; Data Use</h2><input type="checkbox"><button data-autofocus="true">Accept and continue</button></div>',
+function harness({ preference = 'off', initial = true, forceDisabled = false, reason = 'account_changed', mode = 'success', deferred, readFails = false, modern = false, termsFlow = 'backstop' } = {}) {
+  const dom = new JSDOM(modern
+    ? '<div role="dialog"><h2>One last thing before getting started…</h2><input type="checkbox"><button>Continue</button></div>'
+    : '<div role="dialog"><h2>Security Notice &amp; Data Use</h2><input type="checkbox"><button data-autofocus="true">Accept and continue</button></div>',
     { url: 'https://127.0.0.1:43123/', pretendToBeVisual: true });
   const { window } = dom, { document } = window;
   const dialog = document.querySelector('[role="dialog"]'), heading = document.querySelector('h2');
@@ -23,12 +25,20 @@ function harness({ preference = 'off', initial = true, forceDisabled = false, re
     const marker = { defaultTelemetryOnError:!0 };
     return [marker, 'POST_ONBOARDING_TERMS_SHOWN', 'POST_ONBOARDING_TERMS_ACCEPTED', 'Accept and continue'];
   }
+  function ModernContent({ onTelemetryChange }) {
+    return ['One last thing before getting started', 'Terms of Service & Data Use', 'Allow Google to collect and use your Interactions data', onTelemetryChange];
+  }
+  function ModernModal() {
+    const marker = { defaultTelemetryOnError:!0, terms_flow:'backstop' };
+    return [marker, 'POST_ONBOARDING_TERMS_SHOWN', 'POST_ONBOARDING_TERMS_ACCEPTED', "Continue"];
+  }
   const props = { embedded: true, telemetryEnabled: initial, onTelemetryChange() {},
     userDataCollectionForceDisabled: forceDisabled, gcpTos: false };
-  const owner = { type: NativeModal, key: 'synthetic@example.invalid:false', memoizedProps: {
+  const owner = { type: modern ? ModernModal : NativeModal, key: 'synthetic@example.invalid:false', memoizedProps: {
     isGcpTos: false, reason, onAccept() { accepts++; dialog.remove(); },
   } };
-  const content = { type: NativeContent, memoizedProps: props, return: owner };
+  if (modern) owner.memoizedProps.termsFlow = termsFlow;
+  const content = { type: modern ? ModernContent : NativeContent, memoizedProps: props, return: owner };
   heading.__reactFiber$synthetic = { memoizedProps: {}, return: content };
   const service = {
     getUserAccountSettings() { reads.push(true); if (readFails) throw Error('synthetic read failure'); return { telemetryEnabled: initial, marketingEmailsEnabled: false, userDataCollectionForceDisabled: false }; },
@@ -91,6 +101,21 @@ test('on uses the native account preference while manual leaves the popup unchan
       assert.equal(h.accepts(), preference === 'on' ? 1 : 0);
       assert.deepEqual(h.calls, preference === 'on' ? [{ telemetryEnabled: true, marketingEmailsEnabled: false }] : []);
       assert.equal(h.dialog.style.visibility, '');
+    } finally { h.close(); }
+  }
+});
+
+test('2.31 Continue dialogs preserve preference, account-change reason and recognized terms flow', async () => {
+  for (const options of [{}, { termsFlow: 'post_onboarding', preference: 'on' }, { preference: 'manual' },
+    { reason: 'no_prior_acceptance' }, { reason: 'tos_type_changed' }, { termsFlow: 'changed_contract' }, { mode: 'reject' }]) {
+    const h = harness({ modern: true, ...options });
+    try {
+      h.start(); await settle();
+      const accepted = !options.reason && !options.mode && options.termsFlow !== 'changed_contract' && options.preference !== 'manual';
+      assert.equal(h.accepts(), accepted ? 1 : 0);
+      assert.equal(h.dialog.style.visibility, '');
+      if (accepted) assert.equal(h.calls[0].telemetryEnabled, options.preference === 'on');
+      if (options.reason || options.termsFlow === 'changed_contract' || options.preference === 'manual') assert.deepEqual(h.calls, []);
     } finally { h.close(); }
   }
 });
@@ -222,7 +247,8 @@ test('the reviewed native frontend retains the exact modal and settings-hook con
 }, async () => {
   const source = extractNativeFrontend(await readFile(process.env.ANTIGRAVITY_LANGUAGE_SERVER));
   assert.match(source, /POST_ONBOARDING_TERMS_SHOWN/); assert.match(source, /POST_ONBOARDING_TERMS_ACCEPTED/);
-  assert.match(source, /reason:[\w$]+,onAccept:[\w$]+/); assert.match(source, /defaultTelemetryOnError:!0/);
+  assert(source.match(/reason:[\w$]+,(?:termsFlow:[\w$]+,)?onAccept:[\w$]+/), 'The native account-change modal retains bounded reason and acceptance props');
+  assert(source.includes('defaultTelemetryOnError:!0'));
   const hooks = [...source.matchAll(/(?:[$\w]+)=\(0,[$\w]+\.useRef\)\(0\),(?:[$\w]+)=\(0,[$\w]+\.useRef\)\(0\),(?:[$\w]+)=\(0,[$\w]+\.useRef\)\(0\),(?:[$\w]+)=\(0,[$\w]+\.useRef\)\(0\),(?:[$\w]+)=\(0,[$\w]+\.useRef\)\(0\),(?:[$\w]+)=\(0,[$\w]+\.useCallback\)\(async\(\)=>/g)];
   assert.equal(hooks.filter(match => source.slice(match.index, match.index + 2200).includes('.setUserAccountSettings(')).length, 1);
 });
@@ -231,16 +257,17 @@ test('actual native settings hooks save off while preserving mail, and native fa
   skip: !process.env.ANTIGRAVITY_LANGUAGE_SERVER,
 }, async () => {
   const source = extractNativeFrontend(await readFile(process.env.ANTIGRAVITY_LANGUAGE_SERVER));
-  const expression = (pattern, boundary) => {
+  const expression = (pattern, boundaries) => {
     const matches = [...source.matchAll(pattern)]; assert.equal(matches.length, 1);
-    const start = matches[0].index, end = source.indexOf(boundary, start);
+    const start = matches[0].index;
+    const end = Math.min(...boundaries.map(boundary => source.indexOf(boundary, start)).filter(index => index > start));
     assert(end > start); return source.slice(source.indexOf('=', start) + 1, end + 1);
   };
-  const hookSource = expression(/var ([$\w]+)=\(a=\{\}\)=>\{var \{autoFetch:/g, '};var ');
-  const contentSource = expression(/var ([$\w]+)=\(\{productName:a,telemetryEnabled:b,onTelemetryChange:c/g, '};var ');
-  const modalSource = expression(/const ([$\w]+)=\(\{isGcpTos:a,reason:b,onAccept:c\}\)=>/g, '};const ');
+  const hookSource = expression(/var ([$\w]+)=\(a=\{\}\)=>\{var \{autoFetch:/g, ['};var ']);
+  const contentSource = expression(/var ([$\w]+)=\(\{productName:a,telemetryEnabled:b,onTelemetryChange:c/g, ['};var ', '};\nconst ']);
+  const modalSource = expression(/const ([$\w]+)=\(\{isGcpTos:a,reason:b,(?:onAccept:c|termsFlow:c,onAccept:d)\}\)=>/g, ['};const ']);
   for (const failure of [false, true]) {
-    const h = harness();
+    const h = harness({ modern: modalSource.includes('termsFlow:') });
     try {
       const hooks = [], effects = [], requests = [], actions = [];
       const service = {
@@ -268,7 +295,12 @@ test('actual native settings hooks save off while preserving mail, and native fa
         hk: getSettings, D: { UserStatusSchema: {} }, lu: identity, mqb() {}, Ng: {},
         Al: () => service, ll: getStatus, gt: {}, kl: getDispatch, Vb: construct, sh: {}, Qv: getErrorHandler,
         Fj: getSettings, B: { UserStatusSchema: {} }, ft: identity, Kdb() {}, xg: {},
+        Bk: () => service, ok: getStatus, Yq: {}, nk: getDispatch, Wb: construct, fha: {}, St: getErrorHandler,
+        gj: getSettings, E: { UserStatusSchema: {} }, Xq: identity, WDb() {}, rg: {},
       };
+      if (modalSource.includes('termsFlow:')) {
+        context.B = React;
+      }
       const nativeHook = vm.runInNewContext(`(${hookSource})`, context);
       nativeHook({ defaultTelemetryOnError: true }); effects.forEach(fn => fn());
       await settle();

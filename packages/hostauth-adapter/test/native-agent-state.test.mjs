@@ -92,6 +92,45 @@ test('duplicate, wrong-wire, invalid boolean and truncated protobuf values fail 
   ]) assert.throws(() => decodeAgentStateUpdate(raw), { code: 'native_agent_state_invalid' });
 });
 
+for (const nativeVersion of ['2.31.0', '2.31.2']) {
+test(`${nativeVersion} uses published run states and execution status with its remaining aggregate counts`, () => {
+  const current = ({ status = 1, executable = 1, executor = 1, execution, tasks = 0, messages = 0 } = {}) => bytes(1, Buffer.concat([
+    scalar(3, status), scalar(4, executable), scalar(5, executor), scalar(18, 1),
+    bytes(17, scalar(3, tasks)), bytes(20, scalar(3, messages)),
+    ...(execution === undefined ? [] : [bytes(25, execution)]),
+  ]));
+  const decode = buffer => decodeAgentStateUpdate(buffer, { nativeVersion, initial: true });
+  assert.deepEqual(decode(current()), { known: true, fullyIdle: true, executionActive: false, backgroundTasks: 0, pendingAgentMessages: 0 });
+  for (const change of [{ status: 2 }, { executable: 3 }, { executor: 4 }, { tasks: 1 }, { messages: 1 },
+    { execution: bytes(1, Buffer.from('DO_NOT_READ_INITIALIZATION')) },
+    { execution: bytes(2, scalar(1, 2)) }, { execution: bytes(100, Buffer.alloc(0)) }, { execution: Buffer.alloc(0) }]) {
+    const result = decode(current(change));
+    assert.equal(result.known, true);
+    assert.equal(result.fullyIdle, false);
+    assert.equal(JSON.stringify(result).includes('DO_NOT_READ'), false);
+  }
+  // Removed queue/command/child fields are never invented in a 2.31 result.
+  assert.equal('queuedSteps' in decode(current()), false);
+  assert.equal('backgroundCommands' in decode(current()), false);
+  assert.equal('hasActiveChildren' in decode(current()), false);
+  assert.throws(() => decode(current({ executor: 9 })), { code: 'native_agent_state_invalid' });
+  assert.throws(() => decodeAgentStateUpdate(current(), { nativeVersion: 'future' }), { code: 'native_agent_state_invalid' });
+  const sparse = bytes(1, Buffer.concat([scalar(3, 1), scalar(4, 1), scalar(5, 1), scalar(18, 1)]));
+  assert.equal(decode(sparse).fullyIdle, true);
+  assert.equal(decodeAgentStateUpdate(sparse, { nativeVersion }).known, false);
+  assert.equal(decode(bytes(1, scalar(18, 1))).known, false);
+  assert.throws(() => decode(bytes(1, Buffer.concat([scalar(3, 1), scalar(4, 1), scalar(5, 1), scalar(25, 0)]))), { code: 'native_agent_state_invalid' });
+});
+
+test(`${nativeVersion} stream reads apply the pinned native protocol instead of legacy omitted counters`, async () => {
+  const update = bytes(1, Buffer.concat([scalar(3, 1), scalar(4, 1), scalar(5, 1), scalar(18, 1), bytes(25, bytes(2, scalar(1, 1)))]));
+  const result = await readAgentState({ ...options, nativeVersion, fetchLocal: async () => stream([connectEnvelope(update)]) });
+  assert.equal(result.known, true);
+  assert.equal(result.fullyIdle, false);
+  assert.equal(result.executionActive, true);
+});
+}
+
 test('request uses Connect streaming envelope, explicit zero pages and disables native history rehydration', () => {
   const actual = encodeAgentStateRequest('native-id', 'owned-observer');
   const expectedMessage = Buffer.concat([

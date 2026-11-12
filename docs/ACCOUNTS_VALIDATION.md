@@ -1,6 +1,38 @@
-# Accounts 0.4.0-preview.11: validation scope
+# Accounts 0.4.0-preview.14 validation scope
+
+## Preview.14 update recovery changes — 12 November 2026
+
+Unsupported adaptations can now return a native-login choice when the current official EXE, ASAR, unpacked content and language-service PE image are complete and contain no Accounts hooks. The EXE version must match the ASAR version. The selected identity can differ from the saved independent Accounts identity, so launch asks for confirmation and rechecks the program identities while retaining the installation mutex. Declining confirmation leaves the application closed. Account authorizations, provider enablement and the existing installation receipt are retained so a later compatible package can repair the update.
+
+Local tests use synthetic program images and account-state placeholders. They cover unsupported complete updates, partial replacements, corrupt or missing files, known adapted native programs, obsolete localization records, localized native archives, changed files while the prompt is open, an active updater, cancellation and later repair. The manual CMD now uses the same recovery-and-launch entry point and forwards registered Chinese installations to their existing guarded launcher. These checks do not establish the behavior of every future official binary or a real-account identity change during fallback. Unknown language-service binaries have no reliable product-version field, so structural completeness and change checks cannot prove their semantic compatibility with an unknown frontend.
+
+The final complete local Node suites passed 259 checks without skips using separate original 2.31.2 program inputs, including the updater change that continues official installation but disables automatic direct-EXE restart when handoff preparation fails. The component passed its 44 synthetic checks. Windows helper cases use controlled installer and sidecar processes. No real official update, saved-account switch or model generation was performed for these recovery changes.
+
+The final preview.14 package was installed on the existing Antigravity 2.31.2 application. Startup through the registered Chinese launcher, native account groups and the management panel were observed, with both saved accounts present and the default data-use option unchecked. This installed-client check made zero account switches and zero model submissions. It does not establish a live identity change in native fallback mode or the behavior of a real official installer.
+
+Chinese localization uses a separately maintained external toolkit. The Accounts release does not include that toolkit. Its guarded startup path needs an updated launcher that supports preview.14 native-login confirmation. An older Chinese launcher can continue to refuse an unsupported update. The current local launcher was updated and checked, but the Chinese toolkit has not been published separately from this workspace.
 
 This document distinguishes installed-client observations from checks with synthetic accounts, controlled processes and official program copies. The 7 November development-package check predates the final preview.11 visual changes. Earlier preview.10 and preview.8 results retain their original scope.
+
+## Preview.13 local compatibility work — 12 November 2026
+
+Antigravity 2.31.2 retains the seven complete host scripts and four RPC dependency versions used by 2.31.0. Matching source contracts now select the reviewed application version before considering an unchanged-source fallback, so the identical 2.31.0 and 2.31.2 JavaScript sources still pair with their own native programs.
+
+The native review compared the diagnostics route registration, project-cache Get/forceRefresh, CodeAssist construction, HostAuth methods, public OAuth configuration and agent-state update functions. Their normalized instructions and function sizes match 2.31.0 after address relocation. Public OAuth configuration digests, the activity messages and the native fully-idle predicates also match. The native programs are accepted through their complete version-specific image digests and original instruction bytes.
+
+The existing frontend resolver accepts the recompiled native bindings. The complete Node suites passed 239 checks without skips using separate original 2.31.2 program inputs, including account management, model menus, native settings hooks, version pairing and new/previous activity decoding. The component Release build passed 44 synthetic checks with zero real authentication or model requests.
+
+Isolated copies of the 2.31.2 native program returned the goroutine route while rejecting the remaining diagnostics routes. A local empty conversation produced a known, fully-idle initial activity state through both the stream reader and the normal activity adapter. A synthetic HostAuth A-to-B change made the next model-list metadata request use the B token and B project. These processes used temporary home/app-data directories, loopback replacements for configured endpoints and a rejecting proxy, with zero model-generation requests and no denied proxy hosts. This setup did not use OS-level network isolation. These results do not establish a live-account switch or model generation on 2.31.2. Preview.13 was a local build and was not released separately.
+
+## Preview.12 local compatibility work — 11 November 2026
+
+This local build adds the reviewed Antigravity 2.31.0 source combination and native program while retaining 2.29.0 and 2.28.2. The reviewed main-process changes preserve the existing HostAuth startup, restart, updater and shutdown insertion points. RPC source files, dependencies and language-server launcher source match 2.29.0.
+
+The 2.31 native activity stream removes queued-step, background-command and active-child fields and adds execution status. The new reader uses the known native program version, requires all three execution statuses to be idle, the native fully-idle predicate to be true, and background tasks and pending messages to be empty. Any execution-status message, unknown status or incomplete read keeps switching blocked. Old native versions retain their existing aggregate decoding.
+
+The revised data-use modal is recognized through its native component, account-change reason, known terms-flow value and settings hooks. Checks execute the extracted 2.31 native settings hook with synthetic settings, verify that unchecked telemetry is saved while the marketing choice is preserved, and verify that failed saves leave the modal available. Synthetic cases also cover manual policy, first use, changed terms and unknown flows. The native model-menu identifiers and extracted frontend bindings remain supported.
+
+The component Release build and its 44 checks passed with synthetic accounts and zero real authentication or model requests. The initial full Node suites passed 232 checks without skips. After adding a normal-entry execution-status regression, the final suites passed 233 checks without skips against separate original 2.31.0 program inputs. The local ZIP's validation record was written after the initial run. Isolated native processes use temporary user directories, loopback endpoints and synthetic tokens. They confirm the project metadata refresh, the restricted goroutine route and the initial 2.31 activity stream. These checks do not establish a live-account switch, quota charging or model generation on 2.31.0. Preview.12 was a local build and was not released separately.
 
 ## Preview.11 changes and verification boundaries — 7 November 2026
 
@@ -60,7 +92,7 @@ An earlier account returned `Verify your account to continue.` during quota conf
 | --- | --- | --- |
 | Account component | Primary/secondary relationships, local deletion, transaction generations, cancellation, DPAPI storage, stdio handling and renewal races with controlled OAuth implementations | Does not verify Google's actual token-renewal behavior |
 | Model menu and frontend | Grouping, original model/usage controls, keyboard focus, scrolling, input methods, listener cleanup and model preservation using native frontend code and synthetic state | Does not establish real generation or charging |
-| Native adaptation | Reviewed 2.29.0 and 2.28.2 programs; diagnostic-route and project-refresh changes; rejection of unknown checked-source/native changes | No guarantee for an unknown future program |
+| Native adaptation | Reviewed 2.31.2, 2.31.0, 2.29.0 and 2.28.2 programs, diagnostic-route and project-refresh changes, rejection of unknown checked-source/native changes | No guarantee for an unknown future program |
 | Installation and restoration | Program-copy apply/restore, refusal to overwrite updated programs, independent repair cache and shared account-state-directory selection | Controlled directories do not establish a future updater's behavior |
 | Update handoff | External PowerShell process waited for controlled app/installer processes and changing files, then invoked the repair/start entry | No actual NSIS upgrade was performed |
 | Update repair | Replacing installed files with reviewed same-version official files was followed by cached Accounts repair and reapplication of Chinese localization | Same-version replacement, not an unknown-version update |

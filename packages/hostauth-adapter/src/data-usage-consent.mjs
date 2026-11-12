@@ -7,7 +7,7 @@ export function installDataUsageConsent({ document, window, preference = 'off' }
   if (!allowed(preference)) return null;
   if (window[key]) { window[key].setPreference(preference); return window[key]; }
   const excluded = 'pre,code,textarea,[contenteditable],[data-message-role],[data-message-id],.markdown,.prose,[data-user-content],iframe,[hidden],[aria-hidden="true"],[data-antigravity-accounts-menu]';
-  const titles = new Set(['Security Notice & Data Use', 'Terms of Service & Data Use']);
+  const titles = new Set(['Security Notice & Data Use', 'Terms of Service & Data Use', 'One last thing before getting started…']);
   const attempts = new WeakMap(), hidden = new Map();
   let stopped = false, queued = false, revision = 0;
   const sourceOf = value => typeof value === 'function' ? Function.prototype.toString.call(value) : '';
@@ -83,8 +83,6 @@ export function installDataUsageConsent({ document, window, preference = 'off' }
     if (!heading.isConnected || heading.closest(excluded) || !titles.has(heading.textContent.trim())) return undefined;
     const dialog = heading.closest('[role="dialog"]');
     if (!dialog || dialog.closest(excluded) || dialog.querySelectorAll('h2').length !== 1) return undefined;
-    const accept = [...dialog.querySelectorAll('button[data-autofocus="true"]')];
-    if (accept.length !== 1 || accept[0].textContent.trim() !== 'Accept and continue' || accept[0].disabled) return undefined;
     let fiber = currentFiber(heading), content, owner;
     const visited = new Set();
     while (fiber && !visited.has(fiber) && visited.size < 128) {
@@ -92,16 +90,23 @@ export function installDataUsageConsent({ document, window, preference = 'off' }
       const props = fiber.memoizedProps, source = sourceOf(fiber.type);
       if (!content && props?.embedded === true && typeof props.telemetryEnabled === 'boolean' &&
           typeof props.onTelemetryChange === 'function' && typeof props.userDataCollectionForceDisabled === 'boolean' &&
-          typeof props.gcpTos === 'boolean' && source.includes('Security Notice & Data Use') &&
-          source.includes('Terms of Service & Data Use') && source.includes('onTelemetryChange') &&
-          source.includes('by allowing Google to collect and use my Interactions data')) content = fiber;
+          typeof props.gcpTos === 'boolean' && source.includes('Terms of Service & Data Use') &&
+          source.includes('onTelemetryChange') &&
+          (source.includes('Security Notice & Data Use') && source.includes('by allowing Google to collect and use my Interactions data') ||
+           source.includes('One last thing before getting started') && source.includes('Allow Google to collect and use your Interactions data'))) content = fiber;
       if (content && typeof props?.isGcpTos === 'boolean' && props.reason === 'account_changed' &&
           typeof props.onAccept === 'function' && typeof fiber.key === 'string' &&
           source.includes('POST_ONBOARDING_TERMS_SHOWN') && source.includes('POST_ONBOARDING_TERMS_ACCEPTED') &&
-          source.includes('defaultTelemetryOnError:!0') && source.includes('Accept and continue')) { owner = fiber; break; }
+          source.includes('defaultTelemetryOnError:!0') &&
+          (source.includes('Accept and continue') || source.includes('terms_flow:') && source.includes('"Continue"'))) { owner = fiber; break; }
       fiber = fiber.return;
     }
     if (!content || !owner || content.memoizedProps.gcpTos !== owner.memoizedProps.isGcpTos) return undefined;
+    const modernTerms = Object.prototype.hasOwnProperty.call(owner.memoizedProps, 'termsFlow');
+    if (modernTerms && !['post_onboarding', 'backstop'].includes(owner.memoizedProps.termsFlow)) return undefined;
+    const accept = [...dialog.querySelectorAll(modernTerms ? 'button' : 'button[data-autofocus="true"]')]
+      .filter(button => button.textContent.trim() === (modernTerms ? 'Continue' : 'Accept and continue'));
+    if (accept.length !== 1 || accept[0].disabled) return undefined;
     const callbacks = [], hooks = new Set(), ordered = [];
     for (let hook = owner.memoizedState; hook && !hooks.has(hook) && hooks.size < 192; hook = hook.next) {
       hooks.add(hook); ordered.push(hook);

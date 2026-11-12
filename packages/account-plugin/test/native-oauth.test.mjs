@@ -33,7 +33,9 @@ for (const reviewed of [
   { version: '2.27.0', directory: 'original-program-fixture-2.27.0', code: 0x141fb02e0n, id: 0x1435a677en, secret: 0x14351367bn },
   { version: '2.28.1', directory: 'original-program-fixture-2.28.1', code: 0x1420a14e0n, id: 0x1436c1ed0n, secret: 0x14362d883n },
   { version: '2.28.2', directory: 'original-program-fixture-2.28.2', code: 0x1420a14e0n, id: 0x1436c1ed0n, secret: 0x14362d883n },
-  { version: '2.29.0', program: process.env.ANTIGRAVITY_LANGUAGE_SERVER || `${process.env.LOCALAPPDATA}/Programs/antigravity/resources/bin/language_server.exe`, code: 0x1420f77c0n, id: 0x1437f90ecn, secret: 0x143761911n },
+  { version: '2.29.0', directory: 'original-program-fixture-2.29.0', code: 0x1420f77c0n, id: 0x1437f90ecn, secret: 0x143761911n },
+  { version: '2.31.0', directory: 'original-program-fixture-2.31.0', code: 0x1422fbfa0n, id: 0x143aed556n, secret: 0x143a5071fn },
+  { version: '2.31.2', program: process.env.ANTIGRAVITY_LANGUAGE_SERVER || `${process.env.LOCALAPPDATA}/Programs/antigravity/resources/bin/language_server.exe`, code: 0x1422fe560n, id: 0x143aef5b3n, secret: 0x143a52850n },
 ]) {
   const programPath = reviewed.program || fileURLToPath(new URL(`../../../artifacts/accounts/${reviewed.directory}/resources/bin/language_server.exe`, import.meta.url));
   let hasProgram = false;

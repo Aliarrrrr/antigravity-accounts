@@ -64,10 +64,12 @@ async function prepareHandoff({ autoUpdater, resourcesPath, localAppData, appPid
   if (inside(packageRoot, installRoot) || samePath(packageRoot, installRoot)) fail('update_handoff_cache_invalid');
   const helper = path.join(packageRoot, 'account-plugin', 'Update-Handoff.ps1');
   const recovery = path.join(packageRoot, 'account-plugin', 'recovery-and-launch.mjs');
-  await regular(helper); await regular(recovery);
+  const directoryReader = path.join(packageRoot, 'account-plugin', 'Process-WorkingDirectory.ps1');
+  await regular(helper); await regular(recovery); await regular(directoryReader);
   const cacheManifest = JSON.parse(await fs.readFile(path.join(packageRoot, 'package-manifest.json'), 'utf8'));
   if (cacheManifest.role !== 'accounts-recovery-package' || !Array.isArray(cacheManifest.files)) fail('update_handoff_cache_invalid');
-  for (const [relative, filename] of [['account-plugin/Update-Handoff.ps1', helper], ['account-plugin/recovery-and-launch.mjs', recovery]]) {
+  for (const [relative, filename] of [['account-plugin/Update-Handoff.ps1', helper], ['account-plugin/recovery-and-launch.mjs', recovery],
+    ['account-plugin/Process-WorkingDirectory.ps1', directoryReader]]) {
     const listed = cacheManifest.files.filter(item => item.path === relative);
     if (listed.length !== 1 || listed[0].sha256 !== await fileDigest(filename)) fail('update_handoff_cache_invalid');
   }
@@ -124,7 +126,7 @@ async function prepareHandoff({ autoUpdater, resourcesPath, localAppData, appPid
 }
 
 // Keep the native updater's installation UI choice. Only automatic direct-EXE
-// relaunch is suppressed after an external repair/relaunch helper acknowledged.
+// relaunch is suppressed both for a guarded restart and an unavailable helper.
 function install({ electron, autoUpdater, resourcesPath = process.resourcesPath,
   localAppData = process.env.LOCALAPPDATA, systemRoot = process.env.SystemRoot,
   appPid = process.pid, platform = process.platform, prepare = prepareHandoff, onFailure } = {}) {
@@ -132,26 +134,46 @@ function install({ electron, autoUpdater, resourcesPath = process.resourcesPath,
   if (installations.has(autoUpdater)) return installations.get(autoUpdater);
   const original = autoUpdater.quitAndInstall;
   let pending, stopped = false;
-  const notify = error => {
+  const notify = (error, nativeUpdateContinues = false) => {
     const code = /^update_handoff_[a-z_]+$/.test(error?.code || '') ? error.code : 'update_handoff_failed';
-    if (onFailure) { onFailure(code); return; }
-    const failure = new Error('Accounts update restart could not be prepared (' + code + '). The update was not started.');
+    if (onFailure) {
+      try { onFailure(code, { nativeUpdateContinues }); } catch { /* Notification failure must not stop the native updater. */ }
+      return;
+    }
+    const message = nativeUpdateContinues
+      ? 'Automatic Accounts repair and restart could not be prepared (' + code + '). Antigravity will finish its normal update and remain closed. After installation, use your existing Chinese shortcut to confirm the account for native sign-in.'
+      : 'Accounts update restart failed (' + code + ').';
+    const failure = new Error(message);
     try { autoUpdater.emit?.('error', failure); } catch { /* Keep failures contained in native menu callers. */ }
     try { electron?.dialog?.showErrorBox('Antigravity Accounts', failure.message); } catch { /* Native notification is best-effort. */ }
   };
   autoUpdater.quitAndInstall = function (isSilent = false) {
     if (stopped || pending || autoUpdater.quitAndInstallCalled) return;
     if (typeof isSilent !== 'boolean') { notify({ code: 'update_handoff_arguments_invalid' }); return; }
+    const nativeContext = this, nativeArguments = Array.from(arguments);
     pending = (async () => {
       let handoff;
       try {
-        handoff = await prepare({ autoUpdater, resourcesPath, localAppData, appPid, systemRoot });
+        try { handoff = await prepare({ autoUpdater, resourcesPath, localAppData, appPid, systemRoot }); }
+        catch (error) {
+          if (stopped) return;
+          notify(error, true);
+          const previous = nativeContext.autoRunAppAfterInstall;
+          try {
+            // The update still proceeds, while the guarded shortcut owns the
+            // account choice after an unavailable repair/relaunch handoff.
+            nativeContext.autoRunAppAfterInstall = false;
+            original.apply(nativeContext, [isSilent, false, ...nativeArguments.slice(2)]);
+            if (nativeContext.quitAndInstallCalled === false) fail('update_handoff_install_rejected');
+          } finally { nativeContext.autoRunAppAfterInstall = previous; }
+          return;
+        }
         if (stopped) { handoff.cancel(); return; }
         const previous = autoUpdater.autoRunAppAfterInstall;
         try {
           autoUpdater.autoRunAppAfterInstall = false;
-          original.call(autoUpdater, isSilent, false);
-          if (autoUpdater.quitAndInstallCalled === false) fail('update_handoff_install_rejected');
+          original.call(nativeContext, isSilent, false);
+          if (nativeContext.quitAndInstallCalled === false) fail('update_handoff_install_rejected');
         } finally { autoUpdater.autoRunAppAfterInstall = previous; }
       } catch (error) { handoff?.cancel(); notify(error); }
     })().finally(() => { pending = undefined; });

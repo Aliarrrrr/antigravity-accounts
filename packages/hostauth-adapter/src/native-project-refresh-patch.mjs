@@ -6,9 +6,9 @@ import {
 } from './native-diagnostics-patch.mjs';
 
 export { ORIGINAL_NATIVE_SHA256, DIAGNOSTICS_NATIVE_SHA256 };
-export const PROJECT_REFRESH_VERSION = '2.29.0';
-export const PROJECT_REFRESH_NATIVE_SHA256 = '3269e7df7f3b34aba7b087c6ea8055163c4ace072c72ed376314775439b7453c';
-export const PROVIDER_NATIVE_SHA256 = '9a58d7ec73af4da1f60b9682d6632ed54a9f62dd2752372c8f53f8cbe116eb85';
+export const PROJECT_REFRESH_VERSION = '2.31.2';
+export const PROJECT_REFRESH_NATIVE_SHA256 = '33bad001301bf863bb7108e77667aaf24c649981335f5d220656c75e59818508';
+export const PROVIDER_NATIVE_SHA256 = 'ff323094c41c50508bd4b9d8cc66230c36d2c245df68a0216010603725aa866c';
 
 // The existing getCAICProject call reads a cached LoadCodeAssist response before
 // its caller obtains the current HTTP client/token. An account change can then
@@ -17,11 +17,19 @@ export const PROVIDER_NATIVE_SHA256 = '9a58d7ec73af4da1f60b9682d6632ed54a9f62dd2
 // Both methods take (cache, dictionary, context) and return (response, error).
 // forceRefresh returns its fetched response; it does not reload the cache after
 // fetching. No code, stack frames, auth provider, or cache layout is inserted.
-// Both reviewed callers load CodeAssistClient+0x50. In 2.29 the cache internals
-// changed (failure backoff and member offsets); its exact native forceRefresh
-// implementation was reviewed separately instead of assuming a relocation.
+// The reviewed callers load CodeAssistClient+0x50. The 2.31 cache adds member
+// storage and moves its fetcher to +0x40. Its forceRefresh still passes the
+// same cache, dictionary and context, returning the fetched response and error.
 export const PROJECT_REFRESH_PROFILES = Object.freeze([
   Object.freeze({ version: PROJECT_REFRESH_VERSION, projectSha256: PROJECT_REFRESH_NATIVE_SHA256, providerSha256: PROVIDER_NATIVE_SHA256,
+    address: 0x14231e533n, originalTarget: 0x142333de0n, refreshedTarget: 0x142334340n, dictionaryAddress: 0x14429f1c0n,
+    before: 'e8a8580100', after: 'e8085e0100' }),
+  Object.freeze({ version: '2.31.0', projectSha256: '39b06d761fbfa7f83090b7531b1e64c062150ba366cd97233ffc86bee3352677',
+    providerSha256: 'ff0bfbb49bd798cd07d6add6f7eda235605285fa5ac25731f86d26e30ca7ff6e',
+    address: 0x14231bf73n, originalTarget: 0x142331560n, refreshedTarget: 0x142331ac0n, dictionaryAddress: 0x14429d1c0n,
+    before: 'e8e8550100', after: 'e8485b0100' }),
+  Object.freeze({ version: '2.29.0', projectSha256: '3269e7df7f3b34aba7b087c6ea8055163c4ace072c72ed376314775439b7453c',
+    providerSha256: '9a58d7ec73af4da1f60b9682d6632ed54a9f62dd2752372c8f53f8cbe116eb85',
     address: 0x142114b73n, originalTarget: 0x142128540n, refreshedTarget: 0x1421289e0n, dictionaryAddress: 0x143ece9e0n,
     before: 'e8c8390100', after: 'e8683e0100' }),
   Object.freeze({ version: '2.28.2', projectSha256: 'd728fa9d5ce8eb69a32acbb3b820d25b1c8df901d1cee435c2c2c13963f2871b',

@@ -1,14 +1,14 @@
-# Antigravity 2.29 / 2.28.2 HostAuth adapter
+# Antigravity 2.31 / 2.29 / 2.28.2 HostAuth adapter
 
 Version-bound Electron adaptation for the Accounts plugin. The original LS
 contacts Google directly; original Google Authorization headers and official
 saved credentials never pass through the plugin. The HostBridge uses a fresh
 local capability and supplies only independently added accounts.
 
-`patch-plan.mjs` accepts complete inspected 2.29 / 2.28.2 source contracts and RPC
+`patch-plan.mjs` accepts complete inspected 2.31 / 2.29 / 2.28.2 source contracts and RPC
 dependencies, including a changed package version with unchanged contract files.
 It preserves async shell-environment prefetch and Webview PAC initialization.
-`native-diagnostics-patch.mjs` accepts the two inspected exact LS
+`native-diagnostics-patch.mjs` accepts the three inspected exact LS
 image and changes four instruction regions to register only
 `/debug/pprof/goroutine`. It does not enable dev mode or other pprof routes.
 Unknown source/native changes are rejected before installation. Frontend bindings

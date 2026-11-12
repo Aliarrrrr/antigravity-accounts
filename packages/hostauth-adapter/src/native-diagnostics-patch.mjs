@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 
-export const NATIVE_DIAGNOSTICS_VERSION = '2.29.0';
-export const ORIGINAL_NATIVE_SHA256 = 'c98e7c331da5bcc37002a550e7d625b4c636f775fa2804f73777c6a500e1c3d5';
+export const NATIVE_DIAGNOSTICS_VERSION = '2.31.2';
+export const ORIGINAL_NATIVE_SHA256 = 'e40f0447109c43ece15e7025ca0864a138e0e16cb8864d4ccf64a00512a99e1a';
 // The complete patched digest is checked as well as the original image and
 // individual instruction bytes. There is no version-guessing fallback.
-export const PATCHED_NATIVE_SHA256 = '169355a713b8199f6fe91dd5eaf81bc7f366544b2808014425fc820ccdd04bfc';
+export const PATCHED_NATIVE_SHA256 = 'b02168614d75b680cd8b0814b0d01bf91c66f5e310ff8d772516b920c8813b5f';
 
 const route = '/debug/pprof/goroutine';
 const previousChanges = Object.freeze([
@@ -20,6 +20,22 @@ const previousChanges = Object.freeze([
 ]);
 export const NATIVE_DIAGNOSTICS_PROFILES = Object.freeze([
   Object.freeze({ version: NATIVE_DIAGNOSTICS_VERSION, originalSha256: ORIGINAL_NATIVE_SHA256, patchedSha256: PATCHED_NATIVE_SHA256,
+    routeAddress: 0x1439c02aan, changes: Object.freeze([
+      { address: 0x14339a7e2n, before: '0f84d4000000', after: 'e93500000090', purpose: 'goroutine-only route entry' },
+      { address: 0x14339a824n, before: '488d1dd0265800', after: '488d1d7f5a6200', purpose: 'exact goroutine route literal' },
+      { address: 0x14339a82bn, before: 'b90d000000', after: 'b916000000', purpose: 'goroutine route length' },
+      { address: 0x14339a83cn, before: '488b8424d8010000', after: 'e97b000000909090', purpose: 'skip all remaining debug routes' },
+    ]) }),
+  Object.freeze({ version: '2.31.0', originalSha256: '77b76711786bd78b51a6879fa57e66f9f5d398ac5d369cf8b5b3e2fb5cfc741b',
+    patchedSha256: '0bdb872c8092002dafdf8ef44f1b3da77c2b71ef09eaec47ea169911766b2a2b',
+    routeAddress: 0x1439be1f7n, changes: Object.freeze([
+      { address: 0x143397f62n, before: '0f84d4000000', after: 'e93500000090', purpose: 'goroutine-only route entry' },
+      { address: 0x143397fa4n, before: '488d1d302f5800', after: '488d1d4c626200', purpose: 'exact goroutine route literal' },
+      { address: 0x143397fabn, before: 'b90d000000', after: 'b916000000', purpose: 'goroutine route length' },
+      { address: 0x143397fbcn, before: '488b8424d8010000', after: 'e97b000000909090', purpose: 'skip all remaining debug routes' },
+    ]) }),
+  Object.freeze({ version: '2.29.0', originalSha256: 'c98e7c331da5bcc37002a550e7d625b4c636f775fa2804f73777c6a500e1c3d5',
+    patchedSha256: '169355a713b8199f6fe91dd5eaf81bc7f366544b2808014425fc820ccdd04bfc',
     routeAddress: 0x1436d189cn, changes: Object.freeze([
       { address: 0x1430ba6d7n, before: '0f84d4000000', after: 'e93500000090', purpose: 'goroutine-only route entry' },
       { address: 0x1430ba719n, before: '488d1d485b5700', after: '488d1d7c716100', purpose: 'exact goroutine route literal' },

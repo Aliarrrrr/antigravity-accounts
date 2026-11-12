@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import os from 'node:os';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { assertApplicationStopped, verifiedNodeSidecarIds } from '../src/process-guard.mjs';
 
@@ -56,6 +58,63 @@ test('launcher allows Windows executable path casing but keeps the wrapper comma
   ]) assert.deepEqual(check(wrapper(third)), []);
   assert.deepEqual(check(wrapper('"' + executable + '" %*').replace('@echo off', '@ECHO OFF')), []);
   assert.deepEqual(check(wrapper('"' + executable + '" %*').replace('set ELECTRON_RUN_AS_NODE=1', 'SET ELECTRON_RUN_AS_NODE=1')), []);
+});
+
+test('SwarmBoard main entry is exempt only in its exact external directory with an ordinary entry file', async t => {
+  const temporary = await realpath(os.tmpdir());
+  const base = await mkdtemp(path.join(temporary, 'accounts-sidecar-test-'));
+  t.after(async () => {
+    const actual = await realpath(base);
+    assert.equal(path.dirname(actual), temporary);
+    assert.match(path.basename(actual), /^accounts-sidecar-test-/);
+    await rm(actual, { recursive: true });
+  });
+  const options = { installRoot: path.join(base, 'app'), roamingRoot: path.join(base, 'roaming'), userRoot: path.join(base, 'user'), systemRoot: path.join(base, 'Windows') };
+  const executable = path.join(options.installRoot, 'Antigravity.exe');
+  const cmd = path.join(options.systemRoot, 'System32', 'cmd.exe');
+  const shim = path.join(options.roamingRoot, 'Antigravity', 'bin', 'agy-node.cmd');
+  const directory = path.join(options.userRoot, '.gemini/antigravity/builtin/plugins/swarm/sidecars/swarm_board');
+  const entryFile = path.join(directory, 'main.mjs');
+  const prefix = '--import=' + pathToFileURL(path.join(options.userRoot, '.gemini/antigravity/lib/node_modules/sidecar_sdk/register_loader.js')).href + ' ';
+  const shimText = '@echo off\r\nset ELECTRON_RUN_AS_NODE=1\r\n"' + executable + '" %*\r\n';
+  const parent = { ProcessId: 201, ExecutablePath: cmd, CommandLine: cmd + ' /c ""' + shim + '" ' + prefix + 'main.mjs"' };
+  const child = { ProcessId: 101, ParentProcessId: 201, ExecutablePath: executable, CommandLine: '"' + executable + '" ' + prefix + 'main.mjs', CurrentDirectory: directory };
+  const check = (processes = [parent, child], wrapper = shimText) => verifiedNodeSidecarIds({ ...options, processes, shimText: wrapper });
+  await mkdir(directory, { recursive: true });
+  assert.deepEqual(check(), [], 'A missing main entry remains busy');
+  await writeFile(entryFile, 'export {};');
+  assert.deepEqual(check(), [101]);
+  for (const CurrentDirectory of [undefined, null, '', '.', path.dirname(directory), directory + '-other', path.join(directory, 'child')]) {
+    assert.deepEqual(check([parent, { ...child, CurrentDirectory }]), []);
+  }
+  for (const changed of [{ ParentProcessId: 999 }, { CommandLine: child.CommandLine + ' --type=renderer' },
+    { ExecutablePath: path.join(base, 'Antigravity.exe') }, { CommandLine: child.CommandLine.replace('main.mjs', 'other.mjs') }]) {
+    assert.deepEqual(check([parent, { ...child, ...changed }]), []);
+  }
+  assert.deepEqual(check([{ ...parent, CommandLine: parent.CommandLine.replace('main.mjs', 'dist/server.cjs') }, child]), []);
+  assert.deepEqual(check([{ ...parent, CommandLine: parent.CommandLine + ' & echo extra' }, child]), []);
+  assert.deepEqual(check([child]), []);
+  assert.deepEqual(check([parent, child], shimText.replace('ELECTRON_RUN_AS_NODE=1', 'ELECTRON_RUN_AS_NODE=0')), []);
+  const legacyParent = { ...parent, ProcessId: 202, CommandLine: parent.CommandLine.replace('main.mjs', 'dist/server.cjs') };
+  const legacy = { ...child, ProcessId: 102, ParentProcessId: 202, CommandLine: child.CommandLine.replace('main.mjs', 'dist/server.cjs'), CurrentDirectory: undefined };
+  const sidecarIds = check([parent, child, legacyParent, legacy]);
+  assert.deepEqual(sidecarIds, [101, 102]);
+  const rows = '"Antigravity.exe","101","Console","1","1 K"\n"Antigravity.exe","102","Console","1","1 K"';
+  assert.deepEqual(assertApplicationStopped({ tasklistText: rows, sidecarIds }), { processesStopped: true });
+  assert.throws(() => assertApplicationStopped({ tasklistText: rows + '\n"Antigravity.exe","103","Console","1","1 K"', sidecarIds }), /Exit all/);
+  await rm(entryFile);
+  await mkdir(entryFile);
+  assert.deepEqual(check(), [], 'A directory cannot stand in for the main module');
+  await rm(entryFile, { recursive: true });
+  const linkedEntry = path.join(directory, 'other.mjs');
+  await writeFile(linkedEntry, 'export {};');
+  try { await symlink(linkedEntry, entryFile, 'file'); }
+  catch (error) {
+    if (error.code !== 'EPERM') throw error;
+    t.diagnostic('Symbolic-link creation is unavailable for this account. The ordinary-file and directory cases were checked.');
+    return;
+  }
+  assert.deepEqual(check(), [], 'A symbolic-link entry is not an ordinary file');
 });
 
 test('application guard excludes only its own official Node sidecar PID', () => {
