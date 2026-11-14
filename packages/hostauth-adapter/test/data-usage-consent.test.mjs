@@ -297,6 +297,8 @@ test('actual native settings hooks save off while preserving mail, and native fa
         Fj: getSettings, B: { UserStatusSchema: {} }, ft: identity, Kdb() {}, xg: {},
         Bk: () => service, ok: getStatus, Yq: {}, nk: getDispatch, Wb: construct, fha: {}, St: getErrorHandler,
         gj: getSettings, E: { UserStatusSchema: {} }, Xq: identity, WDb() {}, rg: {},
+        Nk: () => service, Ak: getStatus, kr: {}, zk: getDispatch, ju: getErrorHandler,
+        oj: getSettings, jr: identity, qGb() {},
       };
       if (modalSource.includes('termsFlow:')) {
         context.B = React;

@@ -92,7 +92,7 @@ test('duplicate, wrong-wire, invalid boolean and truncated protobuf values fail 
   ]) assert.throws(() => decodeAgentStateUpdate(raw), { code: 'native_agent_state_invalid' });
 });
 
-for (const nativeVersion of ['2.31.0', '2.31.2']) {
+for (const nativeVersion of ['2.31.0', '2.31.2', '2.32.1']) {
 test(`${nativeVersion} uses published run states and execution status with its remaining aggregate counts`, () => {
   const current = ({ status = 1, executable = 1, executor = 1, execution, tasks = 0, messages = 0 } = {}) => bytes(1, Buffer.concat([
     scalar(3, status), scalar(4, executable), scalar(5, executor), scalar(18, 1),

@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 
-export const NATIVE_DIAGNOSTICS_VERSION = '2.31.2';
-export const ORIGINAL_NATIVE_SHA256 = 'e40f0447109c43ece15e7025ca0864a138e0e16cb8864d4ccf64a00512a99e1a';
+export const NATIVE_DIAGNOSTICS_VERSION = '2.32.1';
+export const ORIGINAL_NATIVE_SHA256 = '65cdb8d132fc61056625081be7d07d4d22f57eba485de7edf0d24d98e77c891f';
 // The complete patched digest is checked as well as the original image and
 // individual instruction bytes. There is no version-guessing fallback.
-export const PATCHED_NATIVE_SHA256 = 'b02168614d75b680cd8b0814b0d01bf91c66f5e310ff8d772516b920c8813b5f';
+export const PATCHED_NATIVE_SHA256 = '8ab537e29e484b7f31e97d1070e4726bc2e4d45180e7afa11d683057d8a5e693';
 
 const route = '/debug/pprof/goroutine';
 const previousChanges = Object.freeze([
@@ -20,6 +20,14 @@ const previousChanges = Object.freeze([
 ]);
 export const NATIVE_DIAGNOSTICS_PROFILES = Object.freeze([
   Object.freeze({ version: NATIVE_DIAGNOSTICS_VERSION, originalSha256: ORIGINAL_NATIVE_SHA256, patchedSha256: PATCHED_NATIVE_SHA256,
+    routeAddress: 0x143afdfd7n, changes: Object.freeze([
+      { address: 0x1434c0242n, before: '0f84d4000000', after: 'e93500000090', purpose: 'goroutine-only route entry' },
+      { address: 0x1434c0284n, before: '488d1daf905900', after: '488d1d4cdd6300', purpose: 'exact goroutine route literal' },
+      { address: 0x1434c028bn, before: 'b90d000000', after: 'b916000000', purpose: 'goroutine route length' },
+      { address: 0x1434c029cn, before: '488b8424d8010000', after: 'e97b000000909090', purpose: 'skip all remaining debug routes' },
+    ]) }),
+  Object.freeze({ version: '2.31.2', originalSha256: 'e40f0447109c43ece15e7025ca0864a138e0e16cb8864d4ccf64a00512a99e1a',
+    patchedSha256: 'b02168614d75b680cd8b0814b0d01bf91c66f5e310ff8d772516b920c8813b5f',
     routeAddress: 0x1439c02aan, changes: Object.freeze([
       { address: 0x14339a7e2n, before: '0f84d4000000', after: 'e93500000090', purpose: 'goroutine-only route entry' },
       { address: 0x14339a824n, before: '488d1dd0265800', after: '488d1d7f5a6200', purpose: 'exact goroutine route literal' },

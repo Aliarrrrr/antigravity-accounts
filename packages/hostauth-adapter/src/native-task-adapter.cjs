@@ -7,6 +7,10 @@ const { readAgentState, AGENT_STATE_PATH } = require('./native-agent-state.cjs')
 
 const SERVICE = '/exa.language_server_pb.LanguageServerService/';
 const NATIVE_PROGRAM_PROFILES = Object.freeze([
+  Object.freeze({ version: '2.32.1',
+    originalSha256: '65cdb8d132fc61056625081be7d07d4d22f57eba485de7edf0d24d98e77c891f',
+    patchedSha256: '8ab537e29e484b7f31e97d1070e4726bc2e4d45180e7afa11d683057d8a5e693',
+    providerSha256: '319c1abd18b4d12ac2149473f04b07be8671d230ecf12adf4cb7d1e3fe85edf6' }),
   Object.freeze({ version: '2.31.2',
     originalSha256: 'e40f0447109c43ece15e7025ca0864a138e0e16cb8864d4ccf64a00512a99e1a',
     patchedSha256: 'b02168614d75b680cd8b0814b0d01bf91c66f5e310ff8d772516b920c8813b5f',

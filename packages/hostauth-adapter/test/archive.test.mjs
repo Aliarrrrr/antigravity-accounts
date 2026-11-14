@@ -123,8 +123,11 @@ test('package updates retain compatibility only with complete unchanged source a
   assert.throws(() => patchSources(malformed), /Unsupported Antigravity/);
 });
 
-test('identical 2.31 source contracts retain each reviewed native-program version', { skip: !hasProgram }, async () => {
-  const original = await readFile(programAsar);
+const source231Asar = new URL('../../../artifacts/accounts/original-program-fixture-2.31.2/resources/app.asar', import.meta.url);
+let has231Program = false;
+try { await access(source231Asar); has231Program = true; } catch { /* Optional previous-version input. */ }
+test('identical 2.31 source contracts retain each reviewed native-program version', { skip: !has231Program }, async () => {
+  const original = await readFile(source231Asar);
   const archive = readAsar(original);
   const metadata = JSON.parse(archive.read('package.json'));
   for (const version of ['2.31.0', '2.31.2']) {
@@ -135,6 +138,27 @@ test('identical 2.31 source contracts retain each reviewed native-program versio
     assert.equal(compatibility.sourceContractVersion, version);
     assert.equal(compatibility.match, 'reviewed-version');
   }
+});
+
+test('shared 2.32 LS defaults and shell loader are checked before account insertion', { skip: !hasProgram }, async () => {
+  const original = await readFile(programAsar);
+  const archive = readAsar(original);
+  const compatibility = inspectSourceCompatibility(archive);
+  if (compatibility.baseArguments !== 'shared') return;
+  assert.equal(compatibility.sourceContractVersion, '2.32.1');
+  const patched = patchSources(archive);
+  for (const name of ['dist/lsDefaults.js', 'dist/loginShellEnvReads.js', 'dist/utils.js']) {
+    assert.ok(compatibility.sourceSha256[name]);
+    assert.equal(patched.has(name), false, 'shared local/SSH helpers are left unchanged');
+    const changed = readAsar(rewriteAsar(original, new Map([[name, Buffer.concat([archive.read(name), Buffer.from('\nvoid changedHostDefaults;')])]])));
+    assert.throws(() => patchSources(changed), /Unsupported exact program source/);
+  }
+  const main = patched.get('dist/main.js').toString();
+  assert.match(main, /const windows = \(0, utils_1\.getLocalHubWindows\)\(\)/);
+  assert.match(main, /remoteWindowSecurity_1\.isRemoteSession/);
+  assert.match(main, /remoteManager\?\.disposeAll\(\)/);
+  assert.match(main, /openSshHostFromArgs\(process\.argv\)/);
+  assert.equal(patched.has('dist/remote/remoteManager.js'), false, 'remote LS launch receives no Accounts modification');
 });
 
 test('actual native launch selects HostAuth only for an activated independent provider', { skip: !hasProgram }, async () => {
@@ -159,7 +183,13 @@ test('actual native launch selects HostAuth only for an activated independent pr
     './paths': { getLsLogPath: () => '/unused/log', getAppDataDirName: () => 'unused', getActivePortFilePath: () => '/unused/port' },
     './utils': { setupNodeWrapper(env) { env.OFFLINE_ORIGINAL_WRAPPER = 'preserved'; } },
     './wsl': {},
+    './loginShellEnvReads': { LoginShellEnvReads: class { prefetch() {} async take() { return { AICODE_DEV_PROJECT: 'test-shell-project' }; } } },
   };
+  if (inspectSourceCompatibility(archive).baseArguments === 'shared') {
+    const defaults = {};
+    vm.runInNewContext(archive.read('dist/lsDefaults.js').toString(), { exports: defaults });
+    overrides['./lsDefaults'] = defaults;
+  }
   const originalEnv = { USER_INFO_OVERRIDE_URL: 'http://127.0.0.1:12345/test-userinfo' };
   vm.runInNewContext(patched.get('dist/languageServer.js').toString(), { exports, __dirname: '/unused/program', process: { platform: 'win32', env: originalEnv, resourcesPath }, require: name => overrides[name] || nativeRequire(name) });
   const providerOptions = { useHostAuth: true, nativeProgramPath, hostBridgeUrl: 'http://127.0.0.1:4567', hostBridgeToken: 'new-local-bridge-capability' };
@@ -197,7 +227,7 @@ test('actual native launch selects HostAuth only for an activated independent pr
   assert.match(main, /webauthn_1\.configurePlatformWebAuthn/);
   assert.match(main, /webauthn_1\.attachWebviewWebAuthnUserActivationTracking/);
   assert.match(main, /webviewBrowser_1\.configureWebviewBrowserContents/);
-  assert.match(main, /const windows = \(0, utils_1\.getHubWindows\)\(\)/);
+  assert.match(main, /const windows = \(0, utils_1\.get(?:Local)?HubWindows\)\(\)/);
 });
 
 test('local supported program copy is patched, survives restore, and rejects later updater changes', { skip: !hasProgram }, async () => {

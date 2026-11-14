@@ -1,4 +1,26 @@
-# Accounts 0.4.0-preview.14 validation scope
+# Accounts 0.4.0-preview.16 validation scope
+
+## Preview.16 native-window switching repair — 14 November 2026
+
+The installed preview.15 check below observed startup and account-management UI on Antigravity 2.32.1 without switching a saved account. A subsequent switching failure exposed that the adapter enumerated only `BrowserWindow` instances while the host's Hub used `BaseWindow` with a `WebContentsView`. Rendering account controls in a preload did not exercise native-view capture, model refresh or the later confirmation path.
+
+The preview.16 repair targets the local Hub page's actual webContents for those operations and preserves support for earlier BrowserWindow hosts. It also includes the 2.32.1 source, native-program and OAuth compatibility changes from the unreleased local preview.15 build. SSH remote sessions remain outside independent-account switching support.
+
+The final complete local Node suites passed 269 tests without skips using separate original 2.32.1 program inputs. A first run accidentally used the modified installed archive for three installation-helper cases; those failed on program or state-root checks. Re-running with the original-program copy and an explicit Electron executable passed all cases. The preview.16 self-contained package passed the existing directory and ZIP checks with 48 payload files. No native-process copy was started for these window changes. Earlier isolated-program, installed-menu and 2.29.0 generation results retain their original scope; they do not establish preview.16 quota attribution or generation on 2.32.1.
+
+The preview.16 build was installed on the actual Antigravity 2.32.1 application and Chinese localization was reapplied. In that installed BaseWindow/WebContentsView UI, the two saved accounts completed A to B to A switching: each confirmation finished, the selected account and welcome identity changed, and the original primary account was selected again at the end. The project and Gemini 3.8 Flash High selection remained. The account component and language-service process IDs were unchanged across the return switch. No model submissions or account edits were made, and no conversation body was opened. The App was left running on the original primary account. This confirms the previously failing installed-window switching path; it does not establish generation, exact quota charging, nonempty draft preservation or long-context continuation on 2.32.1.
+
+## Preview.15 local compatibility work — 14 November 2026
+
+This local repair adds the reviewed Antigravity 2.32.1 main process and language-service launcher, including the new `lsDefaults.js` and `loginShellEnvReads.js` dependencies. Default arguments now come from a shared helper, so the adapter inserts HostAuth arguments at the new array construction point. Existing source contracts retain their previous file requirements. SSH remote sessions are outside this independent-account support scope.
+
+The native review identified relocated goroutine-route, project-refresh and public OAuth configuration addresses, while also finding new HostAuth, cache-backoff and conditional license-evaluation code. The activity messages, RPCs and fully-idle predicates examined remain unchanged from 2.31.2. Version-specific original and adapted program digests and original instruction bytes are required. Native fallback also rejects all three newly adapted 2.32.1 program digests.
+
+The first Node run found an incomplete adapted-program rejection list and a test-only unmapped identifier in the recompiled frontend settings hook. Both were corrected. The final complete Node suites passed 264 tests without skips using the separate original 2.32.1 programs. The preview.15 self-contained component build succeeded, and its 44 synthetic-account checks passed under .NET SDK 10.0.400 with no real authentication or model requests.
+
+Isolated copies of the 2.32.1 native program accepted the goroutine route and rejected the other five checked diagnostics routes. A synthetic A-to-B HostAuth change made the next model-list metadata request use both the B identity and `local-project-b`. When the B project refresh failed, that metadata request was not issued. A real initial activity update from an empty local conversation decoded as known and fully idle, the wait RPC returned 200, and the normal adapter confirmed both synthetic identities. These processes used temporary user directories, loopback services, constructed tokens and a rejecting proxy; model-generation requests and denied proxy hosts were zero. There was no OS-level network isolation and no saved-account switch or cloud quota check. This build is local work and has not been published as a GitHub release.
+
+The local preview.15 package was then installed on the actual 2.32.1 application, Chinese localization was rebuilt on that installation, and the registered launcher returned `ready`. The installed window showed Chinese navigation, native account groups and the management panel with both saved accounts, current/primary badges and the existing unchecked data-use preference. Escape returned to the home page. This check made zero saved-account switches, account edits or model submissions; the App was left open. It does not establish quota attribution or cross-account generation on 2.32.1. The packaged validation file was created before this final installed-window observation.
 
 ## Preview.14 update recovery changes — 12 November 2026
 

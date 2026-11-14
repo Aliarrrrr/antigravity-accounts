@@ -131,7 +131,7 @@ function decodeExecutionStateUpdate(update, initial) {
 
 function decodeAgentStateUpdate(buffer, { initial = false, nativeVersion = '2.29.0' } = {}) {
   if (typeof initial !== 'boolean') throw invalid();
-  if (!['2.28.2', '2.29.0', '2.31.0', '2.31.2'].includes(nativeVersion)) throw invalid();
+  if (!['2.28.2', '2.29.0', '2.31.0', '2.31.2', '2.32.1'].includes(nativeVersion)) throw invalid();
   if (!Buffer.isBuffer(buffer) || buffer.length > MAX_MESSAGE_BYTES) throw invalid();
   let update;
   visitFields(buffer, (number, wire, value) => {
@@ -140,7 +140,7 @@ function decodeAgentStateUpdate(buffer, { initial = false, nativeVersion = '2.29
     update = value;
   });
   if (update === undefined) throw new ComponentError('native_agent_state_incomplete');
-  if (nativeVersion === '2.31.0' || nativeVersion === '2.31.2') return decodeExecutionStateUpdate(update, initial);
+  if (nativeVersion === '2.31.0' || nativeVersion === '2.31.2' || nativeVersion === '2.32.1') return decodeExecutionStateUpdate(update, initial);
   let fullyIdle = false, hasActiveChildren = false;
   const seen = new Set(), counts = {};
   const countFields = new Map([[9, 'queuedSteps'], [12, 'backgroundCommands'], [17, 'backgroundTasks'], [20, 'pendingAgentMessages']]);

@@ -1,17 +1,27 @@
 import { sha256 } from './asar.mjs';
 import { descriptorSource } from './descriptor.mjs';
 
-export const SUPPORTED_VERSION = '2.31.2';
+export const SUPPORTED_VERSION = '2.32.1';
 export const SOURCE_SHA256 = Object.freeze({
-  'dist/main.js': '0d297f7b38f73777e61fdcde103f026b1ae69af91e37edc937c9b37d5fe73d6e',
-  'dist/languageServer.js': '6f671aaf1a6812e75bb692e1def7a0b6eb3b2ac27b12cdc066e0b7f39ac723c4',
+  'dist/main.js': 'b1d133d4aacd31170a23e277008f45b5d4bdc150ae44059a9d27059c8780cd62',
+  'dist/languageServer.js': '89d9fe0b57fc85ac590c91bd8d5248ed5b3fdef79dbe2dc5f5086fc6af681b79',
   'dist/hostBridgeServer.js': 'db4d7dc0e356828ac26ecf461c2c5d34c96612d69c7a9a765221513351378784',
   'dist/proto/host_bridge_pb.js': 'f80259dd94c70ce6befb46d6d9a08617e7ebee97e1e2975d60b657603bab417d',
   'dist/updater.js': 'ef38da806d1db759ff94ec8b1181f057440150cedbab7992b633df8933951e04',
   'node_modules/electron-updater/out/BaseUpdater.js': '9cff8b894ed709f6d9a5b938614fc377be89e1ea5bd1cc1f4cd6143048d918a3',
   'node_modules/electron-updater/out/NsisUpdater.js': '31f36b4ef5cadd35a93df91d9454aa70044e41c0e6b4c799783dca4302cd03b6',
+  'dist/lsDefaults.js': 'a423ac7026b38c4e98d82217b50ead0d22ede92c62e752fdf1fd4c6d189e5af4',
+  'dist/loginShellEnvReads.js': '668b6c7ff54172cc27fe7ff2e4dba98729d4ca83d4fb6a61f171862aa98a7f09',
+  'dist/utils.js': '17879de917b8129ab7a4aa0c760d13f28c1afb1af44150f7f0950799e6af5d50',
+});
+const source231Sha256 = Object.freeze({
+  ...Object.fromEntries(Object.entries(SOURCE_SHA256).filter(([name]) => !['dist/lsDefaults.js', 'dist/loginShellEnvReads.js'].includes(name))),
+  'dist/main.js': '0d297f7b38f73777e61fdcde103f026b1ae69af91e37edc937c9b37d5fe73d6e',
+  'dist/languageServer.js': '6f671aaf1a6812e75bb692e1def7a0b6eb3b2ac27b12cdc066e0b7f39ac723c4',
+  'dist/utils.js': '0c4d101773515c827dd91c3b60bdcc4a04591758bb9b4280c46350987c7d17dd',
 });
 const previousSourceSha256 = Object.freeze({
+  'dist/utils.js': '2f39dd7b944436bd5007297ccc15c42c897d8e6cecd5a0af93bdf6bfc1708b12',
   'dist/main.js': '66fa884c96dee5dd6a536711d35fc90fee853e9a2eede40fb4d1ab576e4ea50f',
   'dist/languageServer.js': '5c781d05050506d7643a88b1eeadc9bb4f320d7133f84b075e6338a6ce158d26',
   'dist/hostBridgeServer.js': 'db4d7dc0e356828ac26ecf461c2c5d34c96612d69c7a9a765221513351378784',
@@ -21,12 +31,14 @@ const previousSourceSha256 = Object.freeze({
   'node_modules/electron-updater/out/NsisUpdater.js': '31f36b4ef5cadd35a93df91d9454aa70044e41c0e6b4c799783dca4302cd03b6',
 });
 export const SOURCE_CONTRACTS = Object.freeze([
-  Object.freeze({ version: SUPPORTED_VERSION, sourceSha256: SOURCE_SHA256, shellEnvironment: 'prefetched' }),
-  Object.freeze({ version: '2.31.0', sourceSha256: SOURCE_SHA256, shellEnvironment: 'prefetched' }),
-  Object.freeze({ version: '2.29.0', sourceSha256: Object.freeze({ ...SOURCE_SHA256,
+  Object.freeze({ version: SUPPORTED_VERSION, sourceSha256: SOURCE_SHA256, shellEnvironment: 'prefetched', baseArguments: 'shared' }),
+  Object.freeze({ version: '2.31.2', sourceSha256: source231Sha256, shellEnvironment: 'prefetched', baseArguments: 'inline' }),
+  Object.freeze({ version: '2.31.0', sourceSha256: source231Sha256, shellEnvironment: 'prefetched', baseArguments: 'inline' }),
+  Object.freeze({ version: '2.29.0', sourceSha256: Object.freeze({ ...source231Sha256,
     'dist/main.js': 'e5bf4ae92a586b222034c7de27e0e58dd8922deb0edc9649d290bc06182b2c6c',
-  }), shellEnvironment: 'prefetched' }),
-  Object.freeze({ version: '2.28.2', sourceSha256: previousSourceSha256, shellEnvironment: 'sync' }),
+    'dist/utils.js': '277c626bedc704f12927eee26836350078835eb43ae1847cdc346b0be21b2d9d',
+  }), shellEnvironment: 'prefetched', baseArguments: 'inline' }),
+  Object.freeze({ version: '2.28.2', sourceSha256: previousSourceSha256, shellEnvironment: 'sync', baseArguments: 'inline' }),
 ]);
 const dependencyVersions = Object.freeze({ '@bufbuild/protobuf': '2.11.0', '@connectrpc/connect': '2.2.0', '@connectrpc/connect-node': '2.2.0', 'electron-updater': '6.8.9' });
 
@@ -36,12 +48,14 @@ const dependencyVersions = Object.freeze({ '@bufbuild/protobuf': '2.11.0', '@con
 export function inspectSourceCompatibility(archive) {
   const packageInfo = JSON.parse(archive.read('package.json').toString('utf8'));
   if (packageInfo.name !== 'antigravity' || !/^\d+\.\d+\.\d+$/.test(packageInfo.version) || packageInfo.main !== 'dist/main.js') throw new Error('Unsupported Antigravity version or entry point');
-  let sourceSha256;
-  try { sourceSha256 = Object.fromEntries(Object.keys(SOURCE_SHA256).map(name => [name, sha256(archive.read(name))])); }
-  catch { throw new Error('Unsupported exact program source: missing contract file'); }
-  const matchingContracts = SOURCE_CONTRACTS.filter(candidate => Object.entries(candidate.sourceSha256).every(([name, expected]) => sourceSha256[name] === expected));
+  const availableSha256 = {};
+  for (const name of new Set(SOURCE_CONTRACTS.flatMap(candidate => Object.keys(candidate.sourceSha256)))) {
+    try { availableSha256[name] = sha256(archive.read(name)); } catch { /* A missing file cannot satisfy that source contract. */ }
+  }
+  const matchingContracts = SOURCE_CONTRACTS.filter(candidate => Object.entries(candidate.sourceSha256).every(([name, expected]) => availableSha256[name] === expected));
   const contract = matchingContracts.find(candidate => candidate.version === packageInfo.version) || matchingContracts[0];
   if (!contract) throw new Error('Unsupported exact program source: no complete reviewed source contract matches');
+  const sourceSha256 = Object.fromEntries(Object.keys(contract.sourceSha256).map(name => [name, availableSha256[name]]));
   for (const [name, version] of Object.entries(dependencyVersions)) {
     let installed;
     try { installed = JSON.parse(archive.read(`node_modules/${name}/package.json`).toString('utf8')).version; } catch { /* Report only the public dependency name. */ }
@@ -49,7 +63,7 @@ export function inspectSourceCompatibility(archive) {
   }
   return { antigravityVersion: packageInfo.version, sourceContractVersion: contract.version,
     match: packageInfo.version === contract.version ? 'reviewed-version' : 'unchanged-source-contract',
-    sourceSha256, dependencyVersions: { ...dependencyVersions }, shellEnvironment: contract.shellEnvironment };
+    sourceSha256, dependencyVersions: { ...dependencyVersions }, shellEnvironment: contract.shellEnvironment, baseArguments: contract.baseArguments };
 }
 
 export function exactReplace(source, before, after) {
@@ -61,7 +75,7 @@ export function exactReplace(source, before, after) {
 export function patchSources(archive) {
   const compatibility = inspectSourceCompatibility(archive);
   const sources = new Map();
-  for (const name of Object.keys(SOURCE_SHA256)) sources.set(name, archive.read(name).toString('utf8'));
+  for (const name of Object.keys(compatibility.sourceSha256)) sources.set(name, archive.read(name).toString('utf8'));
   let main = sources.get('dist/main.js');
   main = exactReplace(main, 'const hostBridgeServer_1 = require("./hostBridgeServer");', 'const hostBridgeServer_1 = require("./hostBridgeServer");\nconst hostauthAddon = require("./hostauth-addon/runtime.cjs");\nconst accountsUpdateHandoff = require("./hostauth-addon/update-handoff.cjs");');
   main = exactReplace(main, 'let hostBridgeServer;', 'let hostBridgeServer;\nlet hostauthSession;');
@@ -92,7 +106,8 @@ export function patchSources(archive) {
   ls = exactReplace(ls,
     "        const logStream = fs.createWriteStream((0, paths_1.getLsLogPath)(), { flags: 'w' });",
     "        if (useHostAuth === true && (!hostBridgeUrl || !hostBridgeToken || wsl)) {\n            reject(new Error('Independent host authentication is required; startup was stopped.'));\n            return;\n        }\n        let independentNativeProgram;\n        if (useHostAuth === true) {\n            if (nativeProgramPath !== 'hostauth-addon/native/language_server.exe' || !process.resourcesPath || !path_1.default.isAbsolute(process.resourcesPath)) {\n                reject(new Error('Independent native program path is invalid; startup was stopped.'));\n                return;\n            }\n            independentNativeProgram = path_1.default.join(process.resourcesPath, nativeProgramPath);\n            try {\n                if (!fs.statSync(independentNativeProgram).isFile()) throw new Error();\n            }\n            catch {\n                reject(new Error('Independent native program is unavailable; startup was stopped.'));\n                return;\n            }\n        }\n        else if (nativeProgramPath !== undefined) {\n            reject(new Error('Independent native program requires host authentication; startup was stopped.'));\n            return;\n        }\n        const logStream = fs.createWriteStream((0, paths_1.getLsLogPath)(), { flags: 'w' });");
-  ls = exactReplace(ls, "            '--standalone',", "            '--standalone',\n            ...(useHostAuth === true ? ['--use_host_auth=true'] : []),");
+  const argumentAnchor = compatibility.baseArguments === 'shared' ? '        const args = [' : "            '--standalone',";
+  ls = exactReplace(ls, argumentAnchor, argumentAnchor + "\n            ...(useHostAuth === true ? ['--use_host_auth=true'] : []),");
   ls = exactReplace(ls,
     '        let spawnCmd = exports.LS_BINARY;',
     '        let spawnCmd = independentNativeProgram || exports.LS_BINARY;');

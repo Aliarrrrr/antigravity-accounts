@@ -1,8 +1,8 @@
-# Antigravity Accounts · 0.4.0-preview.14
+# Antigravity Accounts · 0.4.0-preview.16
 
 Windows x64 账号插件：将独立授权的 Google 账号分组放入 Antigravity 原生模型列表，保留官方模型选项、主题和 View Usage。各账号分别使用自己的额度；插件不合并或转移额度。模型请求仍由原生语言服务直接发往 Google。
 
-当前 preview.14 支持已检查的 Antigravity 2.31.2、2.31.0、2.29.0 和 2.28.2 程序，并增加未知更新的原生登录确认入口。需要完整分发包与本机宿主适配。仅安装 `plugin.json` 不会启用切换。未知版本不写入账号补丁，当前未在 Marketplace 上架。运行检查范围见包根目录 `VALIDATION.md`。
+preview.16 包含 preview.15 的 Antigravity 2.32.1 兼容修复，并修正宿主采用 BaseWindow/WebContentsView 时的账号切换窗口访问。preview.15 仅作为本地修复，未单独发布。保留 2.31.2、2.31.0、2.29.0 和 2.28.2 的已有支持，以及 preview.14 的未知更新原生登录确认入口。需要完整分发包与本机宿主适配。仅安装 `plugin.json` 不会启用切换。未知版本不写入账号补丁，当前未在 Marketplace 上架。运行检查范围见包根目录 `VALIDATION.md`；先前只显示账号菜单和管理面板的检查不能证明切换成功。SSH 远程会话不在独立账号切换支持范围内。
 
 ## 安装
 
@@ -15,6 +15,8 @@ Windows x64 账号插件：将独立授权的 Google 账号分组放入 Antigrav
 无需另装 .NET、Node、Python 或 PowerShell 7。安装辅助脚本使用本机官方 Electron 的 Node 模式。自定义安装位置时，将 `ANTIGRAVITY_INSTALL_ROOT` 设置为包含 `Antigravity.exe` 的目录。`Prepare.cmd` 只生成本机程序副本，不应用到安装目录。
 
 ## 添加和切换账号
+
+2026 年 11 月 14 日，preview.16 已在本机 Antigravity 2.32.1 的 BaseWindow/WebContentsView 界面完成两个已保存账号 A → B → A 切换，确认过程结束，项目和模型保留，并切回原主账号。本轮未发送模型请求，也未验证实际扣额或跨账号生成。
 
 在原生模型菜单中打开“账号设置…”，输入可选标签并点击“添加账号”，亲自在 Google 网页完成授权。在同一面板设定唯一主账号，其余账号作为附属账号。添加、删除、标签编辑、重新授权、主账号配置和数据使用设置都位于该面板；模型列表保留切换和管理入口。未配置独立账号时，应用继续使用原官方登录。
 
@@ -58,7 +60,7 @@ preview.11 修复了 Windows 路径大小写导致已识别 `agy-node.cmd` 后�
 
 ## 源码、支持和许可
 
-[项目与问题反馈](https://github.com/Aliarrrrr/antigravity-accounts) · [当前版本](https://github.com/Aliarrrrr/antigravity-accounts/releases/tag/accounts-v0.4.0-preview.14) · [源码构建说明](https://github.com/Aliarrrrr/antigravity-accounts#development)
+[项目与问题反馈](https://github.com/Aliarrrrr/antigravity-accounts) · [当前版本](https://github.com/Aliarrrrr/antigravity-accounts/releases/tag/accounts-v0.4.0-preview.16) · [源码构建说明](https://github.com/Aliarrrrr/antigravity-accounts#development)
 
 MIT 许可，详见包内 `LICENSE`。
 

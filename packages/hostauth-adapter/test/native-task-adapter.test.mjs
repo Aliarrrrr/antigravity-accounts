@@ -143,7 +143,7 @@ test('real task adapter uses only local CSRF and protobuf state RPCs before it r
   adapter.close();
 });
 
-for (const version of ['2.31.0', '2.31.2']) {
+for (const version of ['2.31.0', '2.31.2', '2.32.1']) {
 test(`${version} native execution status blocks switching after idle summary and idle RPC responses`, async () => {
   const state = connectEnvelope(bytes(1, Buffer.concat([
     scalar(3, 1), scalar(4, 1), scalar(5, 1), scalar(18, 1), bytes(25, bytes(2, scalar(1, 1))),

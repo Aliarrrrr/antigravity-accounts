@@ -2,6 +2,7 @@
 
 const { ComponentError } = require('./component-client.cjs');
 const { loopbackOrigin } = require('./submission-gate.cjs');
+const { getLocalHubViews } = require('./local-hub-windows.cjs');
 const path = require('node:path');
 const CHANNEL = 'antigravity-accounts:model-menu';
 const ACTIONS = new Set(['getState', 'getPreferences', 'setPreferences', 'renameAccount', 'selectAccount', 'cancelSwitch', 'beginLogin', 'cancelLogin', 'setPrimaryAccount', 'removeAccount', 'confirmModelSelection']);
@@ -19,17 +20,18 @@ function publicState(status, accounts) {
   };
 }
 
-function createModelMenuBridge({ electron, client, preferences, isAccountWindow = () => false }) {
+function createModelMenuBridge({ electron, client, preferences, isAccountWindow = () => false, hostWindowAccess }) {
   let origin, closed = false;
+  const nativeViews = () => getLocalHubViews({ electron, origin, hostWindowAccess }).filter(({ window }) => !isAccountWindow(window));
   function nativeWindow(event) {
     if (closed || !origin || !event?.sender || !event.senderFrame ||
         event.senderFrame !== event.sender.mainFrame || event.senderFrame.parent) throw new ComponentError('account_menu_unavailable');
     let address;
     try { address = new URL(event.senderFrame.url); } catch { throw new ComponentError('account_menu_unavailable'); }
-    const window = electron.BrowserWindow.fromWebContents(event.sender);
-    if (address.origin !== origin || !window || window.isDestroyed() || window.webContents !== event.sender || isAccountWindow(window))
+    const view = nativeViews().find(({ contents }) => contents === event.sender);
+    if (address.origin !== origin || !view)
       throw new ComponentError('account_menu_unavailable');
-    return window;
+    return view.window;
   }
   const handler = async (event, request, ...extra) => {
     nativeWindow(event);
@@ -50,10 +52,9 @@ function createModelMenuBridge({ electron, client, preferences, isAccountWindow 
       if (method === 'setPreferences') {
         if (!preferences) throw new ComponentError('account_preferences_unavailable');
         const next = await preferences.set(params);
-        for (const window of electron.BrowserWindow.getAllWindows()) {
+        for (const { contents } of nativeViews()) {
           try {
-            if (!window.isDestroyed() && new URL(window.webContents.getURL()).origin === origin)
-              window.webContents.send?.(CHANNEL + ':preferences', next);
+            contents.send?.(CHANNEL + ':preferences', next);
           } catch { /* A closing or navigating window does not undo a saved preference. */ }
         }
         return next;
@@ -91,15 +92,13 @@ function createModelMenuBridge({ electron, client, preferences, isAccountWindow 
     },
     async open(parent) {
       if (closed || !origin) throw new ComponentError('account_menu_unavailable');
-      const windows = parent ? [parent] : electron.BrowserWindow.getAllWindows();
-      const window = windows.find(candidate => !candidate.isDestroyed() && !isAccountWindow(candidate) && (() => {
-        try { return new URL(candidate.webContents.getURL()).origin === origin; } catch { return false; }
-      })());
-      if (!window) throw new ComponentError('account_menu_unavailable');
+      const view = nativeViews().find(({ window }) => !parent || window === parent);
+      if (!view) throw new ComponentError('account_menu_unavailable');
+      const { window, contents } = view;
       window.show(); window.focus();
       // Native tray/application commands only open the existing selector.
       // Account changes still require trusted input in the isolated preload.
-      await window.webContents.executeJavaScript(`(() => { const b = document.querySelector('button[data-testid="model-selector-trigger"]'); if (b && b.getAttribute('aria-expanded') !== 'true') b.click(); })()`);
+      await contents.executeJavaScript(`(() => { const b = document.querySelector('button[data-testid="model-selector-trigger"]'); if (b && b.getAttribute('aria-expanded') !== 'true') b.click(); })()`);
     },
     close() {
       if (closed) return;

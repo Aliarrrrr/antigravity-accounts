@@ -11,6 +11,9 @@ const validDigest = value => typeof value === 'string' && /^[a-f0-9]{64}$/i.test
 const fail = () => { throw new Error('native_fallback_program_invalid'); };
 
 export const adaptedNativeDigests = Object.freeze([
+  '8ab537e29e484b7f31e97d1070e4726bc2e4d45180e7afa11d683057d8a5e693',
+  '9728f6eb169fd63a7b154934c7151932152fcc93ca97720117237218df907490',
+  '319c1abd18b4d12ac2149473f04b07be8671d230ecf12adf4cb7d1e3fe85edf6',
   'b02168614d75b680cd8b0814b0d01bf91c66f5e310ff8d772516b920c8813b5f',
   '0bdb872c8092002dafdf8ef44f1b3da77c2b71ef09eaec47ea169911766b2a2b',
   '169355a713b8199f6fe91dd5eaf81bc7f366544b2808014425fc820ccdd04bfc',

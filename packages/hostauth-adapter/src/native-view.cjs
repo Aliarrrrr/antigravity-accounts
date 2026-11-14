@@ -1,6 +1,7 @@
 'use strict';
 
 const { ComponentError } = require('./component-client.cjs');
+const { getLocalHubViews } = require('./local-hub-windows.cjs');
 
 // Executed in the inspected native main world. These are the native protobuf decoder,
 // Redux action and selectors, rather than a second copy of model definitions.
@@ -152,13 +153,10 @@ function nativeBindingsExpression(bindings) {
   return '{' + keys.map(key => JSON.stringify(key) + ':' + bindings.symbols[key]).join(',') + '}';
 }
 
-async function refreshNativeViews({ electron, origin, userStatus, requireExplicitSelection = false, phase = 'refresh', bindings }) {
-  const windows = electron?.BrowserWindow?.getAllWindows?.().filter(window => {
-    if (window.isDestroyed()) return false;
-    try { return new URL(window.webContents.getURL()).origin === origin; } catch { return false; }
-  }) || [];
+async function refreshNativeViews({ electron, origin, userStatus, requireExplicitSelection = false, phase = 'refresh', bindings, hostWindowAccess }) {
+  const views = getLocalHubViews({ electron, origin, hostWindowAccess });
   if (!['capture', 'refresh', 'clear'].includes(phase)) throw new ComponentError('native_view_phase_invalid');
-  if (!windows.length) {
+  if (!views.length) {
     if (phase === 'clear') return { cleared: true };
     throw new ComponentError('native_view_unavailable');
   }
@@ -167,7 +165,7 @@ async function refreshNativeViews({ electron, origin, userStatus, requireExplici
   const bindingSource = bindings ? nativeBindingsExpression(bindings) : 'undefined';
   const source = `(${updateNativeView.toString()})(JSON.parse(${data}), ${requireExplicitSelection === true}, ${JSON.stringify(phase)}, ${bindingSource})`;
   let results;
-  try { results = await Promise.all(windows.map(window => window.webContents.executeJavaScript(source))); }
+  try { results = await Promise.all(views.map(({ contents }) => contents.executeJavaScript(source))); }
   catch { throw new ComponentError('native_view_execution_failed'); }
   const successField = phase === 'capture' ? 'captured' : phase === 'clear' ? 'cleared' : 'updated';
   if (results.some(result => result?.[successField] !== true)) {

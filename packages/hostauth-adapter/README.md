@@ -1,15 +1,15 @@
-# Antigravity 2.31 / 2.29 / 2.28.2 HostAuth adapter
+# Antigravity 2.32 / 2.31 / 2.29 / 2.28.2 HostAuth adapter
 
 Version-bound Electron adaptation for the Accounts plugin. The original LS
 contacts Google directly; original Google Authorization headers and official
 saved credentials never pass through the plugin. The HostBridge uses a fresh
 local capability and supplies only independently added accounts.
 
-`patch-plan.mjs` accepts complete inspected 2.31 / 2.29 / 2.28.2 source contracts and RPC
+`patch-plan.mjs` accepts complete inspected 2.32.1 / 2.31 / 2.29 / 2.28.2 source contracts and RPC
 dependencies, including a changed package version with unchanged contract files.
 It preserves async shell-environment prefetch and Webview PAC initialization.
-`native-diagnostics-patch.mjs` accepts the three inspected exact LS
-image and changes four instruction regions to register only
+`native-diagnostics-patch.mjs` accepts the five inspected version-specific LS
+images and changes four instruction regions to register only
 `/debug/pprof/goroutine`. It does not enable dev mode or other pprof routes.
 Unknown source/native changes are rejected before installation. Frontend bindings
 are extracted by action/schema/Redux contracts instead of fixed compiler names.
@@ -76,6 +76,13 @@ it remains available. Otherwise submissions stay paused until an actual native
 modelPicked action is observed. Unknown frontend contracts, custom models and
 ambiguous aliases stay paused. The 2.28.2 bindings have been checked with extracted
 native definitions and synthetic account/model state in an offline browser.
+
+Preview.16 updates local Hub window access for BaseWindow/WebContentsView hosts
+while retaining the earlier BrowserWindow path. The preview.15 installed-menu
+check did not switch a saved account and therefore missed that switching-path
+lookup failure. Current repair checks and installed-client observations belong
+to the version-specific validation record below; SSH remote sessions remain
+outside independent-account switching support.
 
 Preview.8 on installed Antigravity 2.29.0 completed a real metadata-only
 Account A -> Account B -> Account A round trip while retaining the same App,

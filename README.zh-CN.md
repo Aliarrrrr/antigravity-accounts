@@ -2,9 +2,13 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
+本机 2.32.1 已完成两个已保存账号 A → B → A 切换，项目和模型选择保留。本轮未发送模型请求，不代表已验证实际扣额或跨账号生成；详见[检查记录](docs/ACCOUNTS_VALIDATION.md)。
+
+**0.4.0-preview.16** 包含 Antigravity **2.32.1** 兼容修复，并修正宿主使用 BaseWindow/WebContentsView 时的账号切换窗口访问。本次测试和已安装客户端的检查范围见[检查记录](docs/ACCOUNTS_VALIDATION.md)。
+
 **在 Antigravity 原生模型列表中使用已授权的 Google 账号。**
 
-![Preview 0.4.0-preview.14](https://img.shields.io/badge/preview-0.4.0--preview.14-8b5cf6)
+![Preview 0.4.0-preview.16](https://img.shields.io/badge/preview-0.4.0--preview.16-8b5cf6)
 ![Windows x64](https://img.shields.io/badge/platform-Windows%20x64-0078D4)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
@@ -12,23 +16,23 @@ Antigravity Accounts 在现有模型菜单中加入账号分组，保留官方�
 
 这是通过 ZIP 分发的 **Windows 非官方宿主适配预览版**，尚未在 Antigravity 插件市场收录。单独安装 `plugin.json` 不会启用账号切换。
 
-[下载 preview.14](https://github.com/Aliarrrrr/antigravity-accounts/releases/tag/accounts-v0.4.0-preview.14) · [安装说明](docs/ACCOUNTS_PLUGIN.md) · [更新日志](CHANGELOG.md) · [检查记录](docs/ACCOUNTS_VALIDATION.md)
+[下载 preview.16](https://github.com/Aliarrrrr/antigravity-accounts/releases/tag/accounts-v0.4.0-preview.16) · [安装说明](docs/ACCOUNTS_PLUGIN.md) · [更新日志](CHANGELOG.md) · [检查记录](docs/ACCOUNTS_VALIDATION.md)
 
 ## 安装
 
 | 项目 | 支持范围 |
 | --- | --- |
 | 操作系统 | Windows x64 |
-| Antigravity App | 已检查的 2.31.2、2.31.0、2.29.0、2.28.2 程序组合 |
+| Antigravity App | 已检查的 2.32.1、2.31.2、2.31.0、2.29.0、2.28.2 程序组合 |
 | 额外运行时 | 分发包无需另装运行时；.NET 组件自包含，安装辅助程序使用已安装的 Electron 运行时 |
 
-1. 下载并完整解压 [AntigravityAccounts-0.4.0-preview.14-win-x64.zip](https://github.com/Aliarrrrr/antigravity-accounts/releases/download/accounts-v0.4.0-preview.14/AntigravityAccounts-0.4.0-preview.14-win-x64.zip)。
+1. 下载并完整解压 [AntigravityAccounts-0.4.0-preview.16-win-x64.zip](https://github.com/Aliarrrrr/antigravity-accounts/releases/download/accounts-v0.4.0-preview.16/AntigravityAccounts-0.4.0-preview.16-win-x64.zip)。
 2. 完全退出 Antigravity。若应用常驻系统托盘，请从托盘菜单选择“退出”。
 3. 在解压后的 `AntigravityAccounts` 目录运行 `Install-Preview.cmd`，然后正常启动 Antigravity。
 
 安装器会检查已安装的程序、保存原始文件，再应用本机宿主适配，不修改 `Antigravity.exe`。请保留完整分发目录及校验文件，以便恢复。
 
-宿主版本未变、仅升级 Accounts 时，先退出 Antigravity，运行**新解压 preview.14 包**中的 `Restore.cmd`，再运行同包的 `Install-Preview.cmd`。宿主已被官方更新替换为上表支持的新原程序时，直接运行新版 `Install-Preview.cmd`，安装器会保存旧记录并对当前程序重新准备适配。已保存的账号授权会保留。当前仍有中文适配时，先恢复中文层，完成 Accounts 操作后重新应用中文层。详见[安装说明](docs/ACCOUNTS_PLUGIN.md#安装)。
+宿主版本未变、仅升级 Accounts 时，先退出 Antigravity，运行**新解压 preview.16 包**中的 `Restore.cmd`，再运行同包的 `Install-Preview.cmd`。宿主已被官方更新替换为上表支持的新原程序时，直接运行新版 `Install-Preview.cmd`，安装器会保存旧记录并对当前程序重新准备适配。已保存的账号授权会保留。当前仍有中文适配时，先恢复中文层，完成 Accounts 操作后重新应用中文层。详见[安装说明](docs/ACCOUNTS_PLUGIN.md#安装)。
 
 自定义安装目录时，在运行安装器前将 `ANTIGRAVITY_INSTALL_ROOT` 设为包含 `Antigravity.exe` 的目录。
 
@@ -65,7 +69,7 @@ Antigravity Accounts 在现有模型菜单中加入账号分组，保留官方�
 
 ## 兼容与更新
 
-preview.14 包含 Antigravity 2.31.2、2.31.0 的兼容修复，增加未知官方更新的原生登录降级入口。preview.12 和 preview.13 是未单独发布的本地兼容包，各次检查范围见检查文档。
+preview.16 包含未单独发布的 preview.15 的 Antigravity 2.32.1 兼容修复，并修正账号切换的原生窗口查找。保留 2.31.2、2.31.0、2.29.0、2.28.2 的已有支持，以及 preview.14 的未知官方更新原生登录确认入口。preview.12、preview.13 和 preview.15 均为未单独发布的本地版本。SSH 远程会话不在独立账号支持范围内。各次检查范围见检查文档。
 
 兼容检查依据已检查的宿主脚本、RPC 依赖和原生程序组合，未知程序不会写入补丁。完整官方更新暂时无法适配时，启动器检查当前文件后提供原生登录选项，并提醒其身份可能与之前的额度账号不同。原账号授权保留，后续兼容包可继续恢复账号功能。部分替换、文件损坏、记录冲突及安装器仍在运行时继续阻止启动。
 
@@ -76,6 +80,8 @@ preview.14 包含 Antigravity 2.31.2、2.31.0 的兼容修复，增加未知官�
 未知更新后直接打开 EXE 可能绕过这些启动检查。请保留原始文件，按[恢复说明](docs/ACCOUNTS_PLUGIN.md#更新与恢复)操作，不要用旧程序备份覆盖新版官方安装。
 
 ### 已检查的范围
+
+本地 preview.15 已在 Antigravity 2.32.1 启动，中文、原生账号分组及管理面板可见，但该次检查没有切换已保存账号。后续切换失败暴露出适配器只查 BrowserWindow，而宿主使用 BaseWindow 与 WebContentsView。preview.16 修正这处窗口访问；最终测试与已安装客户端的切换结果记录在[检查文档](docs/ACCOUNTS_VALIDATION.md)。旧版生成结果不代表已确认 2.32.1 的生成或扣额行为。
 
 2026 年 11 月 12 日，本机 preview.14 已安装到 Antigravity 2.31.2。已观察登记的中文启动器启动、原生账号分组和管理面板，两个已保存账号均在，默认数据使用选项为不勾选。这轮检查的账号切换和模型发送均为 0。中文界面由单独维护的外部汉化工具提供，Accounts 发行包不包含该工具。中文保护入口需要使用支持 preview.14 原生登录确认的新版启动器，旧版仍可能阻止未知更新启动。当前本机已更新并检查该启动器，本仓库未单独分发中文工具。
 

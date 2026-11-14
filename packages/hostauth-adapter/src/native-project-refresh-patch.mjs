@@ -6,9 +6,9 @@ import {
 } from './native-diagnostics-patch.mjs';
 
 export { ORIGINAL_NATIVE_SHA256, DIAGNOSTICS_NATIVE_SHA256 };
-export const PROJECT_REFRESH_VERSION = '2.31.2';
-export const PROJECT_REFRESH_NATIVE_SHA256 = '33bad001301bf863bb7108e77667aaf24c649981335f5d220656c75e59818508';
-export const PROVIDER_NATIVE_SHA256 = 'ff323094c41c50508bd4b9d8cc66230c36d2c245df68a0216010603725aa866c';
+export const PROJECT_REFRESH_VERSION = '2.32.1';
+export const PROJECT_REFRESH_NATIVE_SHA256 = '9728f6eb169fd63a7b154934c7151932152fcc93ca97720117237218df907490';
+export const PROVIDER_NATIVE_SHA256 = '319c1abd18b4d12ac2149473f04b07be8671d230ecf12adf4cb7d1e3fe85edf6';
 
 // The existing getCAICProject call reads a cached LoadCodeAssist response before
 // its caller obtains the current HTTP client/token. An account change can then
@@ -22,6 +22,10 @@ export const PROVIDER_NATIVE_SHA256 = 'ff323094c41c50508bd4b9d8cc66230c36d2c245d
 // same cache, dictionary and context, returning the fetched response and error.
 export const PROJECT_REFRESH_PROFILES = Object.freeze([
   Object.freeze({ version: PROJECT_REFRESH_VERSION, projectSha256: PROJECT_REFRESH_NATIVE_SHA256, providerSha256: PROVIDER_NATIVE_SHA256,
+    address: 0x142860333n, originalTarget: 0x142874600n, refreshedTarget: 0x142874b60n, dictionaryAddress: 0x14441a140n,
+    before: 'e8c8420100', after: 'e828480100' }),
+  Object.freeze({ version: '2.31.2', projectSha256: '33bad001301bf863bb7108e77667aaf24c649981335f5d220656c75e59818508',
+    providerSha256: 'ff323094c41c50508bd4b9d8cc66230c36d2c245df68a0216010603725aa866c',
     address: 0x14231e533n, originalTarget: 0x142333de0n, refreshedTarget: 0x142334340n, dictionaryAddress: 0x14429f1c0n,
     before: 'e8a8580100', after: 'e8085e0100' }),
   Object.freeze({ version: '2.31.0', projectSha256: '39b06d761fbfa7f83090b7531b1e64c062150ba366cd97233ffc86bee3352677',

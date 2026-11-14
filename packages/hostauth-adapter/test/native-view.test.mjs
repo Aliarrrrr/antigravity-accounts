@@ -200,6 +200,22 @@ test('only native windows receive public status; payload strings remain data', a
   assert.equal((await refreshNativeViews({ electron, origin: 'https://127.0.0.1:12345', phase: 'clear' })).cleared, true);
 });
 
+test('BaseWindow Hub views capture, refresh and clear while the BrowserWindow collection is empty', async () => {
+  const h = harness(), session = {}, calls = [];
+  const window = { isDestroyed: () => false };
+  const contents = { session, mainFrame: { parent: null }, getURL: () => 'https://127.0.0.1:12345/c/conversation',
+    async executeJavaScript(source) { calls.push(source); return vm.runInNewContext(source, h.context); } };
+  const electron = { BrowserWindow: { getAllWindows: () => [] }, session: { defaultSession: session } };
+  const hostWindowAccess = { getLocalHubWindows: () => [window], getHubWebContents: () => contents,
+    isLocalHubTopFrame: event => event.sender === contents && event.senderFrame === contents.mainFrame };
+  const options = { electron, origin: 'https://127.0.0.1:12345', hostWindowAccess };
+  assert.equal((await refreshNativeViews({ ...options, phase: 'capture' })).captured, true);
+  assert.equal((await refreshNativeViews({ ...options, userStatus: { models: [config(2)] } })).selectionReady, true);
+  assert.equal((await refreshNativeViews({ ...options, phase: 'clear' })).cleared, true);
+  assert.equal(calls.length, 3);
+  assert.equal(h.listenerCount(), 0);
+});
+
 test('a native status poll before confirmation cannot turn the missing old model into an accepted fallback', () => {
   const h = harness();
   assert.equal(h.capture().captured, true);

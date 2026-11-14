@@ -4,30 +4,53 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { CHANNEL, createModelMenuBridge } = require('../src/model-menu-bridge.cjs');
 
-function harness({ fail, preferences } = {}) {
+function harness({ fail, preferences, baseWindow = false } = {}) {
   const handlers = new Map(), calls = [], opened = [];
   const preloads = new Map();
   const sender = { getURL: () => frame.url, async executeJavaScript(source) { opened.push(source); } }, frame = { url: 'https://127.0.0.1:12345/?local=fake', parent: null };
   sender.mainFrame = frame;
   let destroyed = false, accountWindow = false;
   const window = { webContents: sender, isDestroyed: () => destroyed, show() {}, focus() {} };
+  const session = {
+    registerPreloadScript(script) { assert.equal(script.type, 'frame'); assert.equal(script.filePath.endsWith('model-menu-preload.cjs'), true); preloads.set('model-menu', script); return 'model-menu'; },
+    unregisterPreloadScript(id) { preloads.delete(id); },
+  };
+  sender.session = session;
+  const hostWindowAccess = baseWindow ? {
+    getLocalHubWindows: () => [window], getHubWebContents: () => sender,
+    isLocalHubTopFrame: event => event.sender === sender && event.senderFrame === frame,
+  } : undefined;
   const bridge = createModelMenuBridge({ electron: {
-    BrowserWindow: { fromWebContents: value => value === sender ? window : undefined, getAllWindows: () => [window] },
+    BrowserWindow: { fromWebContents: value => !baseWindow && value === sender ? window : undefined, getAllWindows: () => baseWindow ? [] : [window] },
     ipcMain: { handle(name, callback) { assert.equal(handlers.has(name), false); handlers.set(name, callback); }, removeHandler(name) { handlers.delete(name); } },
-    session: { defaultSession: {
-      registerPreloadScript(script) { assert.equal(script.type, 'frame'); assert.equal(script.filePath.endsWith('model-menu-preload.cjs'), true); preloads.set('model-menu', script); return 'model-menu'; },
-      unregisterPreloadScript(id) { preloads.delete(id); },
-    } },
+    session: { defaultSession: session },
   }, client: { async request(method, params) {
     if (fail) throw fail;
     calls.push({ method, params });
     if (method === 'getStatus') return { configured: true, selectedAccountId: 'a', login: { state: 'idle', token: 'PRIVATE' }, switch: { state: 'active' }, accessToken: 'PRIVATE' };
     if (method === 'listAccounts') return [{ id: 'a', label: 'Work', selected: true, token: 'PRIVATE' }];
     return { refreshToken: 'PRIVATE' };
-  } }, preferences, isAccountWindow: () => accountWindow });
+  } }, preferences, isAccountWindow: () => accountWindow, hostWindowAccess });
   return { handlers, opened, calls, preloads, frame, sender, window, bridge, event: { sender, senderFrame: frame },
     destroy() { destroyed = true; }, manager() { accountWindow = true; } };
 }
+
+test('BaseWindow Hub views receive native menu actions and preference broadcasts without BrowserWindow lookup', async () => {
+  const h = harness({ baseWindow: true, preferences: { async set(value) { return value; } } });
+  const sent = [];
+  h.sender.send = (...args) => sent.push(args);
+  h.window.webContents = { getURL: () => 'data:text/html,shell', executeJavaScript() { assert.fail('Base shell is not the Hub UI'); } };
+  try {
+    h.bridge.setEndpoint('https://127.0.0.1:12345');
+    const handle = h.handlers.get(CHANNEL);
+    assert.equal((await handle(h.event, { method: 'getState' })).accounts.length, 1);
+    assert.deepEqual(await handle(h.event, { method: 'selectAccount', params: { id: 'b' } }), { accepted: true });
+    await handle(h.event, { method: 'setPreferences', params: { dataUsageConsent: 'off' } });
+    assert.deepEqual(sent, [[CHANNEL + ':preferences', { dataUsageConsent: 'off' }]]);
+    await h.bridge.open(h.window);
+    assert.equal(h.opened.length, 1);
+  } finally { h.bridge.close(); }
+});
 
 test('model menu reads only public state and accepts bounded account actions', async () => {
   const h = harness(), handle = h.handlers.get(CHANNEL);
@@ -118,6 +141,9 @@ test('model-menu IPC rejects foreign frames, other origins, manager pages and de
     h => { h.frame.url = 'file:///local/accounts/index.html'; },
     h => { h.frame.url = 'https://localhost:12345/'; },
     h => { h.event.sender = { mainFrame: h.frame }; },
+    h => { h.sender.session = {}; },
+    h => { h.sender.isDestroyed = () => true; },
+    h => { h.sender.getType = () => 'webview'; },
     h => { h.destroy(); },
     h => { h.manager(); },
   ]) {
