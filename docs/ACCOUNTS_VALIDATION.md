@@ -1,4 +1,10 @@
-# Accounts 0.4.0-preview.17 validation scope
+# Accounts 0.4.0-preview.18 validation scope
+
+## Preview.18 Windows compatibility follow-up — 14 November 2026
+
+The preview.17 candidate below was built from commit `9d0eee3354da9df1271d2c17b1b5c4b2cfd748d4`, installed on the existing Antigravity 2.32.1 application through the new coordinator, and launched in Chinese through the stable bootstrap. The two saved accounts completed A to B to A: each confirmation finished, the welcome identity updated, the original primary account was selected again, and the selected project and Gemini 3.8 Flash High remained. The account component and language-service PIDs did not change. The management panel retained both accounts and the existing preference. There were no model submissions, account edits or conversation-body inspections. Normal background account/project/quota requests were not counted.
+
+The pushed preview.17 tag did not publish release assets. Its English-Windows CI run exposed non-Unicode shortcut handling and failures with the runner's 8.3 temporary-directory alias. Local testing on a Chinese Windows installation had not exposed these differences. Preview.18 uses `IShellLinkW` and `IPersistFile`, reads UTF-8 metadata explicitly, normalizes both sides of the Swarm working-directory comparison, and constructs test receipts and mutexes with the same physical directories used in production. All 59 affected Windows cases passed with both normal TEMP and a real `AGYCAN~2` alias, including Chinese and emoji shortcut names. The preview.17 copied-program and installed-window results below retain their original scope. Neither release performs a real vendor-installer upgrade or establishes quota attribution, generation, nonempty-draft preservation or long-context continuation.
 
 ## Preview.17 combined compatibility updates — 14 November 2026
 
@@ -10,7 +16,7 @@ On a separate copy of the official 2.32.1 installation, the coordinator construc
 
 All 26 compatibility tests passed without skips. They cover fixed-repository selection, checksums and release commits, preparation retry after corruption, downgrade refusal, deferred activation, engine fallback, operation refusals, persistent notice deduplication, and preservation of enabled-component settings and redirected account-state roots. Windows ZIP extraction rejects parent traversal, case-insensitive duplicate paths and links before writing any archive entry. Package inspection covers both directory contents and ZIP payloads; the combined bundle contains 429 payload files, including the 55-file Accounts distribution. No official program, authorization file or conversation database is included.
 
-The installed-window A to B to A result in the preview.16 section remains the latest recorded UI check in this packaged document. No model generation or quota attribution was added by these automated and copied-program checks.
+The preview.17 installed-window A to B to A result is recorded in the follow-up section above. No model generation or quota attribution was added by these automated and copied-program checks.
 
 ## Preview.16 native-window switching repair — 14 November 2026
 

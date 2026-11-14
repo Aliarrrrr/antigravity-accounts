@@ -17,7 +17,7 @@ test('Swarm Board exemption requires its exact external working directory and pa
     assert.equal(path.dirname(knownRoot),await fs.realpath(os.tmpdir()));
     await fs.rm(knownRoot,{recursive:true,force:true});
   });
-  const profile=path.join(root,'user'),roaming=path.join(root,'roaming'),install=path.join(root,'install');
+  const profile=path.join(knownRoot,'user'),roaming=path.join(knownRoot,'roaming'),install=path.join(knownRoot,'install');
   const board=path.join(profile,'.gemini','antigravity','builtin','plugins','swarm','sidecars','swarm_board');
   const shim=path.join(roaming,'Antigravity','bin','agy-node.cmd');
   const executable=path.join(install,'Antigravity.exe');
@@ -32,6 +32,7 @@ test('Swarm Board exemption requires its exact external working directory and pa
   const gui={ProcessId:301,ExecutablePath:executable,CommandLine:'"'+executable+'"'};
   const cases=[
     {name:'known board',cwd:board,processes:[parent,child],want:[101]},
+    {name:'working directory may use the TEMP alias',cwd:path.join(root,path.relative(knownRoot,board)),processes:[parent,child],want:[101]},
     {name:'board and GUI',cwd:board,processes:[parent,child,gui],want:[101]},
     {name:'another directory',cwd:install,processes:[parent,child],want:[]},
     {name:'unavailable directory',cwd:null,processes:[parent,child],want:[]},
@@ -46,7 +47,7 @@ test('Swarm Board exemption requires its exact external working directory and pa
 param([string]$Scripts,[string]$Dataset,[string]$Install,[string]$Board)
 $ErrorActionPreference='Stop'
 . (Join-Path $Scripts 'Node-Sidecar-State.ps1')
-$cases=Get-Content -LiteralPath $Dataset -Raw | ConvertFrom-Json
+$cases=Get-Content -LiteralPath $Dataset -Raw -Encoding UTF8 | ConvertFrom-Json
 $results=@(foreach($case in $cases) {
   $main=Join-Path $Board 'main.mjs'
   if($case.missing) { [IO.File]::Delete($main) } else { [IO.File]::WriteAllText($main,'// test sidecar') }

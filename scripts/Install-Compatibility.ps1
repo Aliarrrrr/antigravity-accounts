@@ -11,6 +11,7 @@ param(
   [switch]$StartWatcher
 )
 $ErrorActionPreference = 'Stop'
+. (Join-Path $BundleRoot 'localization\scripts\Unicode-Shortcut.ps1')
 foreach ($name in @('BundleRoot','StateRoot','LocalizationStateRoot','AccountsStateRoot','ToolkitRoot','NodePath','InstallRoot')) {
   Set-Variable -Name $name -Value ([IO.Path]::GetFullPath((Get-Variable -Name $name -ValueOnly)))
 }
@@ -43,7 +44,7 @@ if (Test-Path -LiteralPath (Join-Path $oldPersistence 'install.json')) {
 $oldLock = Join-Path $LocalizationStateRoot 'watcher.lock'
 $deadline = [DateTime]::UtcNow.AddSeconds(30)
 while (Test-Path -LiteralPath $oldLock) {
-  $record = Get-Content -LiteralPath $oldLock -Raw | ConvertFrom-Json
+  $record = Get-Content -LiteralPath $oldLock -Raw -Encoding UTF8 | ConvertFrom-Json
   if (-not ($record.pid -is [int] -or $record.pid -is [long]) -or -not (Get-Process -Id $record.pid -ErrorAction SilentlyContinue)) { break }
   if ([DateTime]::UtcNow -ge $deadline) { throw 'compatibility_previous_watcher_busy' }
   Start-Sleep -Milliseconds 250
@@ -76,9 +77,8 @@ $desktop = [Environment]::GetFolderPath('Desktop')
 $startMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
 $startup = Join-Path $startMenu 'Startup\AntigravityZhCN-Watcher.vbs'
 $shortcuts = @((Join-Path $desktop 'Antigravity.lnk'),(Join-Path $startMenu 'Antigravity.lnk'),(Join-Path $startMenu 'Antigravity（简体中文）.lnk'))
-$shell = New-Object -ComObject WScript.Shell
 foreach ($filename in $shortcuts) {
-  $link = $shell.CreateShortcut($filename)
+  $link = New-UnicodeShortcut -Path $filename
   $link.TargetPath = $wscript
   $link.Arguments = $launchArguments
   $link.WorkingDirectory = $InstallRoot

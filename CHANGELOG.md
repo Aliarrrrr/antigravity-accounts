@@ -1,6 +1,11 @@
 # Changelog
 
-## Accounts 0.4.0-preview.17 — 2026-11-14
+## Accounts 0.4.0-preview.18 — 2026-11-14
+
+- Publishes the combined Accounts/localization updater introduced in the local preview.17 candidate. Preview.17 passed the installed-client round trip below but its English-Windows CI checks failed and no release assets were published.
+- Corrects Unicode shortcut handling and explicit UTF-8 metadata reads on Windows, and checks paths supplied through an 8.3 temporary-directory alias. The detailed failure and validation scope are recorded in `docs/ACCOUNTS_VALIDATION.md`.
+
+## Accounts 0.4.0-preview.17 — 2026-11-14 (local candidate)
 
 - 增加包含 Accounts、中文引擎及生产依赖的成套兼容包；固定启动入口使用版本目录，自动校验并准备本仓库的新预览包，正常退出后再应用。
 - 两层先构建最终候选再修改安装；逐文件记录恢复内容，遇到未知文件或宿主再次更新时停止旧恢复。保留原账号授权及两套状态目录。

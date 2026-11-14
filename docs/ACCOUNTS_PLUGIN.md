@@ -1,4 +1,4 @@
-# Antigravity Accounts · 0.4.0-preview.17
+# Antigravity Accounts · 0.4.0-preview.18
 
 本版同时提供独立 Accounts 包与中文成套兼容包。成套包的自动准备、退出后应用、组件状态和恢复限制见[兼容更新说明](COMPATIBILITY_UPDATES.md)。独立包的安装顺序保持如下约定。
 

@@ -11,6 +11,7 @@
   [switch]$Uninstall
 )
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Unicode-Shortcut.ps1')
 if (-not $StateRoot) { $StateRoot = Join-Path $ToolkitRoot 'state' }
 $InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
 $ToolkitRoot = [IO.Path]::GetFullPath($ToolkitRoot)
@@ -24,10 +25,9 @@ $wscript = Join-Path $env:SystemRoot 'System32\wscript.exe'
 $launchVbs = Join-Path $ToolkitRoot 'scripts\Launch-Localized.vbs'
 $watchVbs = Join-Path $ToolkitRoot 'scripts\Watch-Localized.vbs'
 $startupPath = Join-Path ([IO.Path]::GetFullPath($StartupDirectory)) 'AntigravityZhCN-Watcher.vbs'
-$chineseName = 'Antigravity（简体中文）.lnk'
+$chineseName = 'Antigravity' + [char]0xff08 + [char]0x7b80 + [char]0x4f53 + [char]0x4e2d + [char]0x6587 + [char]0xff09 + '.lnk'
 $shortcutPaths = @((Join-Path ([IO.Path]::GetFullPath($DesktopDirectory)) 'Antigravity.lnk'), (Join-Path ([IO.Path]::GetFullPath($StartMenuDirectory)) 'Antigravity.lnk'), (Join-Path ([IO.Path]::GetFullPath($StartMenuDirectory)) $chineseName))
 $utf8 = New-Object Text.UTF8Encoding($false)
-$shell = New-Object -ComObject WScript.Shell
 
 function Quote-Argument([string]$value) {
   if ($value.Contains('"') -or $value.Contains("`r") -or $value.Contains("`n")) { throw 'invalid_launch_path' }
@@ -46,7 +46,7 @@ function Write-Manifest($value) {
 }
 function Matches-Shortcut([string]$file, [string]$target, [string]$arguments) {
   if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { return $false }
-  $link = $shell.CreateShortcut($file)
+  $link = New-UnicodeShortcut -Path $file
   return ($link.TargetPath -eq $target -and $link.Arguments -eq $arguments)
 }
 $mutexIdentity = $StateRoot.TrimEnd('\').ToLowerInvariant()
@@ -133,7 +133,7 @@ $snapshots = @($shortcutPaths + $startupPath | ForEach-Object { [pscustomobject]
 try {
   foreach ($file in @($shortcutPaths + $startupPath)) { New-Item -ItemType Directory -Path (Split-Path $file -Parent) -Force | Out-Null }
   foreach ($entry in $manifest.shortcuts) {
-    $link = $shell.CreateShortcut($entry.path)
+    $link = New-UnicodeShortcut -Path $entry.path
     $link.TargetPath = $wscript
     $link.Arguments = $launchArguments
     $link.WorkingDirectory = $ToolkitRoot

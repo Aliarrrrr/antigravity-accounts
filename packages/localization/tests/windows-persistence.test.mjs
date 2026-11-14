@@ -14,9 +14,16 @@ const launcher=path.join(scripts,'Launch-Localized.ps1');
 const windows=process.platform==='win32';
 const powershell=path.join(process.env.SystemRoot||'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe');
 const quote=value=>"'"+value.replaceAll("'","''")+"'";
-function ps(args){return spawnSync(powershell,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass',...args],{encoding:'utf8',timeout:30000});}
+function ps(args){
+  const commandIndex=args.indexOf('-Command');
+  if(commandIndex!==-1){
+    const source=`. ${quote(path.join(scripts,'Unicode-Shortcut.ps1'))};[Console]::OutputEncoding=[Text.UTF8Encoding]::new();`+args[commandIndex+1];
+    args=[...args.slice(0,commandIndex),'-EncodedCommand',Buffer.from(source,'utf16le').toString('base64')];
+  }
+  return spawnSync(powershell,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass',...args],{encoding:'utf8',timeout:30000});
+}
 async function temporary(fn){
-  const temp=await fs.mkdtemp(path.join(os.tmpdir(),'agy persistence '));
+  const temp=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'agy persistence ')));
   try{return await fn(temp);}finally{await fs.rm(temp,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
 }
 async function fixture(temp,{unrelated=false}={}){
@@ -29,16 +36,24 @@ async function fixture(temp,{unrelated=false}={}){
     try{await fs.copyFile(path.join(scripts,name),path.join(toolkit,'scripts',name));}catch(error){if(error.code!=='ENOENT')throw error;await fs.writeFile(path.join(toolkit,'scripts',name),'implementation pending');}
   }
   const shortcuts=[path.join(desktop,'Antigravity.lnk'),path.join(menu,'Antigravity.lnk'),path.join(menu,'Antigravity（简体中文）.lnk')];
-  const create=ps(['-Command',"$s=New-Object -ComObject WScript.Shell;"+shortcuts.map((file,index)=>`$l=$s.CreateShortcut(${quote(file)});$l.TargetPath=${quote(unrelated&&index===2?process.execPath:path.join(install,'Antigravity.exe'))};$l.Arguments='';$l.WorkingDirectory=${quote(install)};$l.Save();`).join('')]);
+  const create=ps(['-Command',shortcuts.map((file,index)=>`$l=New-UnicodeShortcut -Path ${quote(file)};$l.TargetPath=${quote(unrelated&&index===2?process.execPath:path.join(install,'Antigravity.exe'))};$l.Arguments='';$l.WorkingDirectory=${quote(install)};$l.Save();`).join('')]);
   assert.equal(create.status,0,create.stderr);
   const originals=await Promise.all(shortcuts.map(file=>fs.readFile(file)));
   const args=['-InstallRoot',install,'-ToolkitRoot',toolkit,'-NodePath',process.execPath,'-StateRoot',state,'-DesktopDirectory',desktop,'-StartMenuDirectory',menu,'-StartupDirectory',startup];
   return {install,toolkit,state,desktop,menu,startup,shortcuts,originals,args};
 }
 function shortcutInfo(files){
-  const result=ps(['-Command',"[Console]::OutputEncoding=[Text.UTF8Encoding]::new();$s=New-Object -ComObject WScript.Shell;$r=@("+files.map(file=>`$l=$s.CreateShortcut(${quote(file)});[pscustomobject]@{target=$l.TargetPath;arguments=$l.Arguments}`).join(';')+");ConvertTo-Json -InputObject $r -Compress"]);
+  const result=ps(['-Command',"$r=@("+files.map(file=>`$l=New-UnicodeShortcut -Path ${quote(file)};[pscustomobject]@{target=$l.TargetPath;arguments=$l.Arguments}`).join(';')+");ConvertTo-Json -InputObject $r -Compress"]);
   assert.equal(result.status,0,result.stderr);return JSON.parse(result.stdout.trim());
 }
+
+test('Unicode shortcut filenames and arguments survive characters outside an ANSI code page',{skip:!windows},async()=>temporary(async temp=>{
+  const directory=path.join(temp,'folder \u{1f9ed} 中文');await fs.mkdir(directory);
+  const filename=path.join(directory,'Antigravity \u{1f680}（简体中文）.lnk'),argumentsText='--label "\u{1f9ed} 中文"';
+  const created=ps(['-Command',`$l=New-UnicodeShortcut -Path ${quote(filename)};$l.TargetPath=${quote(process.execPath)};$l.Arguments=${quote(argumentsText)};$l.WorkingDirectory=${quote(directory)};$l.Save();`]);
+  assert.equal(created.status,0,created.stderr);assert.ok((await fs.stat(filename)).size>0);
+  const info=shortcutInfo([filename])[0];assert.equal(info.target,process.execPath);assert.equal(info.arguments,argumentsText);
+}));
 
 test('Windows installer guards all launch shortcuts and preserves immutable originals across reinstall',{skip:!windows},async()=>temporary(async temp=>{
   const f=await fixture(temp);
@@ -74,7 +89,7 @@ test('Windows uninstall restores exact shortcut bytes and removes only the owned
 test('Uninstall restores original shortcut bytes after an official updater recreates a direct shortcut',{skip:!windows},async()=>temporary(async temp=>{
   const f=await fixture(temp);const installed=ps(['-File',installer,...f.args]);assert.equal(installed.status,0,installed.stderr);
   await fs.unlink(f.shortcuts[0]);
-  const recreated=ps(['-Command',`$s=New-Object -ComObject WScript.Shell;$l=$s.CreateShortcut(${quote(f.shortcuts[0])});$l.TargetPath=${quote(path.join(f.install,'Antigravity.exe'))};$l.Arguments='';$l.Description='Recreated by official updater';$l.WorkingDirectory=${quote(f.toolkit)};$l.Save();`]);
+  const recreated=ps(['-Command',`$l=New-UnicodeShortcut -Path ${quote(f.shortcuts[0])};$l.TargetPath=${quote(path.join(f.install,'Antigravity.exe'))};$l.Arguments='';$l.Description='Recreated by official updater';$l.WorkingDirectory=${quote(f.toolkit)};$l.Save();`]);
   assert.equal(recreated.status,0,recreated.stderr);assert.notDeepEqual(await fs.readFile(f.shortcuts[0]),f.originals[0]);
   const removed=ps(['-File',installer,...f.args,'-Uninstall']);assert.equal(removed.status,0,removed.stderr);
   for(let i=0;i<3;i++)assert.deepEqual(await fs.readFile(f.shortcuts[i]),f.originals[i]);
@@ -85,7 +100,7 @@ test('Uninstall restores original shortcut bytes after an official updater recre
 
 test('Uninstall still refuses an unknown replacement shortcut and leaves integration unchanged',{skip:!windows},async()=>temporary(async temp=>{
   const f=await fixture(temp);const installed=ps(['-File',installer,...f.args]);assert.equal(installed.status,0,installed.stderr);
-  const replaced=ps(['-Command',`$s=New-Object -ComObject WScript.Shell;$l=$s.CreateShortcut(${quote(f.shortcuts[0])});$l.TargetPath=${quote(process.execPath)};$l.Arguments='';$l.Description='Unrelated application';$l.Save();`]);
+  const replaced=ps(['-Command',`$l=New-UnicodeShortcut -Path ${quote(f.shortcuts[0])};$l.TargetPath=${quote(process.execPath)};$l.Arguments='';$l.Description='Unrelated application';$l.Save();`]);
   assert.equal(replaced.status,0,replaced.stderr);const before=await fs.readFile(f.shortcuts[0]);
   const removed=ps(['-File',installer,...f.args,'-Uninstall']);assert.notEqual(removed.status,0);assert.match(removed.stderr,/shortcut_not_owned/);
   assert.deepEqual(await fs.readFile(f.shortcuts[0]),before);

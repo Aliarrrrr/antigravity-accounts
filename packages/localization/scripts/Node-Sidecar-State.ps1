@@ -30,7 +30,7 @@ function Get-NodeSidecarProcessIds($Processes, [string]$InstallRoot,
       $boardRoot = Join-Path $env:USERPROFILE '.gemini\antigravity\builtin\plugins\swarm\sidecars\swarm_board'
       try {
         $workingDirectory = & $WorkingDirectoryReader ([int]$entry.ProcessId)
-        if (-not $workingDirectory -or [IO.Path]::GetFullPath($workingDirectory).TrimEnd('\') -ine $boardRoot) { continue }
+        if (-not $workingDirectory -or [IO.Path]::GetFullPath($workingDirectory).TrimEnd('\') -ine [IO.Path]::GetFullPath($boardRoot).TrimEnd('\')) { continue }
         $main = Get-Item -LiteralPath (Join-Path $boardRoot 'main.mjs') -Force -ErrorAction Stop
         if ($main.PSIsContainer -or ($main.Attributes -band [IO.FileAttributes]::ReparsePoint)) { continue }
       } catch { continue }

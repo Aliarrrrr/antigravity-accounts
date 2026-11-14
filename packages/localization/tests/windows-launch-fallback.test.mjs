@@ -20,7 +20,10 @@ async function waitJson(file){
   assert.fail('application did not receive launch arguments');
 }
 test('Windows bootstrap recovery launches a complete app when localization runtime cannot load',{skip:process.platform!=='win32'},async t=>{
-  const temp=await fs.mkdtemp(path.join(os.tmpdir(),'agy launch recovery '));
+  const inputTemp=await fs.mkdtemp(path.join(os.tmpdir(),'agy launch recovery '));
+  // Receipts and production mutexes use fs.realpath, even when TEMP is an 8.3
+  // alias. Keep the launch inputs aliased to exercise the PowerShell boundary.
+  const temp=await fs.realpath(inputTemp);
   const install=path.join(temp,'app installation'),toolkit=path.join(temp,'tool 工具 kit'),state=path.join(temp,'guard 中文 state');
   const resources=path.join(install,'resources'),source=path.join(temp,'source');
   try{
@@ -41,7 +44,7 @@ test('Windows bootstrap recovery launches a complete app when localization runti
     const actualArgs=['', 'a b','中文','literal $value','quote"inside','slash\\end\\','line\nfeed','amp&pipe|','\\"'];
     const launchArgs=[appScript,received,...actualArgs];
     const missingNode=path.join(temp,'missing node.exe');
-    const settings=['-File',fixtureLauncher,'-InstallRoot',install,'-ToolkitRoot',toolkit,'-StateRoot',state,'-ArgumentsJsonBase64',Buffer.from(JSON.stringify(launchArgs),'utf8').toString('base64'),'-NoPopup'];
+    const settings=['-File',fixtureLauncher,'-InstallRoot',path.join(inputTemp,'app installation'),'-ToolkitRoot',toolkit,'-StateRoot',path.join(inputTemp,'guard 中文 state'),'-ArgumentsJsonBase64',Buffer.from(JSON.stringify(launchArgs),'utf8').toString('base64'),'-NoPopup'];
     const originals=await Promise.all(['app.asar','app.asar.unpacked/dist/external.js'].map(file=>fs.readFile(path.join(resources,file))));
     const removeReceived=()=>fs.rm(received,{force:true});
     await t.test('missing Node launches original with literal arguments and records degraded mode',async()=>{

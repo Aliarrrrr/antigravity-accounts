@@ -3,7 +3,7 @@
   "files": [
     "package.json", "package-lock.json", "localize.mjs", "durable.mjs",
     "LICENSE", "LICENSE.upstream", "THIRD_PARTY_NOTICES.md", "README.md",
-    "scripts/Hold-Mutex.ps1", "scripts/Install-Persistence.ps1",
+    "scripts/Hold-Mutex.ps1", "scripts/Install-Persistence.ps1", "scripts/Unicode-Shortcut.ps1",
     "scripts/Launch-Localized.ps1", "scripts/Launch-Localized.vbs",
     "scripts/Maintenance-State.ps1", "scripts/Node-Sidecar-State.ps1",
     "scripts/Process-State.ps1", "scripts/Process-WorkingDirectory.ps1",

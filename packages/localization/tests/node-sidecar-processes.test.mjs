@@ -17,7 +17,7 @@ test('process checks exempt only the verified external Electron Node sidecar',{s
   t.after(async()=>{
     const resolved=await fs.realpath(temporaryRoot);
     assert.equal(resolved,knownRoot,'temporary directory changed before cleanup');
-    assert.equal(path.dirname(resolved),path.resolve(os.tmpdir()));
+    assert.equal(path.dirname(resolved),await fs.realpath(os.tmpdir()));
     assert.ok(path.basename(resolved).startsWith('agy-node-sidecar-'));
     await fs.rm(resolved,{recursive:true,force:true});
   });
