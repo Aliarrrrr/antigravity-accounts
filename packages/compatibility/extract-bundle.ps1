@@ -1,9 +1,15 @@
 param([Parameter(Mandatory)][string]$ZipPath, [Parameter(Mandatory)][string]$OutputRoot)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
+function Extended-Path([string]$value) {
+  $full = [IO.Path]::GetFullPath($value)
+  if ($full.StartsWith('\\?\')) { return $full }
+  if ($full.StartsWith('\\')) { return '\\?\UNC\' + $full.Substring(2) }
+  return '\\?\' + $full
+}
 $root = [IO.Path]::GetFullPath($OutputRoot).TrimEnd('\')
 if (Test-Path -LiteralPath $root) { throw 'compatibility_extract_target_exists' }
-$archive = [IO.Compression.ZipFile]::OpenRead([IO.Path]::GetFullPath($ZipPath))
+$archive = [IO.Compression.ZipFile]::OpenRead((Extended-Path $ZipPath))
 try {
   $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
   [long]$total = 0
@@ -18,11 +24,11 @@ try {
     $target = [IO.Path]::GetFullPath((Join-Path $root $name))
     if (-not $target.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'compatibility_zip_path_invalid' }
   }
-  New-Item -ItemType Directory -Path $root | Out-Null
+  [IO.Directory]::CreateDirectory((Extended-Path $root)) | Out-Null
   foreach ($entry in $archive.Entries) {
     $target = Join-Path $root $entry.FullName
-    if ($entry.FullName.EndsWith('/')) { New-Item -ItemType Directory -Path $target -Force | Out-Null; continue }
-    New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
-    [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $target, $false)
+    if ($entry.FullName.EndsWith('/')) { [IO.Directory]::CreateDirectory((Extended-Path $target)) | Out-Null; continue }
+    [IO.Directory]::CreateDirectory((Extended-Path ([IO.Path]::GetDirectoryName($target)))) | Out-Null
+    [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, (Extended-Path $target), $false)
   }
 } finally { $archive.Dispose() }

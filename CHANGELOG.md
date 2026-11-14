@@ -1,5 +1,10 @@
 # Changelog
 
+## Accounts 0.4.0-preview.19 — 2026-11-14
+
+- Fixes compatibility ZIP preparation under deep Windows state directories. Windows PowerShell 5 extraction now uses extended paths after the existing archive-path validation, without changing system settings. The published preview.18 bundle was extracted and validated at the actual failing download location with this fix.
+- Adds a dependency-path case beyond 260 characters. All 28 compatibility cases passed, including traversal, duplicate-name and link refusals. Preview.18's standalone Accounts ZIP passed its published checksum, source identity and ZIP checks; its combined automatic preparation failed before changing the current installation.
+
 ## Accounts 0.4.0-preview.18 — 2026-11-14
 
 - Publishes the combined Accounts/localization updater introduced in the local preview.17 candidate. Preview.17 passed the installed-client round trip below but its English-Windows CI checks failed and no release assets were published.

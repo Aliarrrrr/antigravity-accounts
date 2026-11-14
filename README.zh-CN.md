@@ -2,7 +2,7 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-**0.4.0-preview.18** 增加[汉化与 Accounts 成套更新](docs/COMPATIBILITY_UPDATES.md)。已安装两者时可使用[成套兼容包](https://github.com/Aliarrrrr/antigravity-accounts/releases/tag/accounts-v0.4.0-preview.18)：从固定仓库校验并准备新引擎，正常退出后应用；未知原生程序不会被强行修改。独立 Accounts ZIP 继续提供。
+**0.4.0-preview.19** 增加[汉化与 Accounts 成套更新](docs/COMPATIBILITY_UPDATES.md)。已安装两者时可使用[成套兼容包](https://github.com/Aliarrrrr/antigravity-accounts/releases/tag/accounts-v0.4.0-preview.19)：从固定仓库校验并准备新引擎，正常退出后应用；未知原生程序不会被强行修改。独立 Accounts ZIP 继续提供。
 
 本机 2.32.1 已完成两个已保存账号 A → B → A 切换，项目和模型选择保留。本轮未发送模型请求，不代表已验证实际扣额或跨账号生成；详见[检查记录](docs/ACCOUNTS_VALIDATION.md)。
 
@@ -10,7 +10,7 @@
 
 **在 Antigravity 原生模型列表中使用已授权的 Google 账号。**
 
-![Preview 0.4.0-preview.18](https://img.shields.io/badge/preview-0.4.0--preview.17-8b5cf6)
+![Preview 0.4.0-preview.19](https://img.shields.io/badge/preview-0.4.0--preview.17-8b5cf6)
 ![Windows x64](https://img.shields.io/badge/platform-Windows%20x64-0078D4)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
@@ -18,7 +18,7 @@ Antigravity Accounts 在现有模型菜单中加入账号分组，保留官方�
 
 这是通过 ZIP 分发的 **Windows 非官方宿主适配预览版**，尚未在 Antigravity 插件市场收录。单独安装 `plugin.json` 不会启用账号切换。
 
-[下载 preview.17](https://github.com/Aliarrrrr/antigravity-accounts/releases/tag/accounts-v0.4.0-preview.18) · [安装说明](docs/ACCOUNTS_PLUGIN.md) · [更新日志](CHANGELOG.md) · [检查记录](docs/ACCOUNTS_VALIDATION.md)
+[下载 preview.17](https://github.com/Aliarrrrr/antigravity-accounts/releases/tag/accounts-v0.4.0-preview.19) · [安装说明](docs/ACCOUNTS_PLUGIN.md) · [更新日志](CHANGELOG.md) · [检查记录](docs/ACCOUNTS_VALIDATION.md)
 
 ## 安装
 
@@ -28,13 +28,13 @@ Antigravity Accounts 在现有模型菜单中加入账号分组，保留官方�
 | Antigravity App | 已检查的 2.32.1、2.31.2、2.31.0、2.29.0、2.28.2 程序组合 |
 | 额外运行时 | 分发包无需另装运行时；.NET 组件自包含，安装辅助程序使用已安装的 Electron 运行时 |
 
-1. 下载并完整解压 [AntigravityAccounts-0.4.0-preview.18-win-x64.zip](https://github.com/Aliarrrrr/antigravity-accounts/releases/download/accounts-v0.4.0-preview.18/AntigravityAccounts-0.4.0-preview.18-win-x64.zip)。
+1. 下载并完整解压 [AntigravityAccounts-0.4.0-preview.19-win-x64.zip](https://github.com/Aliarrrrr/antigravity-accounts/releases/download/accounts-v0.4.0-preview.19/AntigravityAccounts-0.4.0-preview.19-win-x64.zip)。
 2. 完全退出 Antigravity。若应用常驻系统托盘，请从托盘菜单选择“退出”。
 3. 在解压后的 `AntigravityAccounts` 目录运行 `Install-Preview.cmd`，然后正常启动 Antigravity。
 
 安装器会检查已安装的程序、保存原始文件，再应用本机宿主适配，不修改 `Antigravity.exe`。请保留完整分发目录及校验文件，以便恢复。
 
-仅使用独立 Accounts ZIP、宿主版本未变时，先退出 Antigravity，运行**新解压 preview.18 包**中的 `Restore.cmd`，再运行同包的 `Install-Preview.cmd`。宿主已被官方更新替换为上表支持的新原程序时，直接运行新版 `Install-Preview.cmd`，安装器会保存旧记录并对当前程序重新准备适配。已保存的账号授权会保留。已安装汉化与 Accounts 的用户可改用[成套兼容包](docs/COMPATIBILITY_UPDATES.md)，统一准备两层并保留原状态目录。旧入口单独操作 Accounts 时仍需先恢复中文层、完成后再应用中文层。详见[安装说明](docs/ACCOUNTS_PLUGIN.md#安装)。
+仅使用独立 Accounts ZIP、宿主版本未变时，先退出 Antigravity，运行**新解压 preview.19 包**中的 `Restore.cmd`，再运行同包的 `Install-Preview.cmd`。宿主已被官方更新替换为上表支持的新原程序时，直接运行新版 `Install-Preview.cmd`，安装器会保存旧记录并对当前程序重新准备适配。已保存的账号授权会保留。已安装汉化与 Accounts 的用户可改用[成套兼容包](docs/COMPATIBILITY_UPDATES.md)，统一准备两层并保留原状态目录。旧入口单独操作 Accounts 时仍需先恢复中文层、完成后再应用中文层。详见[安装说明](docs/ACCOUNTS_PLUGIN.md#安装)。
 
 自定义安装目录时，在运行安装器前将 `ANTIGRAVITY_INSTALL_ROOT` 设为包含 `Antigravity.exe` 的目录。
 

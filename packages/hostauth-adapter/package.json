@@ -1,6 +1,6 @@
 {
   "name": "@antigravity-accounts/hostauth-adapter",
-  "version": "0.4.0-preview.18",
+  "version": "0.4.0-preview.19",
   "private": true,
   "type": "module",
   "engines": { "node": ">=22" },

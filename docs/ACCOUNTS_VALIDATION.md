@@ -1,4 +1,10 @@
-# Accounts 0.4.0-preview.18 validation scope
+# Accounts 0.4.0-preview.19 validation scope
+
+## Preview.19 long Windows download paths — 14 November 2026
+
+Preview.18 CI and release publication succeeded at commit `451a6c50401e73689c2840d470545bff93ed3e65`. The published standalone Accounts ZIP passed its checksum, 55-file payload, ZIP and release-source checks. An actual check through the installed preview.17 update client downloaded the published combined ZIP but Windows PowerShell 5 failed to extract a nested npm dependency under the existing state directory: the resulting filename exceeded 260 characters. Preparation returned unavailable before any application changes; the installed preview.17 App remained running.
+
+Preview.19 changes only the Windows extraction file operations to use extended absolute paths after all archive entries pass the existing path, duplicate and link checks. It does not change Windows settings. With the fix, the actual published preview.18 ZIP extracted at the same deep download location and its 430 payload files matched its manifest and release commit. All 28 compatibility tests passed without skips, including a realistic nested dependency path beyond 260 characters. This establishes that Windows extraction case, not a real Antigravity vendor-installer update.
 
 ## Preview.18 Windows compatibility follow-up — 14 November 2026
 

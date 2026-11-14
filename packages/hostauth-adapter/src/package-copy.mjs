@@ -76,7 +76,7 @@ export async function buildCopy({ sourceAsar, outputRoot, componentExecutable, u
     config.frontendBindings = inspectFrontendBindings(extractNativeFrontend(originalNative));
   } else if (!allowMissingPayload) throw new Error('The installed language-server program is required to configure the matching desktop OAuth client');
   const manifest = {
-    schemaVersion: 3, adapterVersion: '0.4.0-preview.18', antigravityVersion: compatibility.antigravityVersion,
+    schemaVersion: 3, adapterVersion: '0.4.0-preview.19', antigravityVersion: compatibility.antigravityVersion,
     originalAsarSha256: sha256(original), patchedAsarSha256: sha256(patched),
     originalSourceSha256: compatibility.sourceSha256, compatibility,
     originalNativeSha256: originalNative ? sha256(originalNative) : undefined,

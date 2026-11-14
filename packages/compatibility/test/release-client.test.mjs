@@ -154,6 +154,15 @@ test('Windows extractor rejects traversal, duplicate names and links before writ
   const extracted=await extractBundle(zip,output);assert.equal(await fs.readFile(path.join(extracted,'file.txt'),'utf8'),'original bytes');
 });
 
+test('Windows ZIP extraction supports dependency paths beyond MAX_PATH',{skip:process.platform!=='win32'},async t=>{
+  const f=await fixture(t),zip=path.join(f.temporary,'long-path.zip');
+  const relative='localization/node_modules/path-scurry/node_modules/lru-cache/dist/commonjs/diagnostics-channel-cjs.cjs.map';
+  const output=path.join(f.temporary,'long-state-directory-'.repeat(5),'downloads','0.4.0-preview.19-'+'a'.repeat(36),'extracted');
+  const expected=path.join(output,'AntigravityCompatibility',relative);assert.ok(expected.length>260);
+  await fs.writeFile(zip,zipEntries([{name:'AntigravityCompatibility/'+relative,text:'dependency bytes'}]));
+  const bundle=await extractBundle(zip,output);assert.equal(await fs.readFile(path.join(bundle,relative),'utf8'),'dependency bytes');
+});
+
 test('watcher waits for normal exit, reconciles owned shortcuts and releases its lock before restart', async t => {
   const f=await fixture(t), order=[];
   await fs.writeFile(path.join(f.state,'active-version.json'),JSON.stringify({schemaVersion:1,version:'0.4.0-preview.16'}));
