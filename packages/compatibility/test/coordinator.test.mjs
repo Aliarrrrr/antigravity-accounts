@@ -6,7 +6,7 @@ import os from 'node:os';
 import {inspectInstallation,prepareInstallation,applyInstallation,ensureInstallation}from '../coordinator.mjs';
 
 async function fixture(t,{accountsFail=false,localizationFail=false,redirectedAccounts=false,accountRootConflict=false}={}){
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'agy-coordinator-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'agy-coordinator-')));t.after(()=>fs.rm(root,{recursive:true,force:true}));
   const options={installRoot:path.join(root,'app'),stateRoot:path.join(root,'state'),accountsStateRoot:path.join(root,'account-data'),localizationStateRoot:path.join(root,'zh-state'),bundleRoot:path.join(root,'bundle'),enabledComponents:{accounts:true,localization:true},checkStopped:async()=>{},validateBundle:async()=>({version:'0.4.0-preview.17'})};
   const write=async(name,text)=>{const target=path.join(options.bundleRoot,name);await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,text);};
   const physicalAccountsRoot=path.join(root,'physical-account-data');
