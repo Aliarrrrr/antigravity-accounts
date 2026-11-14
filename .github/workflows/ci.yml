@@ -31,7 +31,11 @@ jobs:
           cache-dependency-path: packages/hostauth-adapter/package-lock.json
       - name: Install DOM test dependency
         shell: pwsh
-        run: npm ci --prefix packages/hostauth-adapter --ignore-scripts --no-audit --no-fund
+        run: |
+          npm ci --prefix packages/hostauth-adapter --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'Host dependencies failed.' }
+          npm ci --prefix packages/localization --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'Localization dependencies failed.' }
       - name: Build and test Accounts component
         shell: pwsh
         run: ./scripts/Build.ps1 -DotNet dotnet -LockedRestore -Test
@@ -42,6 +46,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Host adapter tests failed.' }
           node --test packages/account-plugin/test/*.test.mjs packages/account-plugin/test/*.test.cjs
           if ($LASTEXITCODE -ne 0) { throw 'Account plugin tests failed.' }
+          npm test --prefix packages/localization
+          if ($LASTEXITCODE -ne 0) { throw 'Localization tests failed.' }
+          node --test packages/compatibility/test/*.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Compatibility tests failed.' }
       - name: Build and inspect portable package
         shell: pwsh
         run: |
@@ -49,3 +57,4 @@ jobs:
           $manifests = @(Get-ChildItem artifacts/accounts/ci -Recurse -Filter package-manifest.json)
           if ($manifests.Count -ne 1) { throw 'Expected exactly one built package.' }
           ./scripts/Test-AccountsPackage.ps1 -PackageRoot $manifests[0].Directory.FullName
+          ./scripts/Publish-Compatibility.ps1 -AccountsPackageRoot $manifests[0].Directory.FullName -OutputRoot artifacts/compatibility/ci

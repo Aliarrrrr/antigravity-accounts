@@ -9,7 +9,7 @@ import { patchNativeProjectRefresh, restoreNativeProjectRefresh } from './native
 import { extractNativeFrontend, inspectFrontendBindings } from './frontend-bindings.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const addonFiles = ['runtime.cjs', 'component-client.cjs', 'switch-coordinator.cjs', 'token-barrier.cjs', 'submission-gate.cjs', 'native-task-adapter.cjs', 'native-agent-state.cjs', 'model-menu-bridge.cjs', 'account-preferences.cjs', 'native-view.cjs', 'local-hub-windows.cjs', 'update-handoff.cjs'];
+const addonFiles = ['runtime.cjs', 'component-client.cjs', 'switch-coordinator.cjs', 'token-barrier.cjs', 'submission-gate.cjs', 'native-task-adapter.cjs', 'native-agent-state.cjs', 'native-program-profiles.cjs', 'model-menu-bridge.cjs', 'account-preferences.cjs', 'native-view.cjs', 'local-hub-windows.cjs', 'update-handoff.cjs'];
 const uiFiles = ['window.cjs'];
 
 function inside(child, parent) { const relative = path.relative(parent, child); return relative === '' || relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative); }
@@ -56,7 +56,7 @@ export async function buildCopy({ sourceAsar, outputRoot, componentExecutable, u
   if (!componentExecutable && !allowMissingPayload) throw new Error('A published independent account component is required');
   const patched = rewriteAsar(original, replacements);
   const componentName = componentExecutable ? path.basename(componentExecutable) : 'ProfileHub.Accounts.exe';
-  const config = { schemaVersion: 1, component: 'component/' + componentName };
+  const config = { schemaVersion: 1, component: 'component/' + componentName, requireRuntimeDiagnostics: true };
   if (accountsStateRoot !== undefined) config.accountsStateRoot = accountsStateRoot;
   let originalNative, patchedNative, nativeDiagnostics, providerNative, nativeProjectRefresh;
   if (languageServerPath) {
@@ -76,7 +76,7 @@ export async function buildCopy({ sourceAsar, outputRoot, componentExecutable, u
     config.frontendBindings = inspectFrontendBindings(extractNativeFrontend(originalNative));
   } else if (!allowMissingPayload) throw new Error('The installed language-server program is required to configure the matching desktop OAuth client');
   const manifest = {
-    schemaVersion: 3, adapterVersion: '0.4.0-preview.16', antigravityVersion: compatibility.antigravityVersion,
+    schemaVersion: 3, adapterVersion: '0.4.0-preview.17', antigravityVersion: compatibility.antigravityVersion,
     originalAsarSha256: sha256(original), patchedAsarSha256: sha256(patched),
     originalSourceSha256: compatibility.sourceSha256, compatibility,
     originalNativeSha256: originalNative ? sha256(originalNative) : undefined,

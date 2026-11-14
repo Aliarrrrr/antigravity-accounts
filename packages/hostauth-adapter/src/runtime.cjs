@@ -127,6 +127,25 @@ async function prepare({ electron, parent, resourcesPath = process.resourcesPath
   let nativeProgramSha256;
   let selectedNativeProgramPath;
   let nativeEndpoint;
+  let viewReadiness = { runtimeState: 'pending' };
+  let readinessCheckedAt = 0;
+  let readinessPromise;
+  async function inspectRuntimeView() {
+    if (!config.requireRuntimeDiagnostics || mode !== 'native-provider') return { runtimeState: 'ready' };
+    if (!nativeEndpoint) return { runtimeState: 'pending' };
+    if (coordinator.operation || Date.now() - readinessCheckedAt < 2000) return viewReadiness;
+    if (!readinessPromise) readinessPromise = (async () => {
+      try {
+        await refreshNativeViews({ electron, origin: nativeEndpoint, phase: 'inspect', bindings: config.frontendBindings });
+        viewReadiness = { runtimeState: 'ready' };
+      } catch (error) {
+        viewReadiness = { runtimeState: 'unavailable', runtimeErrorCode: /^[a-z][a-z0-9_]{0,63}$/.test(error?.code || '') ? error.code : 'native_view_unavailable' };
+      }
+      readinessCheckedAt = Date.now();
+      return viewReadiness;
+    })().finally(() => { readinessPromise = undefined; });
+    return readinessPromise;
+  }
   let coordinator;
   const componentFailed = (code) => {
     componentReady = false;
@@ -155,8 +174,10 @@ async function prepare({ electron, parent, resourcesPath = process.resourcesPath
       }
       if (method === 'getStatus') {
         const status = componentReady ? await client.request(method, params) : { configured: false, selectionLocked: false, selectedAccountId: null, primaryAccountId: null };
+        const readiness = await inspectRuntimeView();
         return { ...status, mode, runtimeStarted: locked, activationRequired: mode === 'registration-only' && Boolean(status.primaryAccountId && status.selectedAccountId && status.configured && !status.selectedAccountDisabled),
-          liveSwitchSupported: mode === 'native-provider' && coordinator.taskAdapter?.authBoundarySafe === true,
+          installationState: 'ready', ...readiness,
+          liveSwitchSupported: mode === 'native-provider' && coordinator.taskAdapter?.authBoundarySafe === true && readiness.runtimeState === 'ready',
           ...(startupAccountError ? { startupAccountError } : {}),
           ...(componentError ? { componentError } : {}), switch: coordinator.getStatus() };
       }
@@ -180,7 +201,11 @@ async function prepare({ electron, parent, resourcesPath = process.resourcesPath
         // pending transaction atomically with removal; no credential is read.
         return client.request(method, params);
       }
-      if (locked && mode === 'native-provider' && method === 'selectAccount') return coordinator.selectAccount(params?.id);
+      if (locked && mode === 'native-provider' && method === 'selectAccount') {
+        const readiness = await inspectRuntimeView();
+        if (readiness.runtimeState !== 'ready') throw new ComponentError(readiness.runtimeErrorCode || 'native_view_not_ready');
+        return coordinator.selectAccount(params?.id);
+      }
       return client.request(method, params);
     },
   });

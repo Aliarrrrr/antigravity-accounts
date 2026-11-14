@@ -124,6 +124,8 @@ export function installModelMenuEntry({ document, window, request, createManagem
         selectionLocked: status.selectionLocked === true,
         primaryAccountId: status.primaryAccountId, selectedAccountId: status.selectedAccountId,
         liveSwitchSupported: status.liveSwitchSupported === true, activationRequired: status.activationRequired === true,
+        runtimeState: ['pending', 'ready', 'unavailable'].includes(status.runtimeState) ? status.runtimeState : undefined,
+        runtimeErrorCode: /^[a-z][a-z0-9_]{0,63}$/.test(status.runtimeErrorCode || '') ? status.runtimeErrorCode : undefined,
         componentError: Boolean(status.componentError), selectedAccountDisabled: status.selectedAccountDisabled === true,
         login: { state: status.login?.state },
         switch: { state: status.switch?.state, targetAccountId: status.switch?.targetAccountId, cancellable: status.switch?.cancellable === true, errorCode: status.switch?.errorCode },
@@ -314,6 +316,8 @@ export function installModelMenuEntry({ document, window, request, createManagem
     // the rejected IPC operation. Do not hide its recovery action or code.
     message.textContent = messages[status?.switch?.state] || errorText ||
       (status?.componentError ? '本机账号组件尚未就绪。' : status?.activationRequired ? '账号已配置，重新打开 Antigravity 后启用。' :
+        status?.runtimeState === 'pending' ? '正在检查本地主界面，账号切换暂未开放。' :
+        status?.runtimeState === 'unavailable' ? `当前主界面暂不能切换账号，当前账号保持不变。${status.runtimeErrorCode ? `错误代码：${status.runtimeErrorCode}。` : ''}` :
         status?.login?.state === 'pending' ? '请在官方 Google 页面完成授权，或在账号设置与管理中取消。' :
         status?.login?.state === 'cancelled' ? '已取消本次授权，已添加的账号保持不变。' :
         status?.login?.state === 'failed' ? 'Google 授权未完成，可重新添加账号。' :

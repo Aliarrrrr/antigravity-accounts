@@ -1,9 +1,13 @@
 'use strict';
 
-const fs = require('node:fs/promises');
+// Electron redirects .asar paths through a virtual filesystem. Program-image
+// metadata and digests must describe the disk file, without changing the
+// application's global process.noAsar setting or any other user's fs module.
+const diskFs = require(process.versions.electron ? 'original-fs' : 'node:fs');
+const fs = diskFs.promises;
 const path = require('node:path');
 const { createHash, randomUUID } = require('node:crypto');
-const { createReadStream } = require('node:fs');
+const { createReadStream } = diskFs;
 const { spawn } = require('node:child_process');
 
 const installations = new WeakMap();

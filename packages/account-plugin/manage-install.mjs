@@ -129,7 +129,7 @@ async function saveReceipt(file, receipt) {
   await rename(stage, file);
 }
 
-async function cacheRecoveryPackage({ stateRoot, suffix, packageRoot, preparedRoot }) {
+export async function cacheRecoveryPackage({ stateRoot, suffix, packageRoot, preparedRoot }) {
   const cacheRoot = path.join(stateRoot, 'recovery-package-' + suffix);
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   await mkdir(cacheRoot, { recursive: false });
@@ -149,7 +149,7 @@ async function cacheRecoveryPackage({ stateRoot, suffix, packageRoot, preparedRo
   await copyPublicFile(path.join(packageRoot, 'account-plugin', 'window.cjs'), path.join('account-plugin', 'window.cjs'));
   await copyPublicFile(path.join(sourceRoot, 'hostauth-adapter', 'package.json'), path.join('hostauth-adapter', 'package.json'));
   for (const entry of await readdir(path.join(sourceRoot, 'hostauth-adapter', 'src'), { withFileTypes: true })) {
-    if (!/\.(?:mjs|cjs)$/.test(entry.name)) continue;
+    if (!/\.(?:mjs|cjs|json|LICENSE)$/.test(entry.name)) continue;
     await copyPublicFile(path.join(sourceRoot, 'hostauth-adapter', 'src', entry.name), path.join('hostauth-adapter', 'src', entry.name));
   }
   const componentRoot = path.join(preparedRoot, 'resources', 'hostauth-addon', 'component');

@@ -1,5 +1,9 @@
 import { sha256 } from './asar.mjs';
 import { descriptorSource } from './descriptor.mjs';
+import { readFileSync } from 'node:fs';
+import { matchesSourceScope } from './source-scope-contracts.mjs';
+
+const reviewedScopes = JSON.parse(readFileSync(new URL('./source-scope-profiles.json', import.meta.url), 'utf8'));
 
 export const SUPPORTED_VERSION = '2.32.1';
 export const SOURCE_SHA256 = Object.freeze({
@@ -43,8 +47,8 @@ export const SOURCE_CONTRACTS = Object.freeze([
 const dependencyVersions = Object.freeze({ '@bufbuild/protobuf': '2.11.0', '@connectrpc/connect': '2.2.0', '@connectrpc/connect-node': '2.2.0', 'electron-updater': '6.8.9' });
 
 // A package-version change alone does not invalidate the adaptation. Every
-// complete affected source file and the RPC dependency versions must still
-// match one reviewed contract; matching isolated insertion anchors is not enough.
+// complete affected file or its protected AST scopes and RPC dependencies must
+// match a reviewed contract; insertion-anchor matches alone are never enough.
 export function inspectSourceCompatibility(archive) {
   const packageInfo = JSON.parse(archive.read('package.json').toString('utf8'));
   if (packageInfo.name !== 'antigravity' || !/^\d+\.\d+\.\d+$/.test(packageInfo.version) || packageInfo.main !== 'dist/main.js') throw new Error('Unsupported Antigravity version or entry point');
@@ -52,7 +56,19 @@ export function inspectSourceCompatibility(archive) {
   for (const name of new Set(SOURCE_CONTRACTS.flatMap(candidate => Object.keys(candidate.sourceSha256)))) {
     try { availableSha256[name] = sha256(archive.read(name)); } catch { /* A missing file cannot satisfy that source contract. */ }
   }
-  const matchingContracts = SOURCE_CONTRACTS.filter(candidate => Object.entries(candidate.sourceSha256).every(([name, expected]) => availableSha256[name] === expected));
+  let matchingContracts = SOURCE_CONTRACTS.filter(candidate => Object.entries(candidate.sourceSha256).every(([name, expected]) => availableSha256[name] === expected));
+  let scopeMatch = false;
+  if (!matchingContracts.length) {
+    matchingContracts = SOURCE_CONTRACTS.filter(candidate => {
+      const expected = reviewedScopes.contracts.find(value => value.version === candidate.version);
+      return Object.keys(candidate.sourceSha256).every(name => {
+        if (availableSha256[name] === candidate.sourceSha256[name]) return true;
+        try { return matchesSourceScope(archive.read(name).toString('utf8'), name, expected?.files[name]); }
+        catch { return false; }
+      });
+    });
+    scopeMatch = matchingContracts.length > 0;
+  }
   const contract = matchingContracts.find(candidate => candidate.version === packageInfo.version) || matchingContracts[0];
   if (!contract) throw new Error('Unsupported exact program source: no complete reviewed source contract matches');
   const sourceSha256 = Object.fromEntries(Object.keys(contract.sourceSha256).map(name => [name, availableSha256[name]]));
@@ -62,7 +78,7 @@ export function inspectSourceCompatibility(archive) {
     if (installed !== version) throw new Error(`Unsupported host RPC dependency: ${name}`);
   }
   return { antigravityVersion: packageInfo.version, sourceContractVersion: contract.version,
-    match: packageInfo.version === contract.version ? 'reviewed-version' : 'unchanged-source-contract',
+    match: scopeMatch ? 'reviewed-scopes' : packageInfo.version === contract.version ? 'reviewed-version' : 'unchanged-source-contract',
     sourceSha256, dependencyVersions: { ...dependencyVersions }, shellEnvironment: contract.shellEnvironment, baseArguments: contract.baseArguments };
 }
 

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import nativePrograms from './native-program-profiles.cjs';
 import {
   ORIGINAL_NATIVE_SHA256,
   PATCHED_NATIVE_SHA256 as DIAGNOSTICS_NATIVE_SHA256,
@@ -20,27 +21,9 @@ export const PROVIDER_NATIVE_SHA256 = '319c1abd18b4d12ac2149473f04b07be8671d230e
 // The reviewed callers load CodeAssistClient+0x50. The 2.31 cache adds member
 // storage and moves its fetcher to +0x40. Its forceRefresh still passes the
 // same cache, dictionary and context, returning the fetched response and error.
-export const PROJECT_REFRESH_PROFILES = Object.freeze([
-  Object.freeze({ version: PROJECT_REFRESH_VERSION, projectSha256: PROJECT_REFRESH_NATIVE_SHA256, providerSha256: PROVIDER_NATIVE_SHA256,
-    address: 0x142860333n, originalTarget: 0x142874600n, refreshedTarget: 0x142874b60n, dictionaryAddress: 0x14441a140n,
-    before: 'e8c8420100', after: 'e828480100' }),
-  Object.freeze({ version: '2.31.2', projectSha256: '33bad001301bf863bb7108e77667aaf24c649981335f5d220656c75e59818508',
-    providerSha256: 'ff323094c41c50508bd4b9d8cc66230c36d2c245df68a0216010603725aa866c',
-    address: 0x14231e533n, originalTarget: 0x142333de0n, refreshedTarget: 0x142334340n, dictionaryAddress: 0x14429f1c0n,
-    before: 'e8a8580100', after: 'e8085e0100' }),
-  Object.freeze({ version: '2.31.0', projectSha256: '39b06d761fbfa7f83090b7531b1e64c062150ba366cd97233ffc86bee3352677',
-    providerSha256: 'ff0bfbb49bd798cd07d6add6f7eda235605285fa5ac25731f86d26e30ca7ff6e',
-    address: 0x14231bf73n, originalTarget: 0x142331560n, refreshedTarget: 0x142331ac0n, dictionaryAddress: 0x14429d1c0n,
-    before: 'e8e8550100', after: 'e8485b0100' }),
-  Object.freeze({ version: '2.29.0', projectSha256: '3269e7df7f3b34aba7b087c6ea8055163c4ace072c72ed376314775439b7453c',
-    providerSha256: '9a58d7ec73af4da1f60b9682d6632ed54a9f62dd2752372c8f53f8cbe116eb85',
-    address: 0x142114b73n, originalTarget: 0x142128540n, refreshedTarget: 0x1421289e0n, dictionaryAddress: 0x143ece9e0n,
-    before: 'e8c8390100', after: 'e8683e0100' }),
-  Object.freeze({ version: '2.28.2', projectSha256: 'd728fa9d5ce8eb69a32acbb3b820d25b1c8df901d1cee435c2c2c13963f2871b',
-    providerSha256: 'c132ea0fc1688dfd614cae5ac5c47b89c6c36753375981a0600170cef896dfea',
-    address: 0x1420bb593n, originalTarget: 0x1420ce620n, refreshedTarget: 0x1420cea20n, dictionaryAddress: 0x143d7fd80n,
-    before: 'e888300100', after: 'e888340100' }),
-]);
+export const PROJECT_REFRESH_PROFILES = Object.freeze(nativePrograms.NATIVE_PROGRAM_PROFILES.map(profile => Object.freeze({
+  version: profile.version, projectSha256: profile.projectSha256, providerSha256: profile.providerSha256, ...profile.projectRefresh,
+})));
 const variants = Object.freeze(PROJECT_REFRESH_PROFILES.flatMap(profile => {
   const diagnostics = NATIVE_DIAGNOSTICS_PROFILES.find(item => item.version === profile.version);
   return [

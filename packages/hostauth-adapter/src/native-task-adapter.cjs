@@ -6,28 +6,9 @@ const { WORK_KINDS } = require('./switch-coordinator.cjs');
 const { readAgentState, AGENT_STATE_PATH } = require('./native-agent-state.cjs');
 
 const SERVICE = '/exa.language_server_pb.LanguageServerService/';
-const NATIVE_PROGRAM_PROFILES = Object.freeze([
-  Object.freeze({ version: '2.32.1',
-    originalSha256: '65cdb8d132fc61056625081be7d07d4d22f57eba485de7edf0d24d98e77c891f',
-    patchedSha256: '8ab537e29e484b7f31e97d1070e4726bc2e4d45180e7afa11d683057d8a5e693',
-    providerSha256: '319c1abd18b4d12ac2149473f04b07be8671d230ecf12adf4cb7d1e3fe85edf6' }),
-  Object.freeze({ version: '2.31.2',
-    originalSha256: 'e40f0447109c43ece15e7025ca0864a138e0e16cb8864d4ccf64a00512a99e1a',
-    patchedSha256: 'b02168614d75b680cd8b0814b0d01bf91c66f5e310ff8d772516b920c8813b5f',
-    providerSha256: 'ff323094c41c50508bd4b9d8cc66230c36d2c245df68a0216010603725aa866c' }),
-  Object.freeze({ version: '2.31.0',
-    originalSha256: '77b76711786bd78b51a6879fa57e66f9f5d398ac5d369cf8b5b3e2fb5cfc741b',
-    patchedSha256: '0bdb872c8092002dafdf8ef44f1b3da77c2b71ef09eaec47ea169911766b2a2b',
-    providerSha256: 'ff0bfbb49bd798cd07d6add6f7eda235605285fa5ac25731f86d26e30ca7ff6e' }),
-  Object.freeze({ version: '2.29.0',
-    originalSha256: 'c98e7c331da5bcc37002a550e7d625b4c636f775fa2804f73777c6a500e1c3d5',
-    patchedSha256: '169355a713b8199f6fe91dd5eaf81bc7f366544b2808014425fc820ccdd04bfc',
-    providerSha256: '9a58d7ec73af4da1f60b9682d6632ed54a9f62dd2752372c8f53f8cbe116eb85' }),
-  Object.freeze({ version: '2.28.2',
-    originalSha256: 'a51a80eb1b355dc523dd9a6d7cec098ad450e3c9fb30d6001806cac86814f37b',
-    patchedSha256: '684a9ea0bbba226335feac69f9fc45d27980522fe172979fd58de07f35c52441',
-    providerSha256: 'c132ea0fc1688dfd614cae5ac5c47b89c6c36753375981a0600170cef896dfea' }),
-]);
+const NATIVE_PROGRAM_PROFILES = Object.freeze(require('./native-program-profiles.cjs').NATIVE_PROGRAM_PROFILES.map(profile => Object.freeze({
+  version: profile.version, originalSha256: profile.originalSha256, patchedSha256: profile.diagnosticsSha256, providerSha256: profile.providerSha256,
+})));
 const { originalSha256: PROGRAM_SHA256, patchedSha256: PATCHED_PROGRAM_SHA256,
   providerSha256: PROVIDER_PROGRAM_SHA256 } = NATIVE_PROGRAM_PROFILES[0];
 

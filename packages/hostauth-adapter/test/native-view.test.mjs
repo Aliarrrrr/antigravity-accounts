@@ -88,6 +88,16 @@ test('a native reducer may recreate equivalent protobuf status without failing a
   assert.equal(h.store.getState().userStatus.email, 'synthetic@example.invalid');
 });
 
+test('runtime inspection resolves native model state without dispatching or installing listeners', () => {
+  const h = harness(), before = h.store.getState();
+  const result = vm.runInNewContext(`(${updateNativeView.toString()})(null, false, 'inspect')`, h.context);
+  assert.equal(result.ready, true);
+  assert.equal(h.actions.length, 0);
+  assert.equal(h.listenerCount(), 0);
+  assert.equal(h.store.getState(), before);
+  assert.equal(Object.hasOwn(h.context.document, Symbol.for('antigravity.accounts.native-model-capture-store.v1')), false);
+});
+
 test('an unavailable original model cannot silently become the native fallback', () => {
   const h = harness();
   const next = { models: [config(1), config(3)] };

@@ -20,6 +20,17 @@ async function publicJson(filename) {
 async function guardedLauncher(installRoot, stateRoot) {
   const launcher = await publicJson(path.join(stateRoot, 'guarded-launcher.json'));
   if (!launcher) return;
+  if (launcher.schemaVersion === 1 && launcher.kind === 'compatibility') {
+    if (![launcher.installRoot, launcher.stateRoot, launcher.nodePath, launcher.bootstrapPath].every(value => path.isAbsolute(value || '')) ||
+        !samePath(launcher.installRoot, installRoot) || !samePath(launcher.bootstrapPath, path.join(launcher.stateRoot, 'bootstrap.mjs')))
+      throw new Error('update_handoff_launcher_invalid');
+    const config = await publicJson(path.join(launcher.stateRoot, 'bootstrap.json'));
+    if (!config || config.schemaVersion !== 1 || !samePath(config.installRoot, installRoot) ||
+        !samePath(config.stateRoot, launcher.stateRoot) || !samePath(config.accountsStateRoot, stateRoot) || !samePath(config.nodePath, launcher.nodePath))
+      throw new Error('update_handoff_launcher_invalid');
+    for (const file of [launcher.nodePath, launcher.bootstrapPath]) { const info = await fs.lstat(file); if (!info.isFile() || info.isSymbolicLink()) throw new Error('update_handoff_launcher_invalid'); }
+    return { launcher, compatibility: true };
+  }
   const keys = ['installRoot', 'toolkitRoot', 'stateRoot', 'nodePath'];
   if (launcher.schemaVersion !== 1 || launcher.kind !== 'localization' ||
       keys.some(key => !path.isAbsolute(launcher[key] || '')) || !samePath(launcher.installRoot, installRoot))
@@ -56,6 +67,11 @@ export async function recoverAndLaunch({ installRoot, packageRoot, stateRoot,
   const guarded = await guardedLauncher(installRoot, stateRoot);
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
   if (guarded) {
+    if (guarded.compatibility) {
+      await startChild(spawnApp, guarded.launcher.nodePath, [guarded.launcher.bootstrapPath, 'launch', '--state-root', guarded.launcher.stateRoot, ...(showAccounts ? ['--', '--accounts'] : [])],
+        { cwd: installRoot, env, detached: true, stdio: 'ignore', windowsHide: true });
+      return { dispatched: true, guarded: true, credentialFilesRead: false };
+    }
     const { launcher, vbs } = guarded;
     await startChild(spawnApp, path.join(process.env.SystemRoot, 'System32', 'wscript.exe'),
       [vbs, launcher.nodePath, launcher.toolkitRoot, installRoot, launcher.stateRoot, ...(showAccounts ? ['--accounts'] : [])],

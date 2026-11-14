@@ -35,6 +35,7 @@ Invoke-AccountsEnvironment -Root $root -DotNet $DotNet -Action {
         }
         Copy-Item -LiteralPath (Join-Path $root 'docs/ACCOUNTS_PLUGIN.md') -Destination (Join-Path $package 'README.md')
         Copy-Item -LiteralPath (Join-Path $root 'docs/ACCOUNTS_VALIDATION.md') -Destination (Join-Path $package 'VALIDATION.md')
+        Copy-Item -LiteralPath (Join-Path $root 'docs/COMPATIBILITY_UPDATES.md') -Destination (Join-Path $package 'COMPATIBILITY_UPDATES.md')
         Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $package
         foreach ($entry in @(@{Name='Prepare';Operation='prepare'},@{Name='Install-Preview';Operation='apply'},@{Name='Restore';Operation='restore'})) {
             $lines = @(

@@ -1,4 +1,16 @@
-# Accounts 0.4.0-preview.16 validation scope
+# Accounts 0.4.0-preview.17 validation scope
+
+## Preview.17 combined compatibility updates — 14 November 2026
+
+Accounts, Chinese localization and a shared prepare/apply coordinator are now distributed together, alongside the standalone Accounts ZIP. Official updates take priority; unsupported native programs are retained, and independent authorizations are not moved. This does not establish arbitrary future native programs or real vendor-installer upgrades.
+
+The complete Accounts Node suites passed 274 tests without skips using separate original 2.32.1 program inputs, including a real Electron check of raw ASAR metadata through `original-fs`. The .NET component passed its 44 synthetic-account checks. The full Chinese suite initially passed 252 of 253 cases; the remaining test supplied an obsolete synthetic manifest without its installation directory. Adding that required identity field made the modified-candidate rejection case pass without weakening deployment validation. Two additional launch cases confirm disabled components are not repaired by the legacy launcher and incomplete coordinated installations refuse launch.
+
+On a separate copy of the official 2.32.1 installation, the coordinator constructed Accounts and then Chinese localization before modifying the destination. Applying both layers succeeded; rolling back that same transaction restored the original program bytes. A synthetic authorization sentinel remained unchanged. The transaction covered seven changed files and guarded the executable plus 347 unpacked files. This was an actual copied-program installation and restoration, not a run of the vendor installer. Interruption, unknown-file refusal, program-change refusal, partial component compatibility, active-application deferral and settings changes are covered by the coordinator tests.
+
+All 26 compatibility tests passed without skips. They cover fixed-repository selection, checksums and release commits, preparation retry after corruption, downgrade refusal, deferred activation, engine fallback, operation refusals, persistent notice deduplication, and preservation of enabled-component settings and redirected account-state roots. Windows ZIP extraction rejects parent traversal, case-insensitive duplicate paths and links before writing any archive entry. Package inspection covers both directory contents and ZIP payloads; the combined bundle contains 429 payload files, including the 55-file Accounts distribution. No official program, authorization file or conversation database is included.
+
+The installed-window A to B to A result in the preview.16 section remains the latest recorded UI check in this packaged document. No model generation or quota attribution was added by these automated and copied-program checks.
 
 ## Preview.16 native-window switching repair — 14 November 2026
 

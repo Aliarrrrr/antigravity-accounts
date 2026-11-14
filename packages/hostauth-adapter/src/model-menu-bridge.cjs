@@ -12,7 +12,7 @@ function publicState(status, accounts) {
   return {
     status: {
       ...pick(status, ['configured', 'selectionLocked', 'selectedAccountId', 'primaryAccountId', 'selectedAccountDisabled',
-        'generation', 'mode', 'runtimeStarted', 'activationRequired', 'liveSwitchSupported', 'componentError', 'startupAccountError']),
+        'generation', 'mode', 'runtimeStarted', 'activationRequired', 'liveSwitchSupported', 'componentError', 'startupAccountError', 'installationState', 'runtimeState', 'runtimeErrorCode']),
       login: pick(status?.login, ['state']),
       switch: pick(status?.switch, ['state', 'targetAccountId', 'cancellable', 'errorCode']),
     },

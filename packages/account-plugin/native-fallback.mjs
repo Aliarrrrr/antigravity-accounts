@@ -1,3 +1,4 @@
+import nativePrograms from '../hostauth-adapter/src/native-program-profiles.cjs';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { lstat, readFile, realpath } from 'node:fs/promises';
@@ -10,23 +11,7 @@ const samePath = (left, right) => path.resolve(left).toLowerCase() === path.reso
 const validDigest = value => typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value);
 const fail = () => { throw new Error('native_fallback_program_invalid'); };
 
-export const adaptedNativeDigests = Object.freeze([
-  '8ab537e29e484b7f31e97d1070e4726bc2e4d45180e7afa11d683057d8a5e693',
-  '9728f6eb169fd63a7b154934c7151932152fcc93ca97720117237218df907490',
-  '319c1abd18b4d12ac2149473f04b07be8671d230ecf12adf4cb7d1e3fe85edf6',
-  'b02168614d75b680cd8b0814b0d01bf91c66f5e310ff8d772516b920c8813b5f',
-  '0bdb872c8092002dafdf8ef44f1b3da77c2b71ef09eaec47ea169911766b2a2b',
-  '169355a713b8199f6fe91dd5eaf81bc7f366544b2808014425fc820ccdd04bfc',
-  '684a9ea0bbba226335feac69f9fc45d27980522fe172979fd58de07f35c52441',
-  '33bad001301bf863bb7108e77667aaf24c649981335f5d220656c75e59818508',
-  'ff323094c41c50508bd4b9d8cc66230c36d2c245df68a0216010603725aa866c',
-  '39b06d761fbfa7f83090b7531b1e64c062150ba366cd97233ffc86bee3352677',
-  'ff0bfbb49bd798cd07d6add6f7eda235605285fa5ac25731f86d26e30ca7ff6e',
-  '3269e7df7f3b34aba7b087c6ea8055163c4ace072c72ed376314775439b7453c',
-  '9a58d7ec73af4da1f60b9682d6632ed54a9f62dd2752372c8f53f8cbe116eb85',
-  'd728fa9d5ce8eb69a32acbb3b820d25b1c8df901d1cee435c2c2c13963f2871b',
-  'c132ea0fc1688dfd614cae5ac5c47b89c6c36753375981a0600170cef896dfea',
-]);
+export const adaptedNativeDigests = nativePrograms.ADAPTED_NATIVE_DIGESTS;
 
 async function regularFile(filename) {
   const info = await lstat(filename);

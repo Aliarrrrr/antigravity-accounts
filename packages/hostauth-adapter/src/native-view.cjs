@@ -8,7 +8,7 @@ const { getLocalHubViews } = require('./local-hub-windows.cjs');
 function updateNativeView(rawStatus, requireExplicitSelection = false, phase = 'refresh', bindings) {
   const picksKey = Symbol.for('antigravity.accounts.native-model-picks.v1');
   const captureStoreKey = Symbol.for('antigravity.accounts.native-model-capture-store.v1');
-  if (!['capture', 'refresh', 'clear'].includes(phase)) return { errorCode: 'native_view_phase_invalid' };
+  if (!['inspect', 'capture', 'refresh', 'clear'].includes(phase)) return { errorCode: 'native_view_phase_invalid' };
   if (phase === 'clear') {
     const capturedStore = document[captureStoreKey];
     if (capturedStore) {
@@ -74,6 +74,11 @@ function updateNativeView(rawStatus, requireExplicitSelection = false, phase = '
     !left.modelAlias && !right.modelAlias && Number.isSafeInteger(left.value) && left.value !== schema.Model.UNSPECIFIED && left.value === right.value);
   const before = store.getState();
   if (before?.userStatus?.$typeName !== schema.UserStatusSchema.typeName || !before.modelSelection) return { updated: false, errorCode: 'native_view_status_invalid' };
+  if (phase === 'inspect') {
+    const selection = copySelection(selected(before));
+    const resolved = Ls(Ks(before), selected(before));
+    return selection && resolved ? { ready: true } : { ready: false, errorCode: 'native_view_selection_invalid' };
+  }
   let picks = store[picksKey];
   if (phase === 'capture') {
     if (picks || document[captureStoreKey]) return { errorCode: 'native_view_capture_in_progress' };
@@ -155,7 +160,7 @@ function nativeBindingsExpression(bindings) {
 
 async function refreshNativeViews({ electron, origin, userStatus, requireExplicitSelection = false, phase = 'refresh', bindings, hostWindowAccess }) {
   const views = getLocalHubViews({ electron, origin, hostWindowAccess });
-  if (!['capture', 'refresh', 'clear'].includes(phase)) throw new ComponentError('native_view_phase_invalid');
+  if (!['inspect', 'capture', 'refresh', 'clear'].includes(phase)) throw new ComponentError('native_view_phase_invalid');
   if (!views.length) {
     if (phase === 'clear') return { cleared: true };
     throw new ComponentError('native_view_unavailable');
@@ -167,12 +172,12 @@ async function refreshNativeViews({ electron, origin, userStatus, requireExplici
   let results;
   try { results = await Promise.all(views.map(({ contents }) => contents.executeJavaScript(source))); }
   catch { throw new ComponentError('native_view_execution_failed'); }
-  const successField = phase === 'capture' ? 'captured' : phase === 'clear' ? 'cleared' : 'updated';
+  const successField = phase === 'inspect' ? 'ready' : phase === 'capture' ? 'captured' : phase === 'clear' ? 'cleared' : 'updated';
   if (results.some(result => result?.[successField] !== true)) {
     const code = results.find(result => result?.[successField] !== true)?.errorCode;
     throw new ComponentError(/^native_[a-z0-9_]{1,56}$/.test(code || '') ? code : 'native_view_unavailable');
   }
-  return phase === 'capture' ? { captured: true } : phase === 'clear' ? { cleared: true }
+  return phase === 'inspect' ? { ready: true } : phase === 'capture' ? { captured: true } : phase === 'clear' ? { cleared: true }
     : { selectionReady: results.every(result => result.selectionReady === true) };
 }
 

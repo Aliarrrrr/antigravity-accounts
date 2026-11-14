@@ -242,7 +242,7 @@ test('local supported program copy is patched, survives restore, and rejects lat
   }
   assert.match(replacements.get('dist/languageServer.js').toString(), /--use_host_auth=true/);
   assert.match(replacements.get('dist/main.js').toString(), /getOAuthToken: \(\) => hostauthSession.getOAuthToken/);
-  const tamperedSources = rewriteAsar(original, new Map([['dist/main.js', Buffer.concat([source.read('dist/main.js'), Buffer.from('\n')])]]));
+  const tamperedSources = rewriteAsar(original, new Map([['dist/main.js', Buffer.concat([source.read('dist/main.js'), Buffer.from('\nvoid alteredStartupBehavior;')])]]));
   assert.throws(() => patchSources(readAsar(tamperedSources)), /Unsupported exact program source/);
   try {
     const component = path.join(root, 'publish/Accounts.exe');

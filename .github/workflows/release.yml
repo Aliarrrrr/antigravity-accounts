@@ -35,7 +35,11 @@ jobs:
           cache-dependency-path: packages/hostauth-adapter/package-lock.json
       - name: Install DOM test dependency
         shell: pwsh
-        run: npm ci --prefix packages/hostauth-adapter --ignore-scripts --no-audit --no-fund
+        run: |
+          npm ci --prefix packages/hostauth-adapter --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'Host dependencies failed.' }
+          npm ci --prefix packages/localization --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'Localization dependencies failed.' }
       - name: Build and run offline tests
         shell: pwsh
         run: |
@@ -44,6 +48,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Host adapter tests failed.' }
           node --test packages/account-plugin/test/*.test.mjs packages/account-plugin/test/*.test.cjs
           if ($LASTEXITCODE -ne 0) { throw 'Account plugin tests failed.' }
+          npm test --prefix packages/localization
+          if ($LASTEXITCODE -ne 0) { throw 'Localization tests failed.' }
+          node --test packages/compatibility/test/*.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Compatibility tests failed.' }
       - name: Build and inspect tagged release
         id: package
         shell: pwsh
@@ -54,6 +62,7 @@ jobs:
           $manifest = Get-Content $manifests[0].FullName -Raw | ConvertFrom-Json
           if ($env:GITHUB_REF_NAME -cne "accounts-v$($manifest.version)" -or $manifest.provenance.commit -cne $env:GITHUB_SHA -or $manifest.provenance.dirty) { throw 'Release source does not match tag and commit.' }
           ./scripts/Test-AccountsPackage.ps1 -PackageRoot $manifests[0].Directory.FullName
+          ./scripts/Publish-Compatibility.ps1 -AccountsPackageRoot $manifests[0].Directory.FullName -OutputRoot artifacts/compatibility/release -Release
           "version=$($manifest.version)" | Out-File $env:GITHUB_OUTPUT -Append
       - name: Upload validated release assets
         id: artifact
@@ -64,6 +73,9 @@ jobs:
             artifacts/accounts/release/AntigravityAccounts-*-win-x64.zip
             artifacts/accounts/release/AntigravityAccounts-*-win-x64.zip.sha256.json
             artifacts/accounts/release/SHA256SUMS.txt
+            artifacts/compatibility/release/AntigravityCompatibility-*-win-x64.zip
+            artifacts/compatibility/release/AntigravityCompatibility-*-win-x64.zip.sha256.json
+            artifacts/compatibility/release/COMPATIBILITY-SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 7
   publish:
@@ -87,28 +99,31 @@ jobs:
         run: |
           if ($env:GITHUB_REF_NAME -cne "accounts-v$env:VALIDATED_VERSION") { throw 'Validated version/tag mismatch.' }
           $files = @(Get-ChildItem validated -Recurse -File)
-          $name = "AntigravityAccounts-$env:VALIDATED_VERSION-win-x64.zip"
-          $asset = @($files | Where-Object Name -CEQ $name)
-          $proof = @($files | Where-Object Name -CEQ ($name + '.sha256.json'))
-          $sums = @($files | Where-Object Name -CEQ 'SHA256SUMS.txt')
-          if ($files.Count -ne 3 -or $asset.Count -ne 1 -or $proof.Count -ne 1 -or $sums.Count -ne 1) { throw 'Unexpected release assets.' }
-          $hash = Get-Content $proof[0].FullName -Raw | ConvertFrom-Json
-          $actual = (Get-FileHash $asset[0].FullName -Algorithm SHA256).Hash
-          if ($hash.file -cne $name -or $hash.sha256 -ine $actual) { throw 'ZIP checksum mismatch.' }
-          if ((Get-Content $sums[0].FullName -Raw).Trim() -ine "$actual  $name") { throw 'SHA256SUMS mismatch.' }
+          if ($files.Count -ne 6) { throw 'Unexpected release assets.' }
+          foreach ($kind in @(@{prefix='AntigravityAccounts';sums='SHA256SUMS.txt'},@{prefix='AntigravityCompatibility';sums='COMPATIBILITY-SHA256SUMS.txt'})) {
+            $name = "$($kind.prefix)-$env:VALIDATED_VERSION-win-x64.zip"
+            $asset = @($files | Where-Object Name -CEQ $name)
+            $proof = @($files | Where-Object Name -CEQ ($name + '.sha256.json'))
+            $sums = @($files | Where-Object Name -CEQ $kind.sums)
+            if ($asset.Count -ne 1 -or $proof.Count -ne 1 -or $sums.Count -ne 1) { throw 'Missing or duplicate release assets.' }
+            $hash = Get-Content $proof[0].FullName -Raw | ConvertFrom-Json
+            $actual = (Get-FileHash $asset[0].FullName -Algorithm SHA256).Hash
+            if ($hash.file -cne $name -or $hash.sha256 -ine $actual) { throw 'ZIP checksum mismatch.' }
+            if ((Get-Content $sums[0].FullName -Raw).Trim() -ine "$actual  $name") { throw 'SHA256SUMS mismatch.' }
+          }
           $assets = @($files | ForEach-Object FullName)
           $notes = @'
-          Adds reviewed Antigravity 2.32.1 support while retaining 2.31.2, 2.31.0, 2.29.0 and 2.28.2. This release includes the compatibility work from the local, unreleased preview.15 build: shared language-server default arguments, shell-environment dependencies, relocated native-program checks and the matching public OAuth configuration.
+          Adds a versioned compatibility bundle containing Accounts, Chinese localization, production dependencies and the shared prepare/apply coordinator. The standalone Accounts ZIP remains available. Existing account and localization state locations are retained; no official program files, account authorizations or conversation data are distributed.
 
-          Fixes account-switch window access for hosts that use BaseWindow with WebContentsView. The earlier installed preview.15 check opened the account menu and management panel without switching a saved account, so it missed the BrowserWindow-only lookup used later during switching. The adapter now targets the local Hub page's actual webContents for native capture, refresh and confirmation. See VALIDATION.md for the current test and installed-client results; earlier menu checks and 2.29.0 generation results are not new switching or generation results for this release.
+          Automatic compatibility checks use only this repository's preview releases. Downloads are verified and prepared separately; application files are changed only after normal exit. The external bootstrap and watcher use version directories so their running code is not overwritten. See VALIDATION.md for the current test, interruption/recovery and installed-client results.
 
-          The complete local Node suites passed 269 tests without skips. On installed Antigravity 2.32.1 with Chinese localization retained, two saved accounts completed A to B to A switching, each confirmation finished, and the project and Gemini 3.8 Flash High selection remained. The application was returned to the original primary account. This check made no model submissions and does not establish quota charging or cross-account generation.
+          Fixes Electron's ASAR virtual-filesystem handling in the official-update handoff by reading raw program metadata and bytes locally, without changing the host's global ASAR mode. Program compatibility and installed functionality are reported separately; a visible account menu is not treated as proof that switching is available.
 
           Unsupported complete official updates retain the explicit native-login confirmation introduced in preview.14. The native identity may differ from the selected Accounts quota account; saved Accounts authorizations remain available for later repair. Incomplete replacements, damaged files, conflicting records and active installers still prevent launch. Unknown programs are never patched, and no older program backup is written over a newer official update.
 
-          Start-With-Accounts.cmd uses the shared recovery-and-launch path and forwards registered Chinese installations to their existing guarded launcher. If update-handoff preparation fails, the official installation continues but automatic direct-EXE restart is disabled. Chinese localization tooling is maintained separately and is not included in this ZIP. SSH remote sessions are outside independent-account switching support. Exact quota attribution, generation on 2.32.1, expired-token renewal and a real vendor-installer upgrade are not established by source, simulated-state or package checks.
+          Official updates take priority. Unsupported native programs are never guessed compatible or patched, and no older host backup is written over a newer official update. Saved independent authorizations remain available for a later compatible bundle. Native sign-in still requires the existing explicit identity confirmation. SSH account switching, quota charging, generation and real vendor-installer coverage are limited to the actual checks stated in VALIDATION.md.
 
-          To upgrade on an unchanged host: exit Antigravity, restore any Chinese localization, run Restore.cmd from the newly extracted preview.16 package, then its Install-Preview.cmd and reapply localization. If an official update has already replaced the programs, use the new Install-Preview.cmd to prepare the supported current version; do not restore old programs over that update. Saved account authorizations are retained. This Windows x64 preview includes the self-contained component and adapter, without official program files or account credentials.
+          For existing combined installations, use the compatibility bundle's Install-Compatibility.ps1 with the registered Node, host and state locations. It preserves the old shortcut originals and account store. Existing Accounts-only users can continue using their standalone install/restore commands. Read the bundled documentation before changing installation paths.
           '@
           [IO.File]::WriteAllText('release-notes.md', $notes, [Text.UTF8Encoding]::new($false))
           gh release create $env:GITHUB_REF_NAME @assets --repo $env:GITHUB_REPOSITORY --title "Antigravity Accounts $env:VALIDATED_VERSION" --prerelease --latest=false --verify-tag --notes-file release-notes.md

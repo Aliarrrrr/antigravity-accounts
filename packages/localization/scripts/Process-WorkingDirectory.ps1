@@ -1,0 +1,61 @@
+function Get-ProcessWorkingDirectory([int]$ProcessId) {
+  try {
+    if (-not ('Antigravity.ProcessDirectoryReader' -as [type])) {
+      Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+namespace Antigravity {
+  public static class ProcessDirectoryReader {
+    [StructLayout(LayoutKind.Sequential)]
+    struct BasicInformation {
+      public IntPtr Reserved1, Peb, Reserved2, Reserved3, ProcessId, Reserved4;
+    }
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern IntPtr OpenProcess(uint access, bool inherit, int processId);
+    [DllImport("kernel32.dll")]
+    static extern bool CloseHandle(IntPtr handle);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool IsWow64Process(IntPtr process, out bool wow64);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool ReadProcessMemory(IntPtr process, IntPtr address, byte[] buffer, int size, out IntPtr read);
+    [DllImport("ntdll.dll")]
+    static extern int NtQueryInformationProcess(IntPtr process, int informationClass, out BasicInformation information, int size, out int returned);
+
+    static byte[] Read(IntPtr process, IntPtr address, int size) {
+      var bytes = new byte[size];
+      IntPtr read;
+      return ReadProcessMemory(process, address, bytes, size, out read) && read.ToInt64() == size ? bytes : null;
+    }
+
+    public static string ReadDirectory(int processId) {
+      if (IntPtr.Size != 8 || processId <= 0) return null;
+      var process = OpenProcess(0x0410, false, processId);
+      if (process == IntPtr.Zero) return null;
+      try {
+        bool wow64;
+        if (!IsWow64Process(process, out wow64) || wow64) return null;
+        BasicInformation info;
+        int returned;
+        int size = Marshal.SizeOf(typeof(BasicInformation));
+        if (NtQueryInformationProcess(process, 0, out info, size, out returned) != 0 || returned != size) return null;
+        var parameters = Read(process, IntPtr.Add(info.Peb, 0x20), 8);
+        if (parameters == null) return null;
+        var directory = Read(process, new IntPtr(BitConverter.ToInt64(parameters, 0) + 0x38), 16);
+        if (directory == null) return null;
+        int length = BitConverter.ToUInt16(directory, 0);
+        int maximumLength = BitConverter.ToUInt16(directory, 2);
+        if (length == 0 || length > maximumLength || length > 32766 || length % 2 != 0) return null;
+        var text = Read(process, new IntPtr(BitConverter.ToInt64(directory, 8)), length);
+        return text == null ? null : Encoding.Unicode.GetString(text);
+      } finally { CloseHandle(process); }
+    }
+  }
+}
+'@
+    }
+    # Read only the current-directory descriptor and its UTF-16 path. The
+    # environment block and other process parameters are never inspected.
+    return [Antigravity.ProcessDirectoryReader]::ReadDirectory($ProcessId)
+  } catch { return $null }
+}

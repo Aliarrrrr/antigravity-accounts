@@ -1,4 +1,6 @@
-# Antigravity Accounts · 0.4.0-preview.16
+# Antigravity Accounts · 0.4.0-preview.17
+
+本版同时提供独立 Accounts 包与中文成套兼容包。成套包的自动准备、退出后应用、组件状态和恢复限制见[兼容更新说明](COMPATIBILITY_UPDATES.md)。独立包的安装顺序保持如下约定。
 
 Windows x64 账号插件：将独立授权的 Google 账号分组放入 Antigravity 原生模型列表，保留官方模型选项、主题和 View Usage。各账号分别使用自己的额度；插件不合并或转移额度。模型请求仍由原生语言服务直接发往 Google。
 

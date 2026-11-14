@@ -9,6 +9,8 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { existsSync } from 'node:fs';
+import { rewriteAsar } from '../src/asar.mjs';
 const { install, prepareHandoff } = createRequire(import.meta.url)('../src/update-handoff.cjs');
 
 test('native update waits for readiness, preserves installer UI mode and suppresses only force-run', async () => {
@@ -215,6 +217,37 @@ function fakeReadyHelper() {
   setImmediate(() => child.stdout.write('ready\n'));
   return child;
 }
+
+const electronExecutable = process.env.ACCOUNTS_ELECTRON_EXECUTABLE || path.join(process.env.LOCALAPPDATA || '', 'Programs/antigravity/Antigravity.exe');
+test('real Electron handoff reads the disk ASAR without changing global archive behavior', {
+  skip: process.platform !== 'win32' || !existsSync(electronExecutable), timeout: 20000,
+}, async t => {
+  const f = await fixture(t);
+  const json = Buffer.from('{"files":{}}'), header = Buffer.alloc(8 + ((json.length + 3) & ~3));
+  header.writeUInt32LE(header.length - 4); header.writeUInt32LE(json.length, 4); json.copy(header, 8);
+  const size = Buffer.alloc(8); size.writeUInt32LE(4); size.writeUInt32LE(header.length, 4);
+  const archive = rewriteAsar(Buffer.concat([size, header]), new Map([['dummy.txt', Buffer.from('public synthetic program')]]));
+  await fs.writeFile(path.join(f.resourcesPath, 'app.asar'), archive);
+  const parameters = { resourcesPath: f.resourcesPath, localAppData: f.localAppData, autoUpdater: f.autoUpdater, appPid: process.pid, systemRoot: process.env.SystemRoot };
+  const script = `
+    const {EventEmitter}=require('node:events'),{PassThrough}=require('node:stream');
+    const normal=require('node:fs'),disk=require('original-fs'),crypto=require('node:crypto');
+    const {prepareHandoff}=require(${JSON.stringify(path.resolve('packages/hostauth-adapter/src/update-handoff.cjs'))});
+    const parameters=${JSON.stringify(parameters)};
+    const filename=require('node:path').join(parameters.resourcesPath,'app.asar');
+    const before=!!process.noAsar;
+    const virtualBefore=normal.lstatSync(filename).isDirectory();
+    parameters.spawnHelper=()=>{const child=new EventEmitter();child.stdin=new PassThrough();child.stdout=new PassThrough();child.stderr=new PassThrough();child.kill=()=>true;child.unref=()=>{};setImmediate(()=>child.stdout.write('ready\\n'));return child;};
+    prepareHandoff(parameters).then(result=>{
+      const request=JSON.parse(disk.readFileSync(result.requestFile,'utf8'));
+      const stat=request.programState.find(value=>value.relative==='resources/app.asar');
+      console.log(JSON.stringify({virtualBefore,virtualAfter:normal.lstatSync(filename).isDirectory(),globalUnchanged:before===!!process.noAsar,diskSize:stat.length,hashMatches:request.archiveSha256===crypto.createHash('sha256').update(disk.readFileSync(filename)).digest('hex')}));
+    }).catch(error=>{console.error(error.code||error.message);process.exitCode=1;});
+  `;
+  const result = spawnSync(electronExecutable, ['-e', script], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, windowsHide: true, encoding: 'utf8', timeout: 15000 });
+  assert.equal(result.status, 0, result.stderr || result.error?.message);
+  assert.deepEqual(JSON.parse(result.stdout), { virtualBefore: true, virtualAfter: true, globalUnchanged: true, diskSize: archive.length, hashMatches: true });
+});
 
 test('the installed account directory pins receipt, cache, handoff and launcher across differing LOCALAPPDATA inputs', async t => {
   const f = await fixture(t);

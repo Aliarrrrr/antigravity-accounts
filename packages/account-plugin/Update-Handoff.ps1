@@ -146,6 +146,16 @@ try {
     $script:stage='repair-and-launch'
     if ($request.guardedLauncherFile) {
       $launcher=Read-PublicJson $request.guardedLauncherFile
+      if ($launcher.kind -eq 'compatibility') {
+        if ($launcher.schemaVersion -ne 1 -or -not (Same-Path $launcher.installRoot $request.installRoot) -or
+            -not [IO.Path]::IsPathRooted($launcher.stateRoot) -or -not [IO.Path]::IsPathRooted($launcher.nodePath) -or
+            -not (Same-Path $launcher.bootstrapPath (Join-Path $launcher.stateRoot 'bootstrap.mjs'))) { Fail 'update_handoff_launcher_invalid' }
+        $configuration=Read-PublicJson (Join-Path $launcher.stateRoot 'bootstrap.json')
+        if ($configuration.schemaVersion -ne 1 -or -not (Same-Path $configuration.installRoot $request.installRoot) -or
+            -not (Same-Path $configuration.accountsStateRoot $request.stateRoot) -or -not (Same-Path $configuration.nodePath $launcher.nodePath)) { Fail 'update_handoff_launcher_invalid' }
+        [void](Regular-File $launcher.bootstrapPath); [void](Regular-File $launcher.nodePath)
+        Invoke-Hidden $launcher.nodePath @($launcher.bootstrapPath,'launch','--state-root',$launcher.stateRoot)
+      } else {
       if ($launcher.schemaVersion -ne 1 -or $launcher.kind -ne 'localization' -or -not (Same-Path $launcher.installRoot $request.installRoot) -or
           -not [IO.Path]::IsPathRooted($launcher.toolkitRoot) -or -not [IO.Path]::IsPathRooted($launcher.stateRoot) -or -not [IO.Path]::IsPathRooted($launcher.nodePath)) { Fail 'update_handoff_launcher_invalid' }
       $integration=Read-PublicJson (Join-Path $launcher.stateRoot 'windows-persistence/install.json')
@@ -156,6 +166,7 @@ try {
       $vbs=Join-Path $launcher.toolkitRoot 'scripts/Launch-Localized.vbs'
       [void](Regular-File $vbs); [void](Regular-File $launcher.nodePath)
       Invoke-Hidden (Join-Path $env:SystemRoot 'System32/wscript.exe') @($vbs,$launcher.nodePath,$launcher.toolkitRoot,$request.installRoot,$launcher.stateRoot)
+      }
     } else {
       Invoke-Hidden (Join-Path $request.installRoot 'Antigravity.exe') @((Join-Path $request.packageRoot 'account-plugin/recovery-and-launch.mjs'),
         '--install-root',$request.installRoot,'--package-root',$request.packageRoot,'--state-root',$request.stateRoot) $true
