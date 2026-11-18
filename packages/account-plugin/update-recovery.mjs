@@ -8,7 +8,7 @@ import { inspectNativeFallback } from './native-fallback.mjs';
 
 function compatibilityFailure(error) {
   return typeof error?.message === 'string' && (
-    /^unsupported_native_(?:oauth_configuration|diagnostics_program|project_refresh_program|frontend(?:_archive|_contract)?)(?::|$)/.test(error.message) ||
+    /^unsupported_native_(?:program|oauth_configuration|diagnostics_program|project_refresh_program|frontend(?:_archive|_contract)?)(?::|$)/.test(error.message) ||
     /^Unsupported (?:exact program source:|host RPC dependency:)/.test(error.message) ||
     ['Native program and application source contracts differ', 'Expected exactly one complete source anchor'].includes(error.message)
   );

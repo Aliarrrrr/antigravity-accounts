@@ -2,10 +2,11 @@ import { sha256 } from './asar.mjs';
 import { descriptorSource } from './descriptor.mjs';
 import { readFileSync } from 'node:fs';
 import { matchesSourceScope } from './source-scope-contracts.mjs';
+import nativePrograms from './native-program-profiles.cjs';
 
 const reviewedScopes = JSON.parse(readFileSync(new URL('./source-scope-profiles.json', import.meta.url), 'utf8'));
 
-export const SUPPORTED_VERSION = '2.32.1';
+export const SUPPORTED_VERSION = nativePrograms.NATIVE_PROGRAM_PROFILES[0].version;
 export const SOURCE_SHA256 = Object.freeze({
   'dist/main.js': 'b1d133d4aacd31170a23e277008f45b5d4bdc150ae44059a9d27059c8780cd62',
   'dist/languageServer.js': '89d9fe0b57fc85ac590c91bd8d5248ed5b3fdef79dbe2dc5f5086fc6af681b79',
@@ -35,7 +36,7 @@ const previousSourceSha256 = Object.freeze({
   'node_modules/electron-updater/out/NsisUpdater.js': '31f36b4ef5cadd35a93df91d9454aa70044e41c0e6b4c799783dca4302cd03b6',
 });
 export const SOURCE_CONTRACTS = Object.freeze([
-  Object.freeze({ version: SUPPORTED_VERSION, sourceSha256: SOURCE_SHA256, shellEnvironment: 'prefetched', baseArguments: 'shared' }),
+  Object.freeze({ version: '2.32.1', sourceSha256: SOURCE_SHA256, shellEnvironment: 'prefetched', baseArguments: 'shared' }),
   Object.freeze({ version: '2.31.2', sourceSha256: source231Sha256, shellEnvironment: 'prefetched', baseArguments: 'inline' }),
   Object.freeze({ version: '2.31.0', sourceSha256: source231Sha256, shellEnvironment: 'prefetched', baseArguments: 'inline' }),
   Object.freeze({ version: '2.29.0', sourceSha256: Object.freeze({ ...source231Sha256,
@@ -44,6 +45,11 @@ export const SOURCE_CONTRACTS = Object.freeze([
   }), shellEnvironment: 'prefetched', baseArguments: 'inline' }),
   Object.freeze({ version: '2.28.2', sourceSha256: previousSourceSha256, shellEnvironment: 'sync', baseArguments: 'inline' }),
 ]);
+// These releases reuse a reviewed script set but ship a different native
+// service. Recognizing the scripts must not select the older executable.
+const reusedSourceVersions = new Map(nativePrograms.NATIVE_PROGRAM_PROFILES
+  .filter(profile => profile.sourceContractVersion)
+  .map(profile => [profile.version, profile.sourceContractVersion]));
 const dependencyVersions = Object.freeze({ '@bufbuild/protobuf': '2.11.0', '@connectrpc/connect': '2.2.0', '@connectrpc/connect-node': '2.2.0', 'electron-updater': '6.8.9' });
 
 // A package-version change alone does not invalidate the adaptation. Every
@@ -69,7 +75,9 @@ export function inspectSourceCompatibility(archive) {
     });
     scopeMatch = matchingContracts.length > 0;
   }
-  const contract = matchingContracts.find(candidate => candidate.version === packageInfo.version) || matchingContracts[0];
+  const sourceVersion = reusedSourceVersions.get(packageInfo.version);
+  const exact = matchingContracts.find(candidate => candidate.version === (sourceVersion || packageInfo.version));
+  const contract = sourceVersion ? exact : exact || matchingContracts[0];
   if (!contract) throw new Error('Unsupported exact program source: no complete reviewed source contract matches');
   const sourceSha256 = Object.fromEntries(Object.keys(contract.sourceSha256).map(name => [name, availableSha256[name]]));
   for (const [name, version] of Object.entries(dependencyVersions)) {
@@ -78,6 +86,7 @@ export function inspectSourceCompatibility(archive) {
     if (installed !== version) throw new Error(`Unsupported host RPC dependency: ${name}`);
   }
   return { antigravityVersion: packageInfo.version, sourceContractVersion: contract.version,
+    nativeContractVersion: sourceVersion ? packageInfo.version : contract.version,
     match: scopeMatch ? 'reviewed-scopes' : packageInfo.version === contract.version ? 'reviewed-version' : 'unchanged-source-contract',
     sourceSha256, dependencyVersions: { ...dependencyVersions }, shellEnvironment: contract.shellEnvironment, baseArguments: contract.baseArguments };
 }

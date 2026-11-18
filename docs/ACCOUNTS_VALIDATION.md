@@ -1,4 +1,12 @@
-# Accounts 0.4.0-preview.19 validation scope
+# Accounts 0.4.0-preview.20 validation scope
+
+## Preview.20 on Antigravity 2.32.2 — 18 November 2026
+
+The installed preview.19 recorded `unsupported_native_oauth_configuration` during Accounts preparation. Chinese localization completed. The ten host files used by Accounts and the four RPC dependency versions match 2.32.1. Preview.20 recognizes the new Windows x64 language service before inspecting desktop OAuth configuration. The 2.32.2 archive requires its matching native profile. A 2.32.1 service paired with the 2.32.2 archive is rejected before any installation writes.
+
+The unmodified 2.32.2 service reported an idle conversation while a model-list request was still pending. Testing the reviewed provider copy against loopback services confirmed a pending request reports active work and an idle conversation is recognized after the request finishes. Three synthetic account confirmations completed in A → B → A order using the 2.32.2 wire format. The first model-list request after changing to B used B's project. A failed project refresh prevented that request. The goroutine route responded and the five other tested profiling routes returned 404. The test used an emulated view callback in place of the desktop window, synthetic accounts and project data, and a rejecting proxy. No generation requests were sent.
+
+The local Accounts Node suites passed 278 cases with separate original 2.32.2 program inputs, including byte-for-byte restoration of the original archive and native program. The account component passed 44 cases and the combined compatibility and localization fallback suites passed 34. On an isolated copy, preview.19 applied Chinese localization and omitted Accounts. Preview.20 then applied both components. Rolling back its transaction recovered the prior localized archive and original native program, and preserved the synthetic authorization file. Actual desktop switching and quota attribution are separate runtime checks.
 
 ## Preview.19 long Windows download paths — 14 November 2026
 

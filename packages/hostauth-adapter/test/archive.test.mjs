@@ -140,6 +140,38 @@ test('identical 2.31 source contracts retain each reviewed native-program versio
   }
 });
 
+const source2321 = new URL('../../../artifacts/accounts/original-program-fixture-2.32.1/resources/', import.meta.url);
+const native2321 = new URL('bin/language_server.exe', source2321);
+const archive2321 = new URL('app.asar', source2321);
+const has2321 = await Promise.all([access(archive2321), access(native2321)]).then(() => true, () => false);
+test('2.32.2 rejects a previous or unreviewed native image before requesting OAuth configuration', { skip: !has2321 }, async t => {
+  const original = await readFile(archive2321);
+  const metadata = JSON.parse(readAsar(original).read('package.json'));
+  const source = rewriteAsar(original, new Map([
+    ['package.json', Buffer.from(JSON.stringify({ ...metadata, version: '2.32.2' }))],
+  ]));
+  const compatibility = inspectSourceCompatibility(readAsar(source));
+  assert.equal(compatibility.sourceContractVersion, '2.32.1');
+  assert.equal(compatibility.nativeContractVersion, '2.32.2');
+  const root = await mkdtemp(path.join(os.tmpdir(), 'accounts-version-pair-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const resources = path.join(root, 'app', 'resources');
+  await mkdir(resources, { recursive: true });
+  const sourceAsar = path.join(resources, 'app.asar'), unreviewed = path.join(resources, 'unreviewed.exe');
+  await writeFile(sourceAsar, source);
+  await writeFile(unreviewed, 'an unreviewed language service');
+  const outputRoot = path.join(root, 'candidate');
+  let configReads = 0;
+  const prepare = languageServerPath => buildCopy({
+    sourceAsar, outputRoot, languageServerPath, allowMissingPayload: true,
+    nativeOAuthExtractor: async () => { configReads++; },
+  });
+  await assert.rejects(prepare(native2321), { message: 'native_program_source_mismatch' });
+  await assert.rejects(prepare(unreviewed), { message: 'unsupported_native_program' });
+  assert.equal(configReads, 0);
+  await assert.rejects(access(outputRoot), { code: 'ENOENT' });
+});
+
 test('shared 2.32 LS defaults and shell loader are checked before account insertion', { skip: !hasProgram }, async () => {
   const original = await readFile(programAsar);
   const archive = readAsar(original);

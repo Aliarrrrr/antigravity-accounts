@@ -2,8 +2,8 @@ import nativePrograms from '../hostauth-adapter/src/native-program-profiles.cjs'
 import { readFile } from 'node:fs/promises';
 import { createHash, timingSafeEqual } from 'node:crypto';
 
-// Public installed-app OAuth defaults in the reviewed 2.25.0 to 2.32.1
-// programs. These are not account credentials. No user files, overrides,
+// Public installed-app OAuth defaults in the reviewed native programs.
+// These are not account credentials. No user files, overrides,
 // keyrings or databases are read. In 2.27.0 HostAuthProvider.GetTokenSource
 // still calls getOAuth2Config; its instruction sequence differs only in
 // relocated addresses and the default client ID and secret are unchanged.

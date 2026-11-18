@@ -2,15 +2,13 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-**0.4.0-preview.19** adds [combined compatibility updates](docs/COMPATIBILITY_UPDATES.md) for Accounts and Chinese localization. [Download the compatibility bundle](https://github.com/Aliarrrrr/antigravity-accounts/releases/tag/accounts-v0.4.0-preview.19) for an existing combined installation. It verifies and prepares new engines separately and applies application changes only after normal exit; unsupported native programs remain unmodified. The standalone Accounts ZIP is still available.
-
-Includes Antigravity **2.32.1** compatibility and the BaseWindow/WebContentsView account-switching fix. See [validation](docs/ACCOUNTS_VALIDATION.md) for the actual check scope.
+**0.4.0-preview.20** restores Accounts support for Antigravity **2.32.2**. Existing combined installations can update Accounts and Chinese localization together after a normal exit. [Compatibility guide](docs/COMPATIBILITY_UPDATES.md) · [Release downloads](https://github.com/Aliarrrrr/antigravity-accounts/releases/tag/accounts-v0.4.0-preview.20)
 
 On installed 2.32.1, saved accounts completed A → B → A switching with the project and model retained. This check made no model submissions and does not establish quota charging or cross-account generation.
 
 **Use your authorized Google accounts from Antigravity’s native model picker.**
 
-![Preview 0.4.0-preview.19](https://img.shields.io/badge/preview-0.4.0--preview.17-8b5cf6)
+![Preview 0.4.0-preview.20](https://img.shields.io/badge/preview-0.4.0--preview.20-8b5cf6)
 ![Windows x64](https://img.shields.io/badge/platform-Windows%20x64-0078D4)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
@@ -18,23 +16,23 @@ Antigravity Accounts adds account groups to the existing model menu, with the ho
 
 This is an **unofficial Windows host-adapter preview**, distributed as a ZIP. It is not listed in the Antigravity Marketplace, and installing `plugin.json` alone does not enable account switching.
 
-[Download preview.17](https://github.com/Aliarrrrr/antigravity-accounts/releases/tag/accounts-v0.4.0-preview.19) · [Installation guide](docs/ACCOUNTS_PLUGIN.md) · [Changelog](CHANGELOG.md) · [Validation](docs/ACCOUNTS_VALIDATION.md)
+[Download preview.20](https://github.com/Aliarrrrr/antigravity-accounts/releases/tag/accounts-v0.4.0-preview.20) · [Installation guide](docs/ACCOUNTS_PLUGIN.md) · [Changelog](CHANGELOG.md) · [Validation](docs/ACCOUNTS_VALIDATION.md)
 
 ## Install
 
 | Requirement | Supported configuration |
 | --- | --- |
 | Operating system | Windows x64 |
-| Antigravity App | Reviewed 2.32.1, 2.31.2, 2.31.0, 2.29.0 and 2.28.2 program combinations |
+| Antigravity App | Reviewed 2.32.2, 2.32.1, 2.31.2, 2.31.0, 2.29.0 and 2.28.2 program combinations |
 | Additional runtimes | None for the packaged release; .NET is self-contained and installer helpers use the installed Electron runtime |
 
-1. Download and fully extract [AntigravityAccounts-0.4.0-preview.19-win-x64.zip](https://github.com/Aliarrrrr/antigravity-accounts/releases/download/accounts-v0.4.0-preview.19/AntigravityAccounts-0.4.0-preview.19-win-x64.zip).
+1. Download and fully extract [AntigravityAccounts-0.4.0-preview.20-win-x64.zip](https://github.com/Aliarrrrr/antigravity-accounts/releases/download/accounts-v0.4.0-preview.20/AntigravityAccounts-0.4.0-preview.20-win-x64.zip).
 2. Exit Antigravity completely. If it stays in the system tray, choose **Exit** from the tray menu.
 3. Run `Install-Preview.cmd` from the extracted `AntigravityAccounts` directory, then start Antigravity normally.
 
 The installer checks the installed programs, preserves originals and applies the local adaptation. It does not modify `Antigravity.exe`. Keep the complete extracted package and its checksum file for recovery.
 
-For the standalone Accounts ZIP on an unchanged host, exit Antigravity and run `Restore.cmd` from the **newly extracted preview.19 package**, then its `Install-Preview.cmd`. If an official update has already replaced the host with reviewed original programs listed above, run the new `Install-Preview.cmd` directly. Saved authorizations and the old receipt are retained. Existing Chinese and Accounts installations can instead use the [combined bundle](docs/COMPATIBILITY_UPDATES.md) to prepare both layers together while preserving their state locations. Separate legacy Accounts operations still require restoring the Chinese layer first and reapplying it afterward. See the [detailed guide](docs/ACCOUNTS_PLUGIN.md#安装).
+For the standalone Accounts ZIP on an unchanged host, exit Antigravity and run `Restore.cmd` from the **newly extracted preview.20 package**, then its `Install-Preview.cmd`. If an official update has already replaced the host with reviewed original programs listed above, run the new `Install-Preview.cmd` directly. Saved authorizations and the old receipt are retained. Existing Chinese and Accounts installations can instead use the [combined bundle](docs/COMPATIBILITY_UPDATES.md) to prepare both layers together while preserving their state locations. Separate legacy Accounts operations still require restoring the Chinese layer first and reapplying it afterward. See the [detailed guide](docs/ACCOUNTS_PLUGIN.md#安装).
 
 For a custom installation, set `ANTIGRAVITY_INSTALL_ROOT` to the directory containing `Antigravity.exe` before running the installer.
 

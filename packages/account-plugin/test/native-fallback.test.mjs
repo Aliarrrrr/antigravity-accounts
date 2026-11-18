@@ -67,9 +67,13 @@ test('fallback rejects every native image modified by a supported Accounts profi
 test('unsupported complete update returns native mode without changing programs, receipt or authorization', async t => {
   const f = await fixture(t), receiptPath = path.join(f.stateRoot, 'adapter-installation.json');
   const before = await fs.readFile(receiptPath);
-  const result = await ensureAccounts({ ...f, checkStopped() {}, manage() { throw new Error('unsupported_native_oauth_configuration'); } });
-  assert.equal(result.status, 'degraded'); assert.equal(result.mode, 'native');
-  assert.equal(result.program.appVersion, '9.0.0'); assert.equal(result.program.asarSha256, sha256(f.original));
+  for (const reason of ['unsupported_native_program', 'unsupported_native_oauth_configuration']) {
+    const result = await ensureAccounts({ ...f, checkStopped() {}, manage() { throw new Error(reason); } });
+    assert.equal(result.status, 'degraded'); assert.equal(result.mode, 'native');
+    assert.equal(result.program.appVersion, '9.0.0'); assert.equal(result.program.asarSha256, sha256(f.original));
+  }
+  await assert.rejects(ensureAccounts({ ...f, checkStopped() {}, manage() { throw new Error('native_program_source_mismatch'); } }),
+    { message: 'native_program_source_mismatch' });
   assert.deepEqual(await fs.readFile(path.join(f.resourcesRoot, 'app.asar')), f.original);
   assert.deepEqual(await fs.readFile(receiptPath), before);
   assert.equal(await fs.readFile(path.join(f.stateRoot, 'accounts.dpapi'), 'utf8'), 'retained account authorization');

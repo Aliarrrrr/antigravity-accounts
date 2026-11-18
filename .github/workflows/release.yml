@@ -113,7 +113,9 @@ jobs:
           }
           $assets = @($files | ForEach-Object FullName)
           $notes = @'
-          Adds a versioned compatibility bundle containing Accounts, Chinese localization, production dependencies and the shared prepare/apply coordinator. The standalone Accounts ZIP remains available. Existing account and localization state locations are retained; no official program files, account authorizations or conversation data are distributed.
+          Supports the reviewed Antigravity 2.32.2 Windows x64 program. The matching native service is checked before the desktop OAuth configuration is read. See VALIDATION.md for the separate program, recovery and local runtime checks.
+
+          The combined compatibility bundle includes Accounts, Chinese localization, production dependencies and the shared prepare/apply coordinator. The standalone Accounts ZIP remains available. Both packages preserve the existing account and localization state locations.
 
           Automatic compatibility checks use only this repository's preview releases. Downloads are verified and prepared separately; application files are changed only after normal exit. The external bootstrap and watcher use version directories so their running code is not overwritten. See VALIDATION.md for the current test, interruption/recovery and installed-client results.
 

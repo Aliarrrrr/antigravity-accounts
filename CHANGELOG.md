@@ -1,5 +1,11 @@
 # Changelog
 
+## Accounts 0.4.0-preview.20 — 2026-11-18
+
+- 支持 Antigravity 2.32.2 的 Windows x64 语言服务。桌面脚本继续使用已审查的 2.32.1 规则，语言服务和 OAuth 配置按 2.32.2 的原始程序独立校验。
+- 新旧程序混装会在读取 OAuth 配置前被拒绝。成套包保留原汉化和账号状态目录。
+- 用本地模拟账号确认新版语言服务能识别进行中的请求，并在账号切换后使用对应项目。检查范围见 `docs/ACCOUNTS_VALIDATION.md`。
+
 ## Accounts 0.4.0-preview.19 — 2026-11-14
 
 - Fixes compatibility ZIP preparation under deep Windows state directories. Windows PowerShell 5 extraction now uses extended paths after the existing archive-path validation, without changing system settings. The published preview.18 bundle was extracted and validated at the actual failing download location with this fix.

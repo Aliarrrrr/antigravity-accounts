@@ -7,6 +7,7 @@ import { modelMenuEntrySource } from './model-menu-entry.mjs';
 import { patchNativeDiagnostics, restoreNativeDiagnostics, inspectNativeDiagnostics } from './native-diagnostics-patch.mjs';
 import { patchNativeProjectRefresh, restoreNativeProjectRefresh } from './native-project-refresh-patch.mjs';
 import { extractNativeFrontend, inspectFrontendBindings } from './frontend-bindings.mjs';
+import nativePrograms from './native-program-profiles.cjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const addonFiles = ['runtime.cjs', 'component-client.cjs', 'switch-coordinator.cjs', 'token-barrier.cjs', 'submission-gate.cjs', 'native-task-adapter.cjs', 'native-agent-state.cjs', 'native-program-profiles.cjs', 'model-menu-bridge.cjs', 'account-preferences.cjs', 'native-view.cjs', 'local-hub-windows.cjs', 'update-handoff.cjs'];
@@ -47,6 +48,13 @@ export async function buildCopy({ sourceAsar, outputRoot, componentExecutable, u
   if (!await absent(outputRoot)) throw new Error('Output already exists; choose a new directory');
   const original = await readFile(sourceAsar);
   const compatibility = inspectSourceCompatibility(readAsar(original));
+  const originalNative = languageServerPath ? await readFile(languageServerPath) : undefined;
+  const originalNativeSha256 = originalNative && sha256(originalNative);
+  if (originalNative) {
+    const profile = nativePrograms.NATIVE_PROGRAM_PROFILES.find(item => item.originalSha256 === originalNativeSha256);
+    if (!profile) throw new Error('unsupported_native_program');
+    if (profile.version !== compatibility.nativeContractVersion) throw new Error('native_program_source_mismatch');
+  }
   const replacements = patchSources(readAsar(original));
   replacements.set('dist/hostauth-addon/model-menu-preload.cjs', Buffer.from(modelMenuEntrySource()));
   for (const name of addonFiles) replacements.set('dist/hostauth-addon/' + name, await readFile(path.join(packageRoot, 'src', name)));
@@ -58,28 +66,27 @@ export async function buildCopy({ sourceAsar, outputRoot, componentExecutable, u
   const componentName = componentExecutable ? path.basename(componentExecutable) : 'ProfileHub.Accounts.exe';
   const config = { schemaVersion: 1, component: 'component/' + componentName, requireRuntimeDiagnostics: true };
   if (accountsStateRoot !== undefined) config.accountsStateRoot = accountsStateRoot;
-  let originalNative, patchedNative, nativeDiagnostics, providerNative, nativeProjectRefresh;
-  if (languageServerPath) {
-    const extractor = nativeOAuthExtractor || (await import(pathToFileURL(path.resolve(packageRoot, '../account-plugin/native-oauth.mjs')))).extractNativeOAuth;
-    config.oauthClient = await extractor(languageServerPath);
-    originalNative = await readFile(languageServerPath);
+  let patchedNative, nativeDiagnostics, providerNative, nativeProjectRefresh;
+  if (originalNative) {
+    config.oauthClient = nativeOAuthExtractor ? await nativeOAuthExtractor(languageServerPath) :
+      (await import(pathToFileURL(path.resolve(packageRoot, '../account-plugin/native-oauth.mjs')))).extractOAuthFromProgram(originalNative);
     const result = patchNativeDiagnostics(originalNative);
     patchedNative = result.buffer;
     nativeDiagnostics = result.report;
     const providerResult = patchNativeProjectRefresh(patchedNative);
     providerNative = providerResult.buffer;
     nativeProjectRefresh = providerResult.report;
-    if (nativeDiagnostics.version !== compatibility.sourceContractVersion || nativeProjectRefresh.version !== compatibility.sourceContractVersion)
-      throw new Error('Native program and application source contracts differ');
-    config.nativeProgram = { version: nativeDiagnostics.version, originalSha256: sha256(originalNative),
+    if (nativeDiagnostics.version !== compatibility.nativeContractVersion || nativeProjectRefresh.version !== compatibility.nativeContractVersion)
+      throw new Error('native_program_source_mismatch');
+    config.nativeProgram = { version: nativeDiagnostics.version, originalSha256: originalNativeSha256,
       patchedSha256: sha256(patchedNative), providerSha256: sha256(providerNative) };
     config.frontendBindings = inspectFrontendBindings(extractNativeFrontend(originalNative));
   } else if (!allowMissingPayload) throw new Error('The installed language-server program is required to configure the matching desktop OAuth client');
   const manifest = {
-    schemaVersion: 3, adapterVersion: '0.4.0-preview.19', antigravityVersion: compatibility.antigravityVersion,
+    schemaVersion: 3, adapterVersion: '0.4.0-preview.20', antigravityVersion: compatibility.antigravityVersion,
     originalAsarSha256: sha256(original), patchedAsarSha256: sha256(patched),
     originalSourceSha256: compatibility.sourceSha256, compatibility,
-    originalNativeSha256: originalNative ? sha256(originalNative) : undefined,
+    originalNativeSha256,
     patchedNativeSha256: patchedNative ? sha256(patchedNative) : undefined,
     nativeDiagnostics,
     providerNativeSha256: providerNative ? sha256(providerNative) : undefined,
@@ -135,7 +142,7 @@ async function validatePrepared(preparedRoot) {
   const originalNative = await readFile(path.join(preparedRoot, 'restore', 'bin', 'language_server.exe'));
   const patchedNative = await readFile(path.join(preparedRoot, 'resources', 'bin', 'language_server.exe'));
   const native = inspectNativeDiagnostics(originalNative);
-  if (native.version !== compatibility.sourceContractVersion ||
+  if (native.version !== compatibility.nativeContractVersion ||
       manifest.originalNativeSha256 !== native.originalSha256 || manifest.patchedNativeSha256 !== native.patchedSha256 ||
       sha256(originalNative) !== manifest.originalNativeSha256 || sha256(patchedNative) !== manifest.patchedNativeSha256 ||
       !restoreNativeDiagnostics(patchedNative).buffer.equals(originalNative)) throw new Error('Prepared native program differs from the reviewed patch');

@@ -7,9 +7,11 @@ import {
 } from './native-diagnostics-patch.mjs';
 
 export { ORIGINAL_NATIVE_SHA256, DIAGNOSTICS_NATIVE_SHA256 };
-export const PROJECT_REFRESH_VERSION = '2.32.1';
-export const PROJECT_REFRESH_NATIVE_SHA256 = '9728f6eb169fd63a7b154934c7151932152fcc93ca97720117237218df907490';
-export const PROVIDER_NATIVE_SHA256 = '319c1abd18b4d12ac2149473f04b07be8671d230ecf12adf4cb7d1e3fe85edf6';
+export const {
+  version: PROJECT_REFRESH_VERSION,
+  projectSha256: PROJECT_REFRESH_NATIVE_SHA256,
+  providerSha256: PROVIDER_NATIVE_SHA256,
+} = nativePrograms.NATIVE_PROGRAM_PROFILES[0];
 
 // The existing getCAICProject call reads a cached LoadCodeAssist response before
 // its caller obtains the current HTTP client/token. An account change can then
