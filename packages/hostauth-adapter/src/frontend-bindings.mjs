@@ -14,7 +14,10 @@ function unique(source, pattern, name) {
 export function inspectFrontendBindings(source) {
   if (typeof source !== 'string' || source.length > 64 * 1024 * 1024) throw new Error('unsupported_native_frontend');
   const schema = unique(source, `name:"userStatus",initialState:\\(\\)=>${identifier}\\((${identifier})\\.UserStatusSchema\\)`, 'user-status')[1];
-  const setStatus = unique(source, `(${identifier})=${identifier}\\.actions\\.setUserStatus,`, 'set-status')[1];
+  const statusAction = unique(source,
+    `(${identifier})=${identifier}\\.actions\\.setUserStatus,|` +
+    `(${identifier})=${identifier}\\.actions;(?:var|let|const) (${identifier})=\\2\\.setUserStatus,`, 'set-status');
+  const setStatus = statusAction[1] ?? statusAction[3];
   const modelPicked = unique(source, `(?:var|let|const) (${identifier})=${identifier}\\.modelPicked,`, 'model-picked')[1];
   const addListener = unique(source, `(?:var|let|const) (${identifier})=${identifier}\\(${identifier}\\("listenerMiddleware/add"\\)`, 'add-listener')[1];
   const decoder = unique(source, `function (${identifier})\\(a,b,c\\)\\{a=${identifier}\\(a\\);try\\{${identifier}\\(a,b,c\\?\\{\\.\\.\\.${identifier},\\.\\.\\.c\\}:${identifier}\\)\\}catch\\(d\\)\\{b=d;if\\(b instanceof Error&&${identifier}\\.includes\\(b.name\\)&&"field"in b&&typeof b.field=="function"\\)throw Error\\(\x60cannot decode \\$\\{d.field\\(\\)\\} from JSON: \\$\\{d.message\\}\x60,\\{cause:d\\}\\);throw d;\\}return a.message\\}`, 'protobuf-decoder')[1];

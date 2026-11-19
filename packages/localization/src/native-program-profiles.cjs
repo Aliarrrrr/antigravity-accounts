@@ -5,6 +5,36 @@
 // and rejected program sets here; unknown images are never guessed compatible.
 const profiles = [
   {
+    version: '2.33.0',
+    originalSha256: 'eb6d986dfc5a859c6e9b1b36a0601f5c362993cc16eb8962ad554c9141defc9c',
+    diagnosticsSha256: '6e44f7d4018d9540d5b170aad9d65dd579649abb1dc3f6546b0f675445a21b85',
+    projectSha256: '51bdb8da211971487950c2e9d9f3993d20f1e78e7d01df9b585fd635b24b2df6',
+    providerSha256: '18cbda3fc8f131ad37b69c5b83256281e010149e32498aaa2f2359b92bbbc092',
+    activityProtocol: 'execution-status',
+    diagnostics: {
+      routeAddress: 0x143b91c86n,
+      changes: [
+        { address: 0x143548f62n, before: '0f84d4000000', after: 'e93500000090', purpose: 'goroutine-only route entry' },
+        { address: 0x143548fa4n, before: '488d1da0395a00', after: '488d1ddb8c6400', purpose: 'exact goroutine route literal' },
+        { address: 0x143548fabn, before: 'b90d000000', after: 'b916000000', purpose: 'goroutine route length' },
+        { address: 0x143548fbcn, before: '488b8424e0010000', after: 'e97b000000909090', purpose: 'skip all remaining debug routes' },
+      ],
+    },
+    projectRefresh: {
+      address: 0x14289c1b3n,
+      originalTarget: 0x1428b0b40n,
+      refreshedTarget: 0x1428b10a0n,
+      dictionaryAddress: 0x1444bd700n,
+      before: 'e888490100',
+      after: 'e8e84e0100',
+    },
+    oauth: {
+      code: { address: 0x14287b380n, length: 1184, digest: '4fed236ce446adc3ec829f7bd5a8b1754afef798edf9e162cea2d2999b387d92' },
+      id: { address: 0x143cc80f7n, length: 73, digest: 'bf00c418024ba6bf606ccdc37120976e41bc429dd1d46ecf16a729aa532626ea' },
+      secret: { address: 0x143c2677dn, length: 35, digest: '1d2f041093fd95aa8995a038c711d50a7960da09a505381c09a745d6ad0ecc60' },
+    },
+  },
+  {
     version: '2.32.2',
     sourceContractVersion: '2.32.1',
     originalSha256: 'cad159f1b49ff5d9e8e0ea765184e1dd8f59fdb711babbdee9ae1013384f25b9',

@@ -23,6 +23,6 @@ test('current native bindings survive compiler renaming and unrelated updates bu
   assert.notEqual(result.frontendSha256, bindings.frontendSha256);
   assert.match(nativeBindingsExpression(result), /_recompiled/);
   assert.throws(() => inspectFrontendBindings(source + '\n' + source), /unsupported_native_frontend_contract/);
-  assert.throws(() => inspectFrontendBindings(source.replace('.actions.setUserStatus,', '.actions.setUnknownStatus,')), /unsupported_native_frontend_contract/);
+  assert.throws(() => inspectFrontendBindings(source.replace('.setUserStatus,', '.setUnknownStatus,')), /unsupported_native_frontend_contract: set-status/);
   assert.throws(() => nativeBindingsExpression({ ...result, symbols: { ...result.symbols, decoder: 'kf;fetch("x")' } }), { code: 'native_view_bindings_invalid' });
 });

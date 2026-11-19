@@ -113,7 +113,7 @@ jobs:
           }
           $assets = @($files | ForEach-Object FullName)
           $notes = @'
-          Supports the reviewed Antigravity 2.32.2 Windows x64 program. The matching native service is checked before the desktop OAuth configuration is read. See VALIDATION.md for the separate program, recovery and local runtime checks.
+          Restores Accounts support for Antigravity 2.33.0 on Windows x64. The desktop scripts, embedded account-state binding and matching language service are checked before installation. See VALIDATION.md for program, recovery and runtime results.
 
           The combined compatibility bundle includes Accounts, Chinese localization, production dependencies and the shared prepare/apply coordinator. The standalone Accounts ZIP remains available. Both packages preserve the existing account and localization state locations.
 

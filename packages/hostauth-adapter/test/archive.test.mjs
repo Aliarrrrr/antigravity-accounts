@@ -123,6 +123,17 @@ test('package updates retain compatibility only with complete unchanged source a
   assert.throws(() => patchSources(malformed), /Unsupported Antigravity/);
 });
 
+test('a reviewed package version cannot select another release’s source and native pair', { skip: !hasProgram }, async () => {
+  const original = await readFile(programAsar);
+  const archive = readAsar(original);
+  const metadata = JSON.parse(archive.read('package.json'));
+  const version = inspectSourceCompatibility(archive).sourceContractVersion === '2.33.0' ? '2.32.1' : '2.33.0';
+  const relabeled = readAsar(rewriteAsar(original, new Map([
+    ['package.json', Buffer.from(JSON.stringify({ ...metadata, version }))],
+  ])));
+  assert.throws(() => inspectSourceCompatibility(relabeled), /Unsupported exact program source/);
+});
+
 const source231Asar = new URL('../../../artifacts/accounts/original-program-fixture-2.31.2/resources/app.asar', import.meta.url);
 let has231Program = false;
 try { await access(source231Asar); has231Program = true; } catch { /* Optional previous-version input. */ }
@@ -153,6 +164,10 @@ test('2.32.2 rejects a previous or unreviewed native image before requesting OAu
   const compatibility = inspectSourceCompatibility(readAsar(source));
   assert.equal(compatibility.sourceContractVersion, '2.32.1');
   assert.equal(compatibility.nativeContractVersion, '2.32.2');
+  const newerLabel = rewriteAsar(original, new Map([
+    ['package.json', Buffer.from(JSON.stringify({ ...metadata, version: '2.33.0' }))],
+  ]));
+  assert.throws(() => inspectSourceCompatibility(readAsar(newerLabel)), /Unsupported exact program source/);
   const root = await mkdtemp(path.join(os.tmpdir(), 'accounts-version-pair-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const resources = path.join(root, 'app', 'resources');
@@ -172,12 +187,15 @@ test('2.32.2 rejects a previous or unreviewed native image before requesting OAu
   await assert.rejects(access(outputRoot), { code: 'ENOENT' });
 });
 
-test('shared 2.32 LS defaults and shell loader are checked before account insertion', { skip: !hasProgram }, async () => {
+test('shared LS defaults and shell loader are checked before account insertion', { skip: !hasProgram }, async () => {
   const original = await readFile(programAsar);
   const archive = readAsar(original);
   const compatibility = inspectSourceCompatibility(archive);
   if (compatibility.baseArguments !== 'shared') return;
-  assert.equal(compatibility.sourceContractVersion, '2.32.1');
+  if (compatibility.antigravityVersion === '2.33.0') {
+    assert.equal(compatibility.sourceContractVersion, '2.33.0');
+    assert.equal(compatibility.nativeContractVersion, '2.33.0');
+  }
   const patched = patchSources(archive);
   for (const name of ['dist/lsDefaults.js', 'dist/loginShellEnvReads.js', 'dist/utils.js']) {
     assert.ok(compatibility.sourceSha256[name]);
@@ -196,6 +214,7 @@ test('shared 2.32 LS defaults and shell loader are checked before account insert
 test('actual native launch selects HostAuth only for an activated independent provider', { skip: !hasProgram }, async () => {
   const archive = readAsar(await readFile(programAsar));
   const patched = patchSources(archive);
+  const compatibility = inspectSourceCompatibility(archive);
   const captures = [];
   const exports = {};
   const nativeRequire = createRequire(import.meta.url);
@@ -203,9 +222,10 @@ test('actual native launch selects HostAuth only for an activated independent pr
   const resourcesPath = path.resolve('/offline/antigravity/resources');
   const nativeProgramPath = 'hostauth-addon/native/language_server.exe';
   let providerNativeExists = true;
+  let remoteDebugging = false;
   const overrides = {
     child_process: { spawn(command, args, options) { captures.push({ command, args, options }); throw sentinel; } },
-    electron: { app: { isPackaged: true, getVersion: () => SUPPORTED_VERSION } },
+    electron: { app: { isPackaged: true, getVersion: () => SUPPORTED_VERSION, commandLine: { hasSwitch: name => name === 'remote-debugging-port' && remoteDebugging } } },
     'shell-env': { shellEnvSync: () => ({ AICODE_DEV_PROJECT: 'test-shell-project' }), shellEnv: async () => ({ AICODE_DEV_PROJECT: 'test-shell-project' }) },
     fs: { createWriteStream: () => ({}), statSync(filename) {
       assert.equal(filename, path.join(resourcesPath, nativeProgramPath));
@@ -217,12 +237,16 @@ test('actual native launch selects HostAuth only for an activated independent pr
     './wsl': {},
     './loginShellEnvReads': { LoginShellEnvReads: class { prefetch() {} async take() { return { AICODE_DEV_PROJECT: 'test-shell-project' }; } } },
   };
-  if (inspectSourceCompatibility(archive).baseArguments === 'shared') {
+  if (compatibility.baseArguments === 'shared') {
     const defaults = {};
     vm.runInNewContext(archive.read('dist/lsDefaults.js').toString(), { exports: defaults });
     overrides['./lsDefaults'] = defaults;
   }
-  const originalEnv = { USER_INFO_OVERRIDE_URL: 'http://127.0.0.1:12345/test-userinfo' };
+  const originalEnv = {
+    USER_INFO_OVERRIDE_URL: 'http://127.0.0.1:12345/test-userinfo',
+    AGY_BROWSER_ACTIVE_PORT_FILE: '/unused/inherited-port',
+    AGY_BROWSER_WS_URL: 'ws://127.0.0.1:12345',
+  };
   vm.runInNewContext(patched.get('dist/languageServer.js').toString(), { exports, __dirname: '/unused/program', process: { platform: 'win32', env: originalEnv, resourcesPath }, require: name => overrides[name] || nativeRequire(name) });
   const providerOptions = { useHostAuth: true, nativeProgramPath, hostBridgeUrl: 'http://127.0.0.1:4567', hostBridgeToken: 'new-local-bridge-capability' };
   for (const options of [{}, { useHostAuth: false }, providerOptions]) {
@@ -233,11 +257,23 @@ test('actual native launch selects HostAuth only for an activated independent pr
     assert.equal(captures.at(-1).options.env.OFFLINE_ORIGINAL_WRAPPER, 'preserved');
     assert.equal(captures.at(-1).options.env.AICODE_DEV_PROJECT, options.useHostAuth ? undefined : 'test-shell-project');
     assert.equal(captures.at(-1).options.env.USER_INFO_OVERRIDE_URL, options.useHostAuth ? undefined : originalEnv.USER_INFO_OVERRIDE_URL);
+    if (compatibility.sourceContractVersion === '2.33.0') {
+      assert.equal(captures.at(-1).options.env.AGY_BROWSER_ACTIVE_PORT_FILE, undefined);
+      assert.equal(captures.at(-1).options.env.AGY_BROWSER_WS_URL, undefined);
+      for (const name of ['CHROME_DEVTOOLS_MCP_NO_CONFIG_DISCOVERY', 'CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS', 'CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS']) {
+        assert.equal(captures.at(-1).options.env[name], '1');
+      }
+    }
   }
   assert.equal(originalEnv.USER_INFO_OVERRIDE_URL, 'http://127.0.0.1:12345/test-userinfo', 'only the provider child environment is changed');
   const plainArgs = Array.from(captures[0].args);
   const providerArgs = Array.from(captures.at(-1).args).filter(arg => arg !== '--use_host_auth=true' && !arg.startsWith('--host_bridge_'));
   assert.deepEqual(providerArgs, plainArgs);
+  if (compatibility.sourceContractVersion === '2.33.0') {
+    remoteDebugging = true;
+    await assert.rejects(exports.startLanguageServer(0, 'local-csrf-value', providerOptions), error => error === sentinel);
+    assert.equal(captures.at(-1).options.env.AGY_BROWSER_ACTIVE_PORT_FILE, '/unused/port');
+  }
   const before = captures.length;
   await assert.rejects(exports.startLanguageServer(0, 'local-csrf-value', { useHostAuth: true }), /Independent host authentication/);
   await assert.rejects(exports.startLanguageServer(0, 'local-csrf-value', { useHostAuth: true, hostBridgeUrl: 'http://127.0.0.1:4567', hostBridgeToken: 'local', wsl: {} }), /Independent host authentication/);

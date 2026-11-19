@@ -1,4 +1,16 @@
-# Accounts 0.4.0-preview.20 validation scope
+# Accounts 0.4.0-preview.22 validation scope
+
+## Preview.22 on Antigravity 2.33.0 (19 November 2026)
+
+After the official update, the installed compatibility engine applied Chinese localization and recorded `Unsupported exact program source: no complete reviewed source contract matches` for Accounts. In 2.33.0, the desktop main, language-service launcher and window utility scripts changed. The embedded local view also stores the `setUserStatus` action through an intermediate binding, which the older adapter could not resolve. The 2.33.0 language service requires its own Windows x64 program profile.
+
+Preview.22 accepts the checked 2.33.0 desktop and language-service pair. It resolves both embedded action layouts and rejects ambiguous bindings. The combined package recognizes the Accounts-modified desktop script when applying Chinese localization. SSH session cleanup is preserved. The standalone and combined packages use the existing account-state location.
+
+On a copy of the original Windows installation, preview.21 reproduced the Chinese-only result. Preview.22 prepared both components while the application was marked busy, leaving the installed archive and native program byte-identical. After simulated exit, both components applied. Rolling back recovered the previous localized archive and original native program. Reapplying restored both components. The desktop executable and synthetic account-store file retained their original bytes throughout.
+
+With the 2.33.0 native service and synthetic accounts on loopback, A → B → A confirmed each identity and project. The first outbound model-list request after each switch used that account's project. The global activity check detected a pending request while the conversation was idle and there were no background tasks. When a project refresh failed, the service sent no model-list request and could not confirm the new identity. The local view callback was emulated. The run used zero real account authorizations and sent zero model-generation requests.
+
+The local Accounts Node checks passed 257 cases and skipped 13 optional historical or unavailable inputs. The account component passed 44 cases, the combined compatibility coordinator passed 28, and 35 selected localization cases passed. Historical 2.29.0 combined localization checks require unpacked files from that release and were unavailable on this installation. These results cover the copied program and synthetic switching. Actual saved-account switching and quota attribution are separate checks.
 
 ## Preview.20 on Antigravity 2.32.2 — 18 November 2026
 

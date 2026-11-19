@@ -269,6 +269,9 @@ function Start-WithoutLocalization([string]$reason) {
           if ($accountsReceipt.$key -isnot [string] -or $accountsReceipt.$key -notmatch '^[A-Fa-f0-9]{64}$') { throw 'accounts_repair_required: incomplete_receipt' }
         }
         $adaptedNativeDigests = @(
+          '6e44f7d4018d9540d5b170aad9d65dd579649abb1dc3f6546b0f675445a21b85',
+          '51bdb8da211971487950c2e9d9f3993d20f1e78e7d01df9b585fd635b24b2df6',
+          '18cbda3fc8f131ad37b69c5b83256281e010149e32498aaa2f2359b92bbbc092',
           '79ab9459fc97706841cc9a0a94444b1ee376e4b2a44beec15dbe7cdfad0b8e15',
           'c97d9c095fe0badd350f87ee4b3031f6219d9b5adf2d7e3a90b74b1a5ec2c35a',
           'e1b1b644600369d107ef7aab80eba60bdf70f2e059ffa9a90ac0a4242133ca11',

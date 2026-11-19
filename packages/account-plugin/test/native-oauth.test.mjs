@@ -38,6 +38,7 @@ for (const reviewed of [
   { version: '2.31.2', directory: 'original-program-fixture-2.31.2', code: 0x1422fe560n, id: 0x143aef5b3n, secret: 0x143a52850n },
   { version: '2.32.1', directory: 'original-program-fixture-2.32.1', code: 0x14283fbc0n, id: 0x143c32304n, secret: 0x143b921aan },
   { version: '2.32.2', program: process.env.ANTIGRAVITY_2322_LANGUAGE_SERVER, directory: 'original-program-fixture-2.32.2', code: 0x14283fbc0n, id: 0x143c32304n, secret: 0x143b921aan },
+  { version: '2.33.0', program: process.env.ANTIGRAVITY_2330_LANGUAGE_SERVER, directory: 'original-program-fixture-2.33.0', code: 0x14287b380n, id: 0x143cc80f7n, secret: 0x143c2677dn },
 ]) {
   const programPath = reviewed.program || fileURLToPath(new URL(`../../../artifacts/accounts/${reviewed.directory}/resources/bin/language_server.exe`, import.meta.url));
   let hasProgram = false;

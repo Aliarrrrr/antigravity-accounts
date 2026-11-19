@@ -26,4 +26,15 @@ test('reviewed original archives accept comments and unrelated helpers but rejec
     assert.equal(patchSources(updated).size,4);
   }
   for(const updated of [edit('dist/main.js',source=>source+'\nvoid alteredStartup();'),edit('dist/languageServer.js',source=>source.replace('function startLanguageServer(', 'function alteredStartLanguageServer('))]) assert.throws(()=>inspectSourceCompatibility(updated),/Unsupported exact program source/);
+  if(baseline.sourceContractVersion==='2.33.0'){
+    const backend='dist/remote/windowBackends.js';
+    assert.equal(patchSources(archive).has(backend),false);
+    assert.equal(inspectSourceCompatibility(edit(backend,source=>'// Upstream comment\n'+source)).match,'reviewed-scopes');
+    const updated=edit(backend,source=>{
+      const sessionCheck='ses !== electron_1.session.defaultSession';
+      assert.ok(source.includes(sessionCheck));
+      return source.replace(sessionCheck,'false');
+    });
+    assert.throws(()=>inspectSourceCompatibility(updated),/Unsupported exact program source/);
+  }
 });

@@ -36,6 +36,12 @@ const previousSourceSha256 = Object.freeze({
   'node_modules/electron-updater/out/NsisUpdater.js': '31f36b4ef5cadd35a93df91d9454aa70044e41c0e6b4c799783dca4302cd03b6',
 });
 export const SOURCE_CONTRACTS = Object.freeze([
+  Object.freeze({ version: '2.33.0', sourceSha256: Object.freeze({ ...SOURCE_SHA256,
+    'dist/main.js': 'fa6815255b385e59d67f91be9e695a54083613fb3821e0c207651f31b3511457',
+    'dist/languageServer.js': 'c416b3be9bd5a910faa5f3b36d63fc99e4f13e4b8758f208235005ef2ed41563',
+    'dist/utils.js': '68576e63765047faf7d7ecc6247fbae8d73f072aa32eddb19ce6311cccd29a6c',
+    'dist/remote/windowBackends.js': '282f47b80da9cd10b956eb754814cd025089cab0e4bef162ddc1f1d29b9e9957',
+  }), shellEnvironment: 'prefetched', baseArguments: 'shared' }),
   Object.freeze({ version: '2.32.1', sourceSha256: SOURCE_SHA256, shellEnvironment: 'prefetched', baseArguments: 'shared' }),
   Object.freeze({ version: '2.31.2', sourceSha256: source231Sha256, shellEnvironment: 'prefetched', baseArguments: 'inline' }),
   Object.freeze({ version: '2.31.0', sourceSha256: source231Sha256, shellEnvironment: 'prefetched', baseArguments: 'inline' }),
@@ -76,8 +82,13 @@ export function inspectSourceCompatibility(archive) {
     scopeMatch = matchingContracts.length > 0;
   }
   const sourceVersion = reusedSourceVersions.get(packageInfo.version);
-  const exact = matchingContracts.find(candidate => candidate.version === (sourceVersion || packageInfo.version));
-  const contract = sourceVersion ? exact : exact || matchingContracts[0];
+  const expectedVersion = sourceVersion || packageInfo.version;
+  // Already-reviewed versions keep their source/native pairing even if a
+  // different release's complete source is supplied with this version label.
+  const hasExpectedContract = sourceVersion !== undefined || SOURCE_CONTRACTS.some(candidate => candidate.version === expectedVersion);
+  const contract = hasExpectedContract
+    ? matchingContracts.find(candidate => candidate.version === expectedVersion)
+    : matchingContracts[0];
   if (!contract) throw new Error('Unsupported exact program source: no complete reviewed source contract matches');
   const sourceSha256 = Object.fromEntries(Object.keys(contract.sourceSha256).map(name => [name, availableSha256[name]]));
   for (const [name, version] of Object.entries(dependencyVersions)) {

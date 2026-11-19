@@ -1,5 +1,10 @@
 # Changelog
 
+## Accounts 0.4.0-preview.22 — 2026-11-19
+
+- 支持 Antigravity 2.33.0 Windows x64 的桌面脚本、语言服务和内嵌账号状态接口，恢复更新后的同窗口账号切换入口。
+- 支持在同一次成套更新中应用 Accounts 和汉化。保留原有账号状态，并拒绝未支持的新旧程序混装。检查范围见 `docs/ACCOUNTS_VALIDATION.md`。
+
 ## Accounts 0.4.0-preview.20 — 2026-11-18
 
 - 支持 Antigravity 2.32.2 的 Windows x64 语言服务。桌面脚本继续使用已审查的 2.32.1 规则，语言服务和 OAuth 配置按 2.32.2 的原始程序独立校验。

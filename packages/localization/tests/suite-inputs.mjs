@@ -14,6 +14,7 @@ export const requiredInputs=Object.freeze({
   '2-29-accounts-compatibility.test.mjs':[process.env.ANTIGRAVITY_TEST_ACCOUNTS_STATE_ROOT?path.join(process.env.ANTIGRAVITY_TEST_ACCOUNTS_STATE_ROOT,'adapter-installation.json'):''],
   '2-31-compatibility.test.mjs':[path.join(testDataRoot,'verification','2.31.0-compat-review','current','dist','preload.js')],
   '2-32-compatibility.test.mjs':[path.join(testDataRoot,'verification','2.32.1-compat-review','current','dist','preload.js'),path.join(testDataRoot,'verification','2.32.1-compat-review','accounts-main.js')],
+  '2-33-compatibility.test.mjs':[process.env.LOCALIZATION_TEST_2_33_ASAR||path.join(testDataRoot,'verification','2.33.0-compat-review','app.asar')],
   'automatic-compatibility.test.mjs':[archive(process.env.ANTIGRAVITY_TEST_AUTOMATIC_INSTALL||old)],
   'build-source-race.test.mjs':[current],
   'durable.test.mjs':[archive(old),archive(upgraded)],

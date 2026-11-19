@@ -7,6 +7,7 @@ const roots = Object.freeze({
   'dist/hostBridgeServer.js': ['startHostBridgeServer', 'buildRoutes'],
   'dist/utils.js': ['getLocalHubWindows', 'getHubWindows', 'getHubWebContents', 'isLocalHubTopFrame', 'resolveHubWindowFromWebContents', 'registerWindowWebContents', 'createWindow'],
   'dist/lsDefaults.js': ['baseLsArgs'],
+  'dist/remote/windowBackends.js': ['isLocalAppWindow', 'registerRemoteWindow'],
 });
 const reserved = new Set(['hostauthAddon', 'hostauthSession', 'accountsUpdateHandoff']);
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');

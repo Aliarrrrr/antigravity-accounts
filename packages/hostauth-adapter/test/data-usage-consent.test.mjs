@@ -290,7 +290,7 @@ test('actual native settings hooks save off while preserving mail, and native fa
       const construct = (schema, value) => ({ telemetryEnabled: false, marketingEmailsEnabled: false, userDataCollectionForceDisabled: false, ...value });
       const getSettings = () => ({ get: () => ({}) }), getDispatch = () => value => actions.push(value), getErrorHandler = () => () => {};
       const getStatus = () => ({ email: 'synthetic@example.invalid' });
-      const context = { A: React, e: identity,
+      const context = { e: identity,
         dm: () => service, Ql: getStatus, mu: {}, Pl: getDispatch, $b: construct, Oh: {}, tB: getErrorHandler,
         hk: getSettings, D: { UserStatusSchema: {} }, lu: identity, mqb() {}, Ng: {},
         Al: () => service, ll: getStatus, gt: {}, kl: getDispatch, Vb: construct, sh: {}, Qv: getErrorHandler,
@@ -299,10 +299,12 @@ test('actual native settings hooks save off while preserving mail, and native fa
         gj: getSettings, E: { UserStatusSchema: {} }, Xq: identity, WDb() {}, rg: {},
         Nk: () => service, Ak: getStatus, kr: {}, zk: getDispatch, ju: getErrorHandler,
         oj: getSettings, jr: identity, qGb() {},
+        Uk: () => service, Ik: getStatus, Nr: {}, Hk: getDispatch, cc: construct, hha: {}, Tu: getErrorHandler,
+        vj: getSettings, F: { UserStatusSchema: {} }, Mr: identity, QKb() {}, Ag: {},
       };
-      if (modalSource.includes('termsFlow:')) {
-        context.B = React;
-      }
+      const reactBinding = hookSource.match(/\(0,([$\w]+)\.useState\)/);
+      assert.ok(reactBinding);
+      context[reactBinding[1]] = React;
       const nativeHook = vm.runInNewContext(`(${hookSource})`, context);
       nativeHook({ defaultTelemetryOnError: true }); effects.forEach(fn => fn());
       await settle();
