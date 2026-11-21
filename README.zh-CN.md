@@ -2,11 +2,17 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-**0.4.0-preview.22** 恢复对 Antigravity **2.33.0** 的 Accounts 支持。已安装成套包的用户可以正常退出应用后更新 Accounts 与汉化。[成套更新说明](docs/COMPATIBILITY_UPDATES.md) · [下载](https://github.com/Aliarrrrr/antigravity-accounts/releases/tag/accounts-v0.4.0-preview.22)
+## 停止维护
+
+**Antigravity Accounts 账号切换插件**及**我们配套维护的 Windows 简体中文适配**均已停止更新。两个插件均不支持 **Antigravity 2.34.0 及后续版本**。Accounts 的最后一个发行版为 [0.4.0-preview.22](https://github.com/Aliarrrrr/antigravity-accounts/releases/tag/accounts-v0.4.0-preview.22)，支持的最后一个 Antigravity 版本为 2.33.0。过往发行包和文档保留供查阅。
+
+### 恢复使用官方 Antigravity
+
+彻底退出 Antigravity（包括系统托盘中的应用），停用插件的自动恢复入口，并改用官方快捷方式。如果官方更新后仍需恢复程序文件，请使用[官方安装程序](https://antigravity.google/download)重新安装 Antigravity App，随后通过应用自带的入口登录。仅在备份与当前安装的官方程序完全匹配时，才可以用插件备份还原。参见[还原旧版安装](#还原旧版安装)。
+
+## 关于预览版
 
 本机 2.32.1 已完成两个已保存账号 A → B → A 切换，项目和模型选择保留。本轮未发送模型请求，不代表已验证实际扣额或跨账号生成；详见[检查记录](docs/ACCOUNTS_VALIDATION.md)。
-
-**在 Antigravity 原生模型列表中使用已授权的 Google 账号。**
 
 ![Preview 0.4.0-preview.22](https://img.shields.io/badge/preview-0.4.0--preview.22-8b5cf6)
 ![Windows x64](https://img.shields.io/badge/platform-Windows%20x64-0078D4)
@@ -16,9 +22,11 @@ Antigravity Accounts 在现有模型菜单中加入账号分组，保留官方�
 
 这是通过 ZIP 分发的 **Windows 非官方宿主适配预览版**，尚未在 Antigravity 插件市场收录。单独安装 `plugin.json` 不会启用账号切换。
 
-[下载 preview.22](https://github.com/Aliarrrrr/antigravity-accounts/releases/tag/accounts-v0.4.0-preview.22) · [安装说明](docs/ACCOUNTS_PLUGIN.md) · [更新日志](CHANGELOG.md) · [检查记录](docs/ACCOUNTS_VALIDATION.md)
+[历史安装说明](docs/ACCOUNTS_PLUGIN.md) · [更新日志](CHANGELOG.md) · [检查记录](docs/ACCOUNTS_VALIDATION.md)
 
-## 安装
+## 历史安装说明
+
+以下步骤仅适用于表中列出的已检查程序组合。
 
 | 项目 | 支持范围 |
 | --- | --- |
@@ -69,9 +77,11 @@ Antigravity Accounts 在现有模型菜单中加入账号分组，保留官方�
 
 ## 兼容与更新
 
+**历史说明。** 本节记录旧版插件在受支持安装上的更新行为。
+
 preview.16 包含未单独发布的 preview.15 的 Antigravity 2.32.1 兼容修复，并修正账号切换的原生窗口查找。保留 2.31.2、2.31.0、2.29.0、2.28.2 的已有支持，以及 preview.14 的未知官方更新原生登录确认入口。preview.12、preview.13 和 preview.15 均为未单独发布的本地版本。SSH 远程会话不在独立账号支持范围内。各次检查范围见检查文档。
 
-兼容检查依据已检查的宿主脚本、RPC 依赖和原生程序组合，未知程序不会写入补丁。完整官方更新暂时无法适配时，启动器检查当前文件后提供原生登录选项，并提醒其身份可能与之前的额度账号不同。原账号授权保留，后续兼容包可继续恢复账号功能。部分替换、文件损坏、记录冲突及安装器仍在运行时继续阻止启动。
+兼容检查依据已检查的宿主脚本、RPC 依赖和原生程序组合，未知程序不会写入补丁。完整官方更新暂时无法适配时，启动器检查当前文件后提供原生登录选项，并提醒其身份可能与之前的额度账号不同。原生登录回退会保留插件保存的账号授权。部分替换、文件损坏、记录冲突及安装器仍在运行时继续阻止启动。
 
 兼容程序被替换后，先运行 `Start-With-Accounts.cmd` 再启动。已安装中文启动保护时，其启动器和后台监听先恢复 Accounts，再应用中文。应用内更新接力会准备外部辅助进程，等待 App 与安装器退出后修复并重新启动。
 
@@ -95,15 +105,15 @@ preview.8 在已安装的 Antigravity 2.29.0 上完成了仅元数据的 **账�
 
 隔离原生服务已确认插件发现和 enabled 偏好保存可用；Accounts 的 HostAuth 生命周期尚未接入原生插件开关，见[接入可行性](docs/ACCOUNTS_EXTENSION_INTEGRATION.md)。
 
-## 卸载与恢复
+## 还原旧版安装
 
-完全退出 Antigravity 后运行：
+仅使用与当前 Antigravity 程序完全匹配的备份。先彻底退出 Antigravity。如果该版本同时装有两个插件，请先停用自动恢复并还原汉化层，再运行 Accounts 发行包里的还原命令。
 
 ```powershell
 .\Restore.cmd
 ```
 
-该操作恢复保存的官方程序并移除适配运行文件，保留账号记录供以后重新安装使用。需要移除某个账号记录时，请先使用管理面板中的删除功能。请保留已登记 Accounts 状态目录中的 `restore-*` 文件夹。
+该操作还原保存的官方程序、移除适配运行文件，并保留插件保存的账号记录。需要移除某个账号记录时，请先使用管理面板中的删除功能。请保留已登记 Accounts 状态目录中的 `restore-*` 文件夹。
 
 ## 数据与授权
 
@@ -143,13 +153,11 @@ node --test packages/account-plugin/test/*.test.cjs packages/account-plugin/test
 | `scripts` | 构建、检查和打包命令 |
 | `docs` | 安装与检查记录 |
 
-早期 Profile Hub 应用保留在 Git 历史中，当前项目与分发包为 Antigravity Accounts。参见[项目历史](docs/HISTORY.md)。
+早期 Profile Hub 应用保留在 Git 历史中，后续项目与分发包命名为 Antigravity Accounts。参见[项目历史](docs/HISTORY.md)。
 
-## 支持与贡献
+## 安全问题报告
 
-安装或兼容性问题通过 [Issues](https://github.com/Aliarrrrr/antigravity-accounts/issues)反馈，代码改动通过 Pull Request 提交。请提供 Antigravity 版本、插件版本、复现步骤及限定格式的错误代码，不附带账号文件、回调链接、凭据或会话内容。
-
-代码改动请运行相关组件或 JavaScript 检查，并说明实际检查过的客户端行为。维护者：[Aliarrrrr](https://github.com/Aliarrrrr)。
+报告方式见 [SECURITY.md](SECURITY.md)。Antigravity Accounts 原由 [Aliarrrrr](https://github.com/Aliarrrrr) 维护。
 
 ## 许可证
 

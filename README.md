@@ -2,11 +2,17 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-**0.4.0-preview.22** restores Accounts support for Antigravity **2.33.0**. Existing combined installations can update Accounts and Chinese localization together after a normal exit. [Compatibility guide](docs/COMPATIBILITY_UPDATES.md) · [Release downloads](https://github.com/Aliarrrrr/antigravity-accounts/releases/tag/accounts-v0.4.0-preview.22)
+## Maintenance ended
+
+We have stopped updating **Antigravity Accounts** and **our companion Simplified Chinese localization for Windows**. **Antigravity 2.34.0 and later are unsupported.** The final Accounts release is [0.4.0-preview.22](https://github.com/Aliarrrrr/antigravity-accounts/releases/tag/accounts-v0.4.0-preview.22), which added support for Antigravity 2.33.0. Previous releases and documentation are available for historical reference.
+
+### Return to the official Antigravity App
+
+Quit Antigravity completely, including any instance in the system tray. Disable the plugins’ automatic reapplication and return to the official Antigravity shortcut. If program files still need to be restored after an Antigravity update, reinstall the App using the [official Antigravity installer](https://antigravity.google/download), then use the App’s built-in sign-in. Restore from a plugin backup only if it matches the exact installed build. See [Restore an older installation](#restore-an-older-installation).
+
+## About the preview
 
 On installed 2.32.1, saved accounts completed A → B → A switching with the project and model retained. This check made no model submissions and does not establish quota charging or cross-account generation.
-
-**Use your authorized Google accounts from Antigravity’s native model picker.**
 
 ![Preview 0.4.0-preview.22](https://img.shields.io/badge/preview-0.4.0--preview.22-8b5cf6)
 ![Windows x64](https://img.shields.io/badge/platform-Windows%20x64-0078D4)
@@ -16,9 +22,11 @@ Antigravity Accounts adds account groups to the existing model menu, with the ho
 
 This is an **unofficial Windows host-adapter preview**, distributed as a ZIP. It is not listed in the Antigravity Marketplace, and installing `plugin.json` alone does not enable account switching.
 
-[Download preview.22](https://github.com/Aliarrrrr/antigravity-accounts/releases/tag/accounts-v0.4.0-preview.22) · [Installation guide](docs/ACCOUNTS_PLUGIN.md) · [Changelog](CHANGELOG.md) · [Validation](docs/ACCOUNTS_VALIDATION.md)
+[Historical installation guide](docs/ACCOUNTS_PLUGIN.md) · [Changelog](CHANGELOG.md) · [Validation](docs/ACCOUNTS_VALIDATION.md)
 
-## Install
+## Historical installation
+
+These instructions apply only to the reviewed program combinations below.
 
 | Requirement | Supported configuration |
 | --- | --- |
@@ -69,9 +77,11 @@ First-use terms, a changed terms type, unrecognized dialogs and failed reads or 
 
 ## Compatibility and updates
 
+**Historical information.** This section records how earlier releases handled updates on supported installations.
+
 Preview.16 includes the Antigravity 2.32.1 compatibility work from the unreleased preview.15 build and fixes native-window discovery during account switching. It retains reviewed 2.31.2, 2.31.0, 2.29.0 and 2.28.2 support, plus preview.14's explicit native-login fallback for unsupported official updates. Previews.12, .13 and .15 were local builds and were not released separately. SSH remote sessions are outside the independent-account support scope. See the validation record for each build's checks.
 
-Compatibility is checked against reviewed host scripts, RPC dependencies and native program profiles. Unknown programs are never patched. When a complete official update cannot be adapted, startup offers native login after checking its current files. This identity may differ from the previously selected Accounts identity. Saved authorizations remain available for a later compatible package. Incomplete replacements, damaged files, conflicting metadata and active installers still prevent launch.
+Compatibility is checked against reviewed host scripts, RPC dependencies and native program profiles. Unknown programs are never patched. When a complete official update cannot be adapted, startup offers native login after checking its current files. This identity may differ from the previously selected Accounts identity. The fallback preserved saved authorizations. Incomplete replacements, damaged files, conflicting metadata and active installers still prevent launch.
 
 For compatible replacements, use `Start-With-Accounts.cmd` before launching. When the existing Chinese launch protection is installed, its launcher and watcher restore Accounts before applying Chinese localization. The App’s update handoff prepares an external helper that waits for the App and installer to exit before repair and relaunch.
 
@@ -95,15 +105,15 @@ On 7 November, before the preview.11 visual changes, an authorized development-p
 
 Native plugin discovery and persisted enabled preferences worked in an isolated service check. The Accounts HostAuth lifecycle is not yet controlled by the native plugin switch; see [integration feasibility](docs/ACCOUNTS_EXTENSION_INTEGRATION.md).
 
-## Uninstall / restore
+## Restore an older installation
 
-Exit Antigravity completely and run:
+Use the saved program backups only for the exact Antigravity build they came from. Quit Antigravity completely. If both plugins are installed, disable automatic reapplication and restore the Chinese localization layer first. Then run the Accounts package’s restore command:
 
 ```powershell
 .\Restore.cmd
 ```
 
-This restores the saved official programs and removes the adapter runtime. Saved account records remain for a later reinstall. To remove an account record, use the management panel’s deletion action before restoring. Keep the `restore-*` directories in the registered Accounts state directory.
+This command restores the saved official programs and removes the adapter runtime. It keeps the plugin’s saved account records. To remove an account record, use the management panel’s deletion action before restoring. Keep the `restore-*` directories in the registered Accounts state directory.
 
 ## Data and authorization
 
@@ -143,13 +153,11 @@ Native-program tests need unmodified program copies supplied with `ANTIGRAVITY_P
 | `scripts` | Build, test and packaging commands |
 | `docs` | Installation and validation details |
 
-The earlier Profile Hub application is retained in Git history. The active project and release package are Antigravity Accounts. See [project history](docs/HISTORY.md).
+The earlier Profile Hub application is retained in Git history. The successor project and release package were named Antigravity Accounts. See [project history](docs/HISTORY.md).
 
-## Support and contributing
+## Security reports
 
-Use [Issues](https://github.com/Aliarrrrr/antigravity-accounts/issues) for installation or compatibility problems and Pull Requests for changes. Include the Antigravity version, plugin version, reproduction steps and a bounded error code. Omit account files, callback URLs, credentials and conversation content.
-
-For code changes, run the affected component or JavaScript checks and state which client behavior was actually checked. Maintained by [Aliarrrrr](https://github.com/Aliarrrrr).
+See [SECURITY.md](SECURITY.md) for the reporting process. Antigravity Accounts was maintained by [Aliarrrrr](https://github.com/Aliarrrrr).
 
 ## License
 
